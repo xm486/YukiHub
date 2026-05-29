@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true"
+    android:overScrollMode="never"
+    android:background="@drawable/bg_auth_dialog">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="20dp">
+
+        <!-- Logo section -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="❄"
+                android:textSize="28sp"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:id="@+id/tvAuthLogo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="YukiHub"
+                android:textColor="#EAF7FF"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:shadowColor="#455AC8FA"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:shadowRadius="12" />
+
+            <TextView
+                android:id="@+id/tvAuthSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="连接你的游戏库"
+                android:textColor="#5A6A8A"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Tab buttons -->
+        <LinearLayout
+            android:id="@+id/authTabRow"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:background="@drawable/bg_auth_tab_container"
+            android:padding="3dp">
+
+            <TextView
+                android:id="@+id/tabLogin"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="登录"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:background="@drawable/bg_auth_tab_active" />
+
+            <TextView
+                android:id="@+id/tabRegister"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="注册"
+                android:textColor="#4A5568"
+                android:textSize="14sp"
+                android:background="@drawable/bg_auth_tab_inactive" />
+        </LinearLayout>
+
+        <!-- Form title -->
+        <TextView
+            android:id="@+id/tvFormTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="欢迎回来"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvFormHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:text="登录后开启云同步和跨设备恢复"
+            android:textColor="#5A6A8A"
+            android:textSize="11sp" />
+
+        <!-- Nickname (register only) -->
+        <LinearLayout
+            android:id="@+id/rowNickname"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/labelNickname"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="昵称"
+                android:textColor="#7A8BA8"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/etNickname"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/bg_auth_input"
+                android:hint="你的显示名称"
+                android:textColorHint="#3A4568"
+                android:textColor="#EAF7FF"
+                android:textSize="14sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true"
+                android:inputType="textPersonName" />
+        </LinearLayout>
+
+        <!-- Email -->
+        <TextView
+            android:id="@+id/labelEmail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="邮箱"
+            android:textColor="#7A8BA8"
+            android:textSize="12sp" />
+
+        <EditText
+            android:id="@+id/etEmail"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_auth_input"
+            android:hint="name@example.com"
+            android:textColorHint="#3A4568"
+            android:textColor="#EAF7FF"
+            android:textSize="14sp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:inputType="textEmailAddress" />
+
+        <!-- Password -->
+        <TextView
+            android:id="@+id/labelPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="密码"
+            android:textColor="#7A8BA8"
+            android:textSize="12sp" />
+
+        <EditText
+            android:id="@+id/etPassword"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_auth_input"
+            android:hint="输入密码"
+            android:textColorHint="#3A4568"
+            android:textColor="#EAF7FF"
+            android:textSize="14sp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:inputType="textPassword" />
+
+        <!-- Confirm password (register only) -->
+        <LinearLayout
+            android:id="@+id/rowConfirmPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/labelConfirmPassword"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="确认密码"
+                android:textColor="#7A8BA8"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/etConfirmPassword"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/bg_auth_input"
+                android:hint="再次输入密码"
+                android:textColorHint="#3A4568"
+                android:textColor="#EAF7FF"
+                android:textSize="14sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true"
+                android:inputType="textPassword" />
+        </LinearLayout>
+
+        <!-- Submit button -->
+        <Button
+            android:id="@+id/btnSubmit"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="18dp"
+            android:text="登录"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_auth_button_primary"
+            android:stateListAnimator="@null" />
+
+        <!-- Status message -->
+        <TextView
+            android:id="@+id/tvAuthStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:textColor="#FF9500"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <!-- Divider -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp">
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="#1A2240" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_marginEnd="12dp"
+                android:text="或"
+                android:textColor="#3A4A6A"
+                android:textSize="11sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="#1A2240" />
+        </LinearLayout>
+
+        <!-- Continue as local -->
+        <TextView
+            android:id="@+id/tvContinueLocal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="继续使用本地账户"
+            android:textColor="#5AC8FA"
+            android:textSize="13sp"
+            android:padding="8dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+    </LinearLayout>
+</ScrollView>

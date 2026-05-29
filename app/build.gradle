@@ -1,0 +1,75 @@
+
+plugins {
+    id 'com.android.application'
+    
+}
+
+configurations.all {
+    resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib:1.8.10"
+    resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.10"
+    resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10"
+}
+
+android {
+    namespace 'com.yuki.yukihub'
+    compileSdk 33
+    
+    defaultConfig {
+        applicationId "com.yuki.yukihub"
+        minSdk 26
+        targetSdk 33
+        versionCode 1
+        versionName "0.1"
+        
+        vectorDrawables { 
+            useSupportLibrary true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+
+    packagingOptions {
+        pickFirst 'lib/arm64-v8a/libSDL2.so'
+        jniLibs {
+            // AndroidManifest.xml 设置了 android:extractNativeLibs="true"，
+            // AGP 8+ 要求同步开启 legacy JNI packaging，否则 packageDebug 会失败。
+            useLegacyPackaging true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        viewBinding true
+        
+    }
+    
+}
+dependencies {
+
+
+    implementation("com.google.android.material:material:1.9.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.activity:activity:1.7.2")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.cardview:cardview:1.0.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+}
+

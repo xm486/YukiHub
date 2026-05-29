@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="yh_bg">#0B1020</color>
+    <color name="yh_bg_2">#111936</color>
+    <color name="yh_sidebar">#10172A</color>
+    <color name="yh_card">#171E33</color>
+    <color name="yh_card_2">#222B49</color>
+    <color name="yh_primary">#8AB4FF</color>
+    <color name="yh_secondary">#FF8AB3</color>
+    <color name="yh_text">#F5F7FF</color>
+    <color name="yh_text_muted">#9AA4BF</color>
+    <color name="yh_line">#2D3658</color>
+    <color name="yh_success">#34C759</color>
+    <color name="yh_warning">#FFCC00</color>
+</resources>

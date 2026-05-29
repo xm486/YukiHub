@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:layout_marginBottom="8dp"
+    android:padding="10dp"
+    android:orientation="vertical"
+    android:background="@drawable/bg_game_card">
+    <TextView android:id="@+id/tvScanGameTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Title" android:textColor="@color/yh_text" android:textStyle="bold" android:textSize="15sp" />
+    <TextView android:id="@+id/tvScanInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Engine · uri" android:textColor="@color/yh_text_muted" android:textSize="12sp" android:maxLines="1" android:ellipsize="middle" />
+</LinearLayout>

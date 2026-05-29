@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="18dp">
+
+        <TextView android:id="@+id/editDialogTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="添加游戏" android:textColor="@color/yh_text" android:textSize="22sp" android:textStyle="bold" />
+<EditText android:id="@+id/etGameTitle" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="12dp" android:hint="游戏标题" android:singleLine="true" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="游戏引擎类型" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
+        <Spinner android:id="@+id/spEngine" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+
+        <LinearLayout android:id="@+id/layoutArtemisVersion" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Artemis 兼容版本" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal">
+                <Button android:id="@+id/btnArtemisStd" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1" android:text="标准" android:textAllCaps="false" />
+                <Button android:id="@+id/btnArtemisCompat" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1" android:layout_marginStart="6dp" android:text="兼容" android:textAllCaps="false" />
+                <Button android:id="@+id/btnArtemisCompatV2" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1" android:layout_marginStart="6dp" android:text="兼容V2" android:textAllCaps="false" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="启动文件 / 启动入口（从游戏目录真实扫描）" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
+        <Spinner android:id="@+id/spLaunchTarget" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="10dp" android:orientation="horizontal">
+<EditText android:id="@+id/etEmulatorPackage" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:hint="模拟器应用，可选" android:singleLine="true" android:focusable="false" android:clickable="true" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
+<TextView android:id="@+id/btnPickEmulatorApp" android:layout_width="88dp" android:layout_height="match_parent" android:layout_marginStart="8dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="选择应用" android:textColor="#071221" android:textSize="12sp" android:textStyle="bold" />
+</LinearLayout>
+<LinearLayout android:id="@+id/layoutWinlatorLaunchMode" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone">
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Winlator 启动方式" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
+<Spinner android:id="@+id/spWinlatorLaunchMode" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="启动到游戏：默认直启；启动到程序：仅进入 Winlator 界面。" android:textColor="@color/yh_text_muted" android:textSize="10sp" />
+</LinearLayout>
+<LinearLayout android:id="@+id/layoutGameHubLaunch" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone">
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="GameHub直启" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
+<Spinner android:id="@+id/spGameHubLaunchMode" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="启动到游戏：需要补丁版GameHub并填写localGameId；启动到程序：仅打开GameHub。" android:textColor="@color/yh_text_muted" android:textSize="10sp" />
+<LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:orientation="horizontal">
+<EditText android:id="@+id/etGameHubLocalGameId" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:hint="local_xxxxx 或 steam:123456" android:singleLine="true" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
+<TextView android:id="@+id/btnPickGameHubShortcut" android:layout_width="104dp" android:layout_height="match_parent" android:layout_marginStart="8dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="导入快捷方式" android:textColor="#071221" android:textSize="12sp" android:textStyle="bold" />
+</LinearLayout>
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="可从GameHub已创建的桌面快捷方式中导入参数。" android:textColor="@color/yh_text_muted" android:textSize="10sp" />
+</LinearLayout>
+<EditText android:id="@+id/etDescription" android:layout_width="match_parent" android:layout_height="70dp" android:layout_marginTop="10dp" android:hint="备注，可选" android:gravity="top" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
+
+        <TextView android:id="@+id/tvSelectedDir" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="未选择游戏目录" android:textColor="@color/yh_text_muted" android:textSize="12sp" android:maxLines="2" android:ellipsize="middle" />
+        <TextView android:id="@+id/tvSelectedCover" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="未选择封面" android:textColor="@color/yh_text_muted" android:textSize="12sp" android:maxLines="2" android:ellipsize="middle" />
+
+        <TextView android:id="@+id/tvPlayTimeInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="总时长：0分钟" android:textColor="@color/yh_text_muted" android:textSize="12sp" android:visibility="gone" />
+        <Button android:id="@+id/btnClearPlayTime" android:layout_width="match_parent" android:layout_height="40dp" android:layout_marginTop="6dp" android:text="清除该游戏游玩时长" android:textAllCaps="false" android:visibility="gone" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:orientation="horizontal">
+            <Button android:id="@+id/btnPickDir" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="选择目录" android:textAllCaps="false" />
+            <Button android:id="@+id/btnPickCover" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:layout_marginStart="8dp" android:text="选择封面" android:textAllCaps="false" />
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:orientation="horizontal">
+            <Button android:id="@+id/btnCancel" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="取消" android:textAllCaps="false" />
+            <Button android:id="@+id/btnSave" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:layout_marginStart="8dp" android:text="保存" android:textAllCaps="false" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

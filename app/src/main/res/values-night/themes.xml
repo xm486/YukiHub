@@ -1,0 +1,17 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Base.AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/yh_bg</item>
+        <item name="android:colorAccent">@color/yh_primary</item>
+        <item name="colorPrimary">@color/yh_primary</item>
+        <item name="colorPrimaryVariant">@color/yh_bg_2</item>
+        <item name="colorOnPrimary">@color/yh_bg</item>
+    </style>
+
+    <style name="AppTheme" parent="Base.AppTheme" />
+<!-- Shared view styles are defined in values-night/styles.xml. -->
+</resources>

@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#1A1F2E"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- 标题 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="☁ WebDAV 云同步"
+            android:textColor="#EAF7FF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="支持坚果云、OneDrive、NextCloud 等任意 WebDAV 服务器"
+            android:textColor="#8E9AB5"
+            android:textSize="13sp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- 服务器地址 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="服务器地址"
+            android:textColor="#8E9AB5"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <EditText
+            android:id="@+id/etWebDavServer"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_auth_input"
+            android:hint="https://dav.jianguoyun.com/dav/"
+            android:inputType="textUri"
+            android:paddingHorizontal="14dp"
+            android:textColor="#EAF7FF"
+            android:textColorHint="#4A5568"
+            android:textSize="14sp"
+            android:layout_marginBottom="14dp" />
+
+        <!-- 用户名 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="用户名/邮箱"
+            android:textColor="#8E9AB5"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <EditText
+            android:id="@+id/etWebDavUsername"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_auth_input"
+            android:hint="your@email.com"
+            android:inputType="textEmailAddress"
+            android:paddingHorizontal="14dp"
+            android:textColor="#EAF7FF"
+            android:textColorHint="#4A5568"
+            android:textSize="14sp"
+            android:layout_marginBottom="14dp" />
+
+        <!-- 密码 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="密码/应用密码"
+            android:textColor="#8E9AB5"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <EditText
+            android:id="@+id/etWebDavPassword"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_auth_input"
+            android:hint="应用专用密码"
+            android:inputType="textPassword"
+            android:paddingHorizontal="14dp"
+            android:textColor="#EAF7FF"
+            android:textColorHint="#4A5568"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="坚果云教程：\n1. 在坚果云根目录新建 YukiHub 文件夹\n2. 在「账户设置 → 安全选项 → 第三方应用管理」生成应用密码\n3. 服务器填 https://dav.jianguoyun.com/dav/\n4. 用户名填坚果云邮箱，密码填应用密码"
+            android:textColor="#6B7A99"
+            android:textSize="11sp"
+            android:lineSpacingExtra="3dp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- 测试连接按钮 -->
+        <Button
+            android:id="@+id/btnTestConnection"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_auth_tab_active"
+            android:text="测试连接"
+            android:textColor="#EAF7FF"
+            android:textSize="14sp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- 状态文本 -->
+        <TextView
+            android:id="@+id/tvWebDavStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:textSize="13sp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- 同步选项（测试成功后显示） -->
+        <LinearLayout
+            android:id="@+id/syncOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#2D3748"
+                android:layout_marginBottom="14dp" />
+
+            <!-- 自动同步 -->
+            <Switch
+                android:id="@+id/swAutoSync"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="启动时自动同步"
+                android:textColor="#8E9AB5"
+                android:textSize="13sp"
+                android:layout_marginBottom="10dp" />
+
+            <!-- 存档同步暂不提供：不同模拟器存档结构差异较大，避免误同步大文件。 -->
+
+            <!-- 进度条 -->
+            <ProgressBar
+                android:id="@+id/progressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:visibility="gone"
+                android:layout_marginBottom="8dp" />
+
+            <!-- 上次同步时间 -->
+            <TextView
+                android:id="@+id/tvLastSync"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                android:textColor="#6B7A99"
+                android:textSize="11sp"
+                android:layout_marginBottom="10dp" />
+
+            <!-- 立即同步按钮 -->
+            <Button
+                android:id="@+id/btnSyncNow"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_auth_button_primary"
+                android:text="立即同步"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:enabled="false"
+                android:layout_marginBottom="6dp" />
+
+        </LinearLayout>
+
+        <!-- 本地备份/导入 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btnLocalBackup"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_auth_tab_active"
+                android:text="本地备份"
+                android:textColor="#EAF7FF"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnLocalImport"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_auth_tab_active"
+                android:text="本地导入"
+                android:textColor="#EAF7FF"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- 保存按钮 -->
+        <Button
+            android:id="@+id/btnSaveWebDav"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_auth_button_primary"
+            android:text="保存配置"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginTop="6dp" />
+
+        <!-- 使用说明 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="同步内容：\n• 游戏库与游戏卡片信息完整同步\n• 分类/标签、游玩状态、游玩统计完整同步\n• 个人资料（昵称、签名、头像引用）\n• 应用设置（不包含 Bangumi Token 和 WebDAV 密码）\n• 元数据缓存完整同步\n• 游玩记录动态仅同步最近 200 条\n• 游戏本体/图片二进制/视频背景/存档暂不同步"
+            android:textColor="#4A5568"
+            android:textSize="11sp"
+            android:lineSpacingExtra="4dp"
+            android:layout_marginTop="16dp" />
+
+    </LinearLayout>
+
+</ScrollView>

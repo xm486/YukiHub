@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.yuki.yukihub.ui.DynamicSnowBackgroundView
+        android:id="@+id/dynamicBackground"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#111A3A" />
+
+    <ImageView
+        android:id="@+id/customBackgroundImage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <TextureView
+        android:id="@+id/customBackgroundVideo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <View
+        android:id="@+id/customBackgroundDim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66030812"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="6dp"
+        android:background="#00000000">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="0dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="96dp"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:text="❄YukiHub"
+            android:textColor="#CFE8F7"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.012"
+            android:shadowColor="#455AC8FA"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="3" />
+
+        <EditText
+            android:id="@+id/etSearch"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:hint="搜索Galgame标题..."
+            android:textColor="@color/yh_text"
+            android:textColorHint="@color/yh_text_muted"
+            android:textSize="9sp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:background="@drawable/bg_input" />
+
+        <TextView android:id="@+id/btnScan" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="8dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⌕ 扫描" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+        <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="＋ 添加" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+        <TextView android:id="@+id/btnSettings" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⚙ 设置" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:paddingTop="6dp">
+
+        <LinearLayout
+            android:layout_width="80dp"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <ScrollView
+android:id="@+id/sidebarScroll"
+android:layout_width="match_parent"
+android:layout_height="0dp"
+android:layout_weight="1"
+android:fillViewport="false"
+android:overScrollMode="ifContentScrolls"
+android:scrollbars="none"
+android:background="@drawable/bg_sidebar">
+
+<LinearLayout
+android:id="@+id/sidebar"
+android:layout_width="match_parent"
+android:layout_height="wrap_content"
+android:orientation="vertical"
+android:padding="5dp">
+
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:text="游戏库" android:textColor="#B9D8FF" android:textSize="9sp" android:textStyle="bold" android:paddingTop="1dp" android:paddingBottom="4dp" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginBottom="5dp" android:background="@drawable/bg_sidebar_header_line" />
+
+                <TextView android:id="@+id/filterAll" style="@style/YukiSidebarItem" android:text="全部游戏" />
+                <TextView android:id="@+id/filterRecent" style="@style/YukiSidebarItem" android:text="最近游玩" />
+                <TextView android:id="@+id/filterPlaying" style="@style/YukiSidebarItem" android:text="在玩" />
+                <TextView android:id="@+id/filterCompleted" style="@style/YukiSidebarItem" android:text="玩过" />
+                <TextView android:id="@+id/filterUnplayed" style="@style/YukiSidebarItem" android:text="未玩" />
+
+                <TextView android:id="@+id/filterDeveloper" style="@style/YukiSidebarItem" android:layout_marginTop="8dp" android:text="▸ 开发商" />
+                <LinearLayout android:id="@+id/developerList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" />
+            </LinearLayout>
+</ScrollView>
+
+<TextView
+android:id="@+id/friendsChatPanel"
+android:layout_width="match_parent"
+android:layout_height="34dp"
+android:layout_marginTop="6dp"
+android:gravity="center"
+android:paddingStart="4dp"
+android:paddingEnd="4dp"
+android:clickable="true"
+android:foreground="?android:attr/selectableItemBackgroundBorderless"
+android:background="@drawable/bg_sidebar"
+android:text="☷ 好友/聊天"
+android:textColor="@color/yh_text"
+android:textSize="8sp"
+android:textStyle="bold"
+android:singleLine="true" />
+
+<LinearLayout
+android:id="@+id/profilePanel"
+                android:layout_width="match_parent"
+                android:layout_height="82dp"
+                android:layout_marginTop="6dp"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:padding="6dp"
+                android:clickable="true"
+                android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/bg_sidebar">
+                <FrameLayout android:layout_width="30dp" android:layout_height="30dp" android:background="@drawable/bg_cover_placeholder">
+                    <ImageView android:id="@+id/ivProfileAvatar" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:visibility="gone" />
+                    <TextView android:id="@+id/tvProfileInitial" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="Y" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" />
+                    <View android:id="@+id/profileStatusDot" android:layout_width="8dp" android:layout_height="8dp" android:layout_gravity="top|end" android:background="@drawable/bg_profile_dot_local" />
+                </FrameLayout>
+                <TextView android:id="@+id/tvProfileName" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:gravity="center" android:text="Yuki" android:textColor="@color/yh_text" android:textSize="10sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+                <TextView android:id="@+id/tvStats" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:gravity="center" android:text="0 Games\n0h Played" android:textColor="@color/yh_text_muted" android:textSize="7sp" android:lineSpacingExtra="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp">
+
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/recyclerGames" android:layout_width="match_parent" android:layout_height="match_parent" android:clipToPadding="false" android:paddingEnd="4dp" android:paddingBottom="10dp" />
+            <TextView android:id="@+id/tvEmpty" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:gravity="center" android:text="还没有游戏\n点击“添加”手动录入，或点击“扫描”导入目录" android:textColor="@color/yh_text_muted" android:textSize="16sp" android:visibility="gone" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:layout_width="152dp"
+            android:layout_height="match_parent"
+            android:padding="1dp"
+            android:clipToPadding="true"
+            android:background="@drawable/bg_game_card">
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:fillViewport="false"
+                android:overScrollMode="ifContentScrolls"
+                android:scrollbars="none"
+                android:clipToPadding="true">
+
+            <LinearLayout
+                android:id="@+id/detailPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="6dp">
+
+                <FrameLayout android:layout_width="match_parent" android:layout_height="82dp" android:background="@drawable/bg_cover_placeholder">
+                    <ImageView android:id="@+id/sideDetailCover" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:visibility="gone" />
+                    <TextView android:id="@+id/sideDetailPlaceholder" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="选择游戏" android:textColor="@color/yh_text_muted" android:textSize="9sp" android:textStyle="bold" />
+                </FrameLayout>
+
+                <TextView android:id="@+id/sideDetailTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:maxLines="2" android:ellipsize="end" android:text="请选择游戏" android:textColor="@color/yh_text" android:textSize="11sp" android:textStyle="bold" />
+                <TextView android:id="@+id/sideDetailOriginalTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:maxLines="1" android:ellipsize="end" android:text="" android:textColor="@color/yh_text_muted" android:textSize="8sp" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal">
+                    <TextView android:id="@+id/sideBtnLaunch" android:layout_width="0dp" android:layout_height="28dp" android:layout_weight="1" android:gravity="center" android:background="@drawable/bg_yuki_button" android:text="▶ 开始" android:textColor="#071221" android:textSize="8sp" android:textStyle="bold" android:singleLine="true" />
+                    <TextView android:id="@+id/sideBtnOptions" android:layout_width="0dp" android:layout_height="28dp" android:layout_marginStart="4dp" android:layout_weight="1" android:gravity="center" android:background="@drawable/bg_input" android:text="⚙ 选项" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:singleLine="true" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="简介" android:textColor="@color/yh_text" android:textSize="9sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/sideTranslateToggle" android:layout_width="56dp" android:layout_height="24dp" android:gravity="center" android:paddingStart="1dp" android:paddingEnd="1dp" android:paddingTop="0dp" android:paddingBottom="0dp" android:includeFontPadding="true" android:background="@drawable/bg_input" android:text="译文" android:textColor="@color/yh_primary" android:textSize="6sp" android:textStyle="bold" android:singleLine="true" android:ellipsize="none" android:visibility="gone" />
+                </LinearLayout>
+                <TextView android:id="@+id/sideDetailHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="这里后续接 VNDB/APJ 简介。" android:textColor="@color/yh_text_muted" android:textSize="8sp" android:lineSpacingExtra="1dp" android:maxLines="5" android:ellipsize="end" />
+                <TextView android:id="@+id/sideDescToggle" android:layout_width="wrap_content" android:layout_height="22dp" android:layout_marginTop="2dp" android:gravity="center_vertical" android:text="展开" android:textColor="@color/yh_primary" android:textSize="8sp" android:textStyle="bold" android:visibility="gone" />
+                <TextView android:id="@+id/sideDetailPath" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="路径：-" android:textColor="@color/yh_text_muted" android:textSize="7sp" android:maxLines="2" android:ellipsize="middle" />
+
+                <LinearLayout android:id="@+id/detailMetaPanel" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="vertical">
+                    <TextView android:id="@+id/sideDetailDate" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="发布日期：-" android:textColor="@color/yh_text_muted" android:textSize="8sp" />
+                    <TextView android:id="@+id/sideDetailDeveloper" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="开发商：-" android:textColor="@color/yh_text_muted" android:textSize="8sp" />
+                    <TextView android:id="@+id/sideDetailRating" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="评分：-/10" android:textColor="@color/yh_text_muted" android:textSize="8sp" />
+<TextView android:id="@+id/sideDetailLength" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="游玩时长：-" android:textColor="@color/yh_text_muted" android:textSize="8sp" />
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="标签" android:textColor="@color/yh_text" android:textSize="9sp" android:textStyle="bold" />
+                    <LinearLayout android:id="@+id/sideTagContainer" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:orientation="vertical">
+                        <TextView android:id="@+id/sideDetailTags" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="-" android:textColor="@color/yh_primary" android:textSize="7sp" />
+                    </LinearLayout>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="媒体" android:textColor="@color/yh_text" android:textSize="9sp" android:textStyle="bold" />
+                    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="42dp" android:layout_marginTop="3dp" android:scrollbars="none" android:overScrollMode="ifContentScrolls">
+                        <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal">
+                            <ImageView android:id="@+id/sideScreenshot1" android:layout_width="64dp" android:layout_height="match_parent" android:layout_marginEnd="4dp" android:background="@drawable/bg_cover_placeholder" android:scaleType="centerCrop" />
+                            <ImageView android:id="@+id/sideScreenshot2" android:layout_width="64dp" android:layout_height="match_parent" android:layout_marginEnd="4dp" android:background="@drawable/bg_cover_placeholder" android:scaleType="centerCrop" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+                </LinearLayout>
+            </LinearLayout>
+            </ScrollView>
+        </FrameLayout>
+    </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

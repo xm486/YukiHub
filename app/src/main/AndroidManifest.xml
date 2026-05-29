@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Winlator 直启使用导出 Activity，不再依赖 Shizuku 权限。 -->
+
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="com.xiaoji.egggame" />
+        <package android:name="com.xiaoji.egggamz" />
+        <package android:name="com.akira.tyranoemu" />
+        <package android:name="org.tvp.kirikiri2" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.WebGame" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true"
+        android:extractNativeLibs="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/AppTheme">
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboardHidden|orientation|screenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".AuthActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.YukiHub.AuthDialog"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <activity
+            android:name="org.tvp.kirikiri2.KR2Activity"
+            android:exported="false"
+            android:process=":kirikiri2"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.yuki.yukihub.Kirikiroid2"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.YukiHub.Kirikiroid2"
+            android:windowSoftInputMode="adjustPan"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <activity
+            android:name="com.akira.tyranoemu.remote.Kirikiroid139"
+            android:exported="false"
+            android:process=":kirikiri2"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.yuki.yukihub.Kirikiroid2"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.YukiHub.Kirikiroid2"
+            android:windowSoftInputMode="adjustPan"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+<activity
+            android:name="com.yuki.yukihub.tyrano.TyranoActivity"
+            android:exported="false"
+            android:process=":tyrano"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.yuki.yukihub.Tyrano"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <activity
+  android:name="com.akira.tyranoemu.remote.ArtemisActivityV1"
+ android:exported="false"
+ android:process=":artemis"
+ android:launchMode="singleInstance"
+ android:taskAffinity="com.yuki.yukihub.Artemis"
+ android:screenOrientation="sensorLandscape"
+ android:configChanges="keyboardHidden|orientation|screenSize">
+ <meta-data android:name="android.app.lib_name" android:value="artemis" />
+ </activity>
+
+ <activity
+ android:name="com.akira.tyranoemu.remote.ArtemisActivityV2"
+ android:exported="false"
+ android:process=":artemis"
+ android:launchMode="singleInstance"
+ android:taskAffinity="com.yuki.yukihub.Artemis"
+ android:screenOrientation="sensorLandscape"
+ android:configChanges="keyboardHidden|orientation|screenSize">
+ <meta-data android:name="android.app.lib_name" android:value="artemis-compatible" />
+ </activity>
+
+ <activity
+ android:name="com.akira.tyranoemu.remote.ArtemisActivityV3"
+ android:exported="false"
+ android:process=":artemis"
+ android:launchMode="singleInstance"
+ android:taskAffinity="com.yuki.yukihub.Artemis"
+ android:screenOrientation="sensorLandscape"
+ android:configChanges="keyboardHidden|orientation|screenSize">
+ <meta-data android:name="android.app.lib_name" android:value="artemis-compatible-v2" />
+ </activity>
+
+    <activity
+  android:name="com.ies_net.artemis.VideoViewActivity"
+  android:exported="false"
+  android:process=":artemis"
+  android:screenOrientation="sensorLandscape"
+  android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <activity
+            android:name="com.yuri.onscripter.ONScripter"
+            android:exported="false"
+            android:process=":ons"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.yuki.yukihub.ONScripter"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode" />
+
+        <activity
+            android:name="com.yuki.yukihub.ons.OnsVideoActivity"
+            android:exported="false"
+            android:process=":ons"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+    </application>
+</manifest>

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="164dp"
+    android:layout_marginStart="6dp"
+    android:layout_marginEnd="6dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="4dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:soundEffectsEnabled="true"
+    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+    android:background="@drawable/bg_game_card">
+
+    <com.yuki.yukihub.ui.CardGlowView
+        android:id="@+id/cardGlow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="6dp">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="92dp"
+        android:background="@drawable/bg_cover_placeholder">
+
+        <ImageView
+            android:id="@+id/ivCover"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvCoverPlaceholder"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="YH"
+            android:textColor="@color/yh_text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvStatusBadge"
+            android:layout_width="40dp"
+            android:layout_height="18dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="4dp"
+            android:gravity="center"
+            android:background="@drawable/bg_status_unplayed"
+            android:text="未玩"
+            android:textColor="#EAF0FF"
+            android:textSize="7sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="visible" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/tvGameTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:minLines="2"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:text="Game Title"
+        android:textColor="@color/yh_text"
+        android:textSize="9sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvEngine"
+        android:layout_width="wrap_content"
+        android:layout_height="16dp"
+        android:layout_marginTop="3dp"
+        android:gravity="center"
+        android:paddingStart="7dp"
+        android:paddingEnd="7dp"
+        android:background="@drawable/bg_chip"
+        android:text="Kirikiri"
+        android:textColor="@color/yh_primary"
+        android:textSize="8sp" />
+
+    <TextView
+        android:id="@+id/tvPlayTime"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="总时长 0h"
+        android:textColor="@color/yh_text_muted"
+        android:textSize="8sp" />
+    </LinearLayout>
+</FrameLayout>

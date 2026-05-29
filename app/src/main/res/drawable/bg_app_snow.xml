@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Deep winter base: close to the old navy palette, but smoother and cleaner. -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="135"
+                android:startColor="#050A14"
+                android:centerColor="#0A1830"
+                android:endColor="#151027" />
+        </shape>
+    </item>
+
+    <!-- Soft cyan aurora glow, placed off-screen so only the edge light remains. -->
+    <item
+        android:left="-92dp"
+        android:top="-72dp"
+        android:width="260dp"
+        android:height="220dp">
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="132dp"
+                android:centerColor="#3049D7FF"
+                android:endColor="#0049D7FF" />
+        </shape>
+    </item>
+
+    <!-- Violet-blue depth in the lower right, subtle enough not to fight with cards. -->
+    <item
+        android:right="-86dp"
+        android:bottom="-88dp"
+        android:width="280dp"
+        android:height="240dp">
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="148dp"
+                android:centerColor="#2F7E6BFF"
+                android:endColor="#007E6BFF" />
+        </shape>
+    </item>
+
+    <!-- Thin icy haze across the middle; gives texture without noisy snow dots. -->
+    <item
+        android:left="-30dp"
+        android:right="-30dp"
+        android:top="58dp"
+        android:height="170dp">
+        <shape>
+            <gradient
+                android:angle="25"
+                android:startColor="#0013223B"
+                android:centerColor="#1C6FB7D8"
+                android:endColor="#0013223B" />
+        </shape>
+    </item>
+
+    <!-- Dark transparent overlay to keep text/cards readable. -->
+    <item>
+        <shape>
+            <gradient
+                android:angle="90"
+                android:startColor="#26040A12"
+                android:centerColor="#08040A12"
+                android:endColor="#30040A12" />
+        </shape>
+    </item>
+</layer-list>
