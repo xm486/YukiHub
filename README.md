@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/src/main/res/mipmap-hdpi/ic_launcher.png" alt="YukiHub" width="120" />
+</p>
+
 # YukiHub
 
 **YukiHub** 是一款面向 Android 平台的游戏管理与启动工具，适合用于管理本地游戏、安卓应用型游戏入口、外部程序快捷方式以及游玩记录。
