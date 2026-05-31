@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.yuki.yukihub.util.AppExecutors;
+
 public class VndbClient {
     private static final String ENDPOINT = "https://api.vndb.org/kana/vn";
     private static final String FIELDS = "title,alttitle,titles.lang,titles.title,titles.latin,titles.official,titles.main,olang,released,image.url,image.thumbnail,image.sexual,image.violence,description,rating,length,length_minutes,length_votes,developers.name,developers.original,tags.name,tags.rating,tags.spoiler,screenshots.url,screenshots.thumbnail,screenshots.sexual,screenshots.violence";
@@ -28,14 +30,14 @@ public class VndbClient {
     }
 
     public static void searchAsync(String title, Callback callback) {
-        new Thread(() -> {
+        AppExecutors.runOnIo(() -> {
             try {
                 VnMetadata result = search(title);
                 callback.onSuccess(result);
             } catch (Exception e) {
                 callback.onError(e);
             }
-        }).start();
+        });
     }
 
     public static VnMetadata search(String title) throws Exception {
@@ -44,10 +46,10 @@ public class VndbClient {
     }
 
     public static void searchCandidatesAsync(String title, int limit, CandidatesCallback callback) {
-        new Thread(() -> {
+        AppExecutors.runOnIo(() -> {
             try { callback.onSuccess(searchCandidates(title, limit)); }
             catch (Exception e) { callback.onError(e); }
-        }).start();
+        });
     }
 
     public static List<VnMetadata> searchCandidates(String title, int limit) throws Exception {

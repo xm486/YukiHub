@@ -18,6 +18,7 @@ import androidx.fragment.app.DialogFragment;
 
 import com.yuki.yukihub.R;
 import com.yuki.yukihub.MainActivity;
+import com.yuki.yukihub.util.AppExecutors;
 
 /**
  * WebDAV 同步设置对话框
@@ -150,7 +151,7 @@ public class WebDavSettingsDialog extends DialogFragment {
         btnTest.setText("测试中...");
         showStatus("正在测试连接...", 0xFF8E9AB5);
         
-        new Thread(() -> {
+        AppExecutors.runOnIo(() -> {
             // 创建临时客户端测试
             WebDavClient client = new WebDavClient(server, username, password);
             final String[] error = new String[]{null};
@@ -175,7 +176,7 @@ public class WebDavSettingsDialog extends DialogFragment {
                     showStatus("✗ 连接失败: " + (error[0] == null ? "请检查配置" : error[0]), 0xFFFF3B30);
                 }
             });
-        }).start();
+        });
     }
     
     private void saveConfig() {

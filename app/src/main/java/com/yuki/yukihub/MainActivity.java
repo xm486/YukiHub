@@ -110,6 +110,7 @@ import com.yuki.yukihub.scanner.GameScanner;
 import com.yuki.yukihub.scanner.ScanResult;
 import com.yuki.yukihub.ui.GameAdapter;
 import com.yuki.yukihub.ui.ScanResultAdapter;
+import com.yuki.yukihub.util.AppExecutors;
 import com.yuki.yukihub.util.TimeFormatUtil;
 import com.yuki.yukihub.util.UiScaleUtil;
 
@@ -438,7 +439,7 @@ private void repairMissingMetadataCoversIfNeeded() {
         if (noCover || missingFile) targets.add(g);
     }
     if (targets.isEmpty()) return;
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         int changed = 0;
         for (Game g : targets) {
             try {
@@ -467,7 +468,7 @@ private void repairMissingMetadataCoversIfNeeded() {
             applyFilter();
             Toast.makeText(this, "已恢复 " + finalChanged + " 个同步封面", Toast.LENGTH_SHORT).show();
         });
-    }).start();
+    });
 }
 
 private void deleteInternalFileUri(String uriText) {
@@ -679,7 +680,7 @@ private String copyImageToInternalStorage(Uri uri, String folder, String prefix,
         }
         if (targets.isEmpty()) return;
         coverScanRunning = true;
-        new Thread(() -> {
+        AppExecutors.runOnIo(() -> {
             int changed = 0;
             for (Game g : targets) {
                 try {
@@ -703,7 +704,7 @@ private String copyImageToInternalStorage(Uri uri, String folder, String prefix,
                     applyFilter();
                 }
             });
-        }).start();
+        });
     }
 
     private boolean hasCover(Game g) {
@@ -1203,9 +1204,8 @@ private String normalizeBaseUrl(String base) {
 
 private void performAuthRequest(boolean register, String email, String password, String nickname, Runnable onSuccess, Runnable onFailureUi) {
     final String base = normalizeBaseUrl(AUTH_BASE_URL);
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         try {
-            // 用 GET 方式（绕过 InfinityFree 的 POST 拦截）
             String endpoint = register ? "/auth/register" : "/auth/login";
             String params = "email=" + java.net.URLEncoder.encode(email, "UTF-8")
                     + "&password=" + java.net.URLEncoder.encode(password, "UTF-8");
@@ -1214,7 +1214,7 @@ private void performAuthRequest(boolean register, String email, String password,
             }
             String url = base + endpoint + "?" + params;
             JSONObject resp = getJson(url);
-            
+
             saveAuthSession(resp, email, nickname);
             runOnUiThread(() -> {
                 updateProfilePanel();
@@ -1230,7 +1230,7 @@ private void performAuthRequest(boolean register, String email, String password,
                 if (onFailureUi != null) onFailureUi.run();
             });
         }
-    }).start();
+    });
 }
 
 private JSONObject getJson(String urlStr) throws Exception {
@@ -1879,7 +1879,7 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
     if (target == null) return;
     if (url == null || url.trim().isEmpty()) { target.setImageDrawable(null); return; }
     final String imageUrl = url.trim();
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         try {
             File cacheDir = prefix != null && prefix.startsWith("cover_") ? persistentRemoteCoverDir() : new File(getCacheDir(), "vndb_images");
             if (!cacheDir.exists()) cacheDir.mkdirs();
@@ -1913,7 +1913,7 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
                 }
             });
         } catch (Throwable ignored) { }
-    }).start();
+    });
 }
 
 private String metadataSource() {
@@ -2029,7 +2029,7 @@ private void fetchBangumiMetadata(Game game, boolean forceRefresh) {
         return;
     }
     setSideDescription("正在从 Bangumi 获取资料…");
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         try {
             VnMetadata meta = BangumiClient.searchFirst(keyword, token, usingBangumiMirror());
             runOnUiThread(() -> {
@@ -2048,7 +2048,7 @@ private void fetchBangumiMetadata(Game game, boolean forceRefresh) {
                 setSideDescription("Bangumi 获取失败。请检查 Token 是否正确，账号是否满足使用条件，或稍后重试。\n\n" + t.getMessage());
             });
         }
-    }).start();
+    });
 }
 
 private boolean downloadImageAllowVndbWarningPage(String imageUrl, File cacheFile, int depth) {
@@ -2134,7 +2134,7 @@ private void toggleOrTranslateDescription() {
     sideTranslateToggle.setText("...");
     sideTranslateToggle.setEnabled(false);
     sideTranslateToggle.setAlpha(0.65f);
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         try {
             String translated = translateTextToChinese(meta.description);
             runOnUiThread(() -> {
@@ -2160,7 +2160,7 @@ private void toggleOrTranslateDescription() {
                 }
             });
         }
-    }).start();
+    });
 }
 
 private String translateTextToChinese(String text) throws Exception {
@@ -2584,7 +2584,7 @@ private void searchBangumiWithKeyword(Game game, String keyword) {
     if (game == null || keyword == null || keyword.trim().isEmpty()) return;
     String token = bangumiToken();
     setSideDescription("正在按自定义关键词搜索 Bangumi…");
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         try {
             List<VnMetadata> data = BangumiClient.searchCandidates(keyword, token, 8, usingBangumiMirror());
             runOnUiThread(() -> {
@@ -2599,7 +2599,7 @@ private void searchBangumiWithKeyword(Game game, String keyword) {
         } catch (Throwable t) {
             runOnUiThread(() -> Toast.makeText(MainActivity.this, "Bangumi 搜索失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
         }
-    }).start();
+    });
 }
 
 private void searchVndbWithKeyword(Game game, String keyword) {
@@ -2631,7 +2631,7 @@ private void syncVndbToGameCard(Game game) {
         return;
     }
     Toast.makeText(this, "正在同步 VNDB 到游戏卡片…", Toast.LENGTH_SHORT).show();
-    new Thread(() -> {
+    AppExecutors.runOnIo(() -> {
         String localCover = null;
         if (meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
             localCover = cacheRemoteImageSync(meta.coverUrl, "card_cover_" + emptyText(meta.id, String.valueOf(game.id)));
@@ -2653,7 +2653,7 @@ private void syncVndbToGameCard(Game game) {
             updateSideDetail(game);
             Toast.makeText(this, "已同步 VNDB 中文名和封面到游戏卡片", Toast.LENGTH_SHORT).show();
         });
-    }).start();
+    });
 }
 
 private String cacheRemoteImageSync(String url, String prefix) {
@@ -3389,7 +3389,7 @@ private void showDetailDialog(Game game) {
 
     private void showGameHubShortcutPicker(EditText titleTarget, EditText pkgTarget, EditText gamehubIdTarget) {
         if (requestShizukuPermissionIfNeeded()) return;
-        new Thread(() -> {
+        AppExecutors.runOnSingle(() -> {
             try {
                 List<GameHubShortcutItem> items = loadGameHubShortcuts();
                 runOnUiThread(() -> {
@@ -3411,7 +3411,7 @@ private void showDetailDialog(Game game) {
                         .setPositiveButton("知道了", null)
                         .show());
             }
-        }).start();
+        });
     }
 
     private void showGameHubShortcutListDialog(List<GameHubShortcutItem> source, EditText titleTarget, EditText pkgTarget, EditText gamehubIdTarget) {
@@ -3800,7 +3800,7 @@ private void showDetailDialog(Game game) {
             dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.74f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
         }
 
-        new Thread(() -> {
+        AppExecutors.runOnSingle(() -> {
             List<AppPickItem> items = new ArrayList<>();
             try {
                 PackageManager pm = getPackageManager();
@@ -3845,7 +3845,7 @@ private void showDetailDialog(Game game) {
                     public void afterTextChanged(Editable e) {}
                 });
             });
-        }).start();
+        });
     }
 
     private interface AppPickCallback { void onPick(AppPickItem item); }
@@ -4713,7 +4713,7 @@ private void showScanResults(List<ScanResult> results) {
         d.findViewById(R.id.btnCancelScan).setOnClickListener(v -> d.dismiss());
         d.findViewById(R.id.btnImportScan).setOnClickListener(v -> {
             ScanImportStats stats = importScannedGames(results);
-            if (stats.added > 0) new Thread(() -> autoMatchVndbForImportedGames(stats.importedGames)).start();
+            if (stats.added > 0) AppExecutors.runOnIo(() -> autoMatchVndbForImportedGames(stats.importedGames));
             d.dismiss();
             loadGames();
             Toast.makeText(this, "新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
@@ -4730,7 +4730,7 @@ if (showToast) Toast.makeText(this, "正在扫描，请稍候...", Toast.LENGTH_
         int scanDepth = prefs == null ? DEFAULT_STARTUP_SCAN_DEPTH : prefs.getInt(KEY_STARTUP_SCAN_DEPTH, DEFAULT_STARTUP_SCAN_DEPTH);
         scanDepth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, scanDepth));
         final int finalScanDepth = scanDepth;
-        new Thread(() -> {
+        AppExecutors.runOnSingle(() -> {
             List<ScanResult> results;
             try {
                 results = GameScanner.scan(this, rootUri, finalScanDepth);
@@ -4739,14 +4739,14 @@ if (showToast) Toast.makeText(this, "正在扫描，请稍候...", Toast.LENGTH_
                 results = new ArrayList<>();
             }
             ScanImportStats stats = importScannedGames(results);
-            if (stats.added > 0) new Thread(() -> autoMatchVndbForImportedGames(stats.importedGames)).start();
+            if (stats.added > 0) AppExecutors.runOnIo(() -> autoMatchVndbForImportedGames(stats.importedGames));
             runOnUiThread(() -> {
                 autoLibraryScanRunning = false;
                 setScanLoading(false);
                 loadGames();
                 if (showToast) Toast.makeText(this, "新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
             });
-        }).start();
+        });
     }
 
     private void scanLastRootOrChoose() {
@@ -4992,11 +4992,11 @@ try {
     
     // 自动刷新 Token（如果已登录但可能过期）
     if (isLoggedIn()) {
-        new Thread(() -> {
+        AppExecutors.runOnIo(() -> {
             if (refreshAccessToken()) {
                 runOnUiThread(() -> updateProfilePanel());
             }
-        }).start();
+        });
     }
     
     updateProfilePanel();

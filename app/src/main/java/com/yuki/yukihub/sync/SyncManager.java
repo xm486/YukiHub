@@ -6,6 +6,7 @@ import android.util.Log;
 
 import com.yuki.yukihub.data.GameRepository;
 import com.yuki.yukihub.data.MetadataRepository;
+import com.yuki.yukihub.util.AppExecutors;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -112,7 +113,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
             if (listener != null) listener.onError("WebDAV 未配置");
             return;
         }
-        new Thread(() -> {
+        AppExecutors.runOnSingle(() -> {
             try {
                 if (listener != null) listener.onSyncStart();
                 WebDavClient c = getClient();
@@ -213,7 +214,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                 Log.e(TAG, "sync failed", t);
                 if (listener != null) listener.onError(t.getMessage() == null ? "未知错误" : t.getMessage());
             }
-        }).start();
+        });
     }
 
     public JSONObject exportSnapshotForLocalBackup() throws Exception {
