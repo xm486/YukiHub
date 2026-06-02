@@ -4247,7 +4247,6 @@ private String displayPath(String value) {
         Button btnArtemisStd = d.findViewById(R.id.btnArtemisStd);
         Button btnArtemisCompat = d.findViewById(R.id.btnArtemisCompat);
         Button btnArtemisCompatV2 = d.findViewById(R.id.btnArtemisCompatV2);
-        Button btnClearPlayTime = d.findViewById(R.id.btnClearPlayTime);
         TextView tvPlayTimeInfo = d.findViewById(R.id.tvPlayTimeInfo);
         View btnPickEmulatorApp = d.findViewById(R.id.btnPickEmulatorApp);
         View btnResetEmulatorPackage = d.findViewById(R.id.btnResetEmulatorPackage);
@@ -4292,8 +4291,6 @@ private String displayPath(String value) {
         if (game != null) {
             tvPlayTimeInfo.setVisibility(View.VISIBLE);
             tvPlayTimeInfo.setText("总时长：" + TimeFormatUtil.playTime(game.totalPlayTime) + " / 最近游玩：" + TimeFormatUtil.date(game.lastPlayedAt));
-            btnClearPlayTime.setVisibility(View.VISIBLE);
-            btnClearPlayTime.setOnClickListener(v -> confirmClearPlayTime(game, d));
         }
         btnArtemisAuto.setOnClickListener(v -> { pkg.setText(resolveArtemisPackageFromMarkers(pendingDirUri)); updateArtemisVersionButtons(pkg.getText().toString(), btnArtemisAuto, btnArtemisStd, btnArtemisCompat, btnArtemisCompatV2); });
         btnArtemisStd.setOnClickListener(v -> { pkg.setText("internal.artemis"); updateArtemisVersionButtons(pkg.getText().toString(), btnArtemisAuto, btnArtemisStd, btnArtemisCompat, btnArtemisCompatV2); });
@@ -4484,23 +4481,7 @@ if (file != null && file.exists()) file.delete();
 } catch (Throwable ignored) { }
 }
 
-private void confirmClearPlayTime(Game game, Dialog editDialog) {
-        if (game == null || game.id <= 0) return;
-        new AlertDialog.Builder(this)
-                .setTitle("清除游玩时长")
-                .setMessage("确定要清除《" + emptyText(game.title, "未命名游戏") + "》的游玩时长吗？\n\n只会清除这个游戏的总时长、最近游玩时间和本地游玩记录，不会删除游戏或封面。同步时也会阻止旧游玩记录再次回流。")
-                .setPositiveButton("清除", (dialog, which) -> {
-                    repository.clearPlayTimeForGame(game.id);
-                    Toast.makeText(this, "已清除该游戏游玩时长", Toast.LENGTH_SHORT).show();
-                    if (editDialog != null) editDialog.dismiss();
-                    loadGames();
-                    updateProfilePanel();
-                })
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void showEditPlayTimeDialog(Game game) {
+private void showEditPlayTimeDialog(Game game) {
         if (game == null || game.id <= 0) return;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);

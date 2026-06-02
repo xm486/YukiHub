@@ -52,7 +52,6 @@
         <TextView android:id="@+id/tvSelectedCover" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="未选择封面" android:textColor="@color/yh_text_muted" android:textSize="12sp" android:maxLines="2" android:ellipsize="middle" />
 
         <TextView android:id="@+id/tvPlayTimeInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="总时长：0分钟" android:textColor="@color/yh_text_muted" android:textSize="12sp" android:visibility="gone" />
-        <Button android:id="@+id/btnClearPlayTime" android:layout_width="match_parent" android:layout_height="40dp" android:layout_marginTop="6dp" android:text="清除该游戏游玩时长" android:textAllCaps="false" android:visibility="gone" />
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:orientation="horizontal">
             <Button android:id="@+id/btnPickDir" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="选择目录" android:textAllCaps="false" />

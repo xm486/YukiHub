@@ -248,7 +248,7 @@ public class WebDavSettingsDialog extends DialogFragment {
                     String msg = "本地和云端都有修改，请选择处理方式。\n\n"
                             + "本地大小：" + (conflict.localBytes / 1024) + "KB\n"
                             + "云端大小：" + (conflict.remoteBytes / 1024) + "KB\n\n"
-                            + "建议选择“智能合并”：会按游戏路径和游玩记录 UUID 去重合并。";
+                            + "建议选择“智能合并”：会按游戏路径和游玩记录 UUID 去重合并，累计游玩时长取两边较大值；如果某设备执行过清除/重设时长，则以更新的重置时间为准。";
                     new androidx.appcompat.app.AlertDialog.Builder(requireContext())
                             .setTitle("同步冲突")
                             .setMessage(msg)

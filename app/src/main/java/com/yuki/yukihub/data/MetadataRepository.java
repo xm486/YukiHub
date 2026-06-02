@@ -91,17 +91,25 @@ public class MetadataRepository {
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.optJSONObject(i);
             if (o == null) continue;
-            long gameId = findGameIdByRootUri(db, o.optString("game_root_uri", ""));
-            if (gameId <= 0) gameId = o.optLong("game_local_id", -1);
+            String rootUri = o.optString("game_root_uri", "");
+            long gameId = findGameIdByRootUri(db, rootUri);
+            if (gameId <= 0 && (rootUri == null || rootUri.trim().isEmpty())) gameId = findGameIdByLocalId(db, o.optLong("game_local_id", -1));
             String source = o.optString("source", "");
             String json = o.optString("json", "");
             if (gameId <= 0 || source.isEmpty() || json.isEmpty()) continue;
+            long incomingUpdatedAt = o.optLong("updated_at", System.currentTimeMillis());
+            Cursor existing = db.rawQuery("SELECT updated_at FROM metadata_cache WHERE game_id=? AND source=? LIMIT 1", new String[]{String.valueOf(gameId), source});
+            try {
+                if (existing.moveToFirst() && incomingUpdatedAt < existing.getLong(0)) continue;
+            } finally {
+                existing.close();
+            }
             ContentValues v = new ContentValues();
             v.put("game_id", gameId);
             v.put("source", source);
             v.put("source_id", o.optString("source_id", ""));
             v.put("json", json);
-            v.put("updated_at", o.optLong("updated_at", System.currentTimeMillis()));
+            v.put("updated_at", incomingUpdatedAt);
             db.insertWithOnConflict("metadata_cache", null, v, SQLiteDatabase.CONFLICT_REPLACE);
             changed++;
         }
@@ -110,7 +118,21 @@ public class MetadataRepository {
 
     private long findGameIdByRootUri(SQLiteDatabase db, String rootUri) {
         if (rootUri == null || rootUri.trim().isEmpty()) return -1;
-        Cursor c = db.rawQuery("SELECT id FROM games WHERE root_uri=? LIMIT 1", new String[]{rootUri});
+        String key = GameRepository.normalizeRootUriKey(rootUri);
+        Cursor c = db.rawQuery("SELECT id,root_uri FROM games WHERE root_uri IS NOT NULL AND root_uri != ''", null);
+        try {
+            while (c.moveToNext()) {
+                if (key.equals(GameRepository.normalizeRootUriKey(c.getString(1)))) return c.getLong(0);
+            }
+            return -1;
+        } finally {
+            c.close();
+        }
+    }
+
+    private long findGameIdByLocalId(SQLiteDatabase db, long localId) {
+        if (localId <= 0) return -1;
+        Cursor c = db.rawQuery("SELECT id FROM games WHERE id=? LIMIT 1", new String[]{String.valueOf(localId)});
         try {
             return c.moveToFirst() ? c.getLong(0) : -1;
         } finally {
