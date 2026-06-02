@@ -53,6 +53,7 @@ captures/
 *.keystore
 *.p12
 *.pem
+keystore.properties
 
 # Environment / local secrets
 .env

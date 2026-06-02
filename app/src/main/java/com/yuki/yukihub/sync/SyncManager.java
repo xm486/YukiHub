@@ -43,6 +43,9 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
     private static final String KEY_SORT_MODE = "sort_mode";
     private static final String KEY_BACKGROUND_VIDEO_SOUND = "background_video_sound";
     private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
+    private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
+    private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
+    private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
     private static final String KEY_UI_FONT_SCALE = "ui_font_scale";
 
     // 游戏库/游戏卡片信息必须完整同步；只限制动态类数据（游玩记录）数量。
@@ -234,7 +237,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         MetadataRepository metaRepo = new MetadataRepository(context);
         JSONObject root = new JSONObject();
         root.put("app", "YukiHub");
-        root.put("schema", 4);
+        root.put("schema", 5);
         root.put("lightweight", true);
         root.put("created_at", 0);
         root.put("note", "Only text metadata is synced. No game files, save files, or binary cover images are embedded.");
@@ -253,13 +256,16 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
 
         JSONObject settings = new JSONObject();
         settings.put("metadata_source", appPrefs.getString(KEY_METADATA_SOURCE, "vndb"));
-        // 不同步 last_scan_root_uri：它通常包含用户本机目录/存储路径，跨设备无效且可能泄露隐私。
+        // 不同步扫描目录（last_scan_root_uri/scan_root_uris）：它们通常包含用户本机目录/存储路径，跨设备无效且可能泄露隐私。
         settings.put("auto_scan_on_startup", appPrefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, false));
         settings.put("startup_scan_depth", appPrefs.getInt(KEY_STARTUP_SCAN_DEPTH, 2));
         settings.put("engine_label_position", appPrefs.getString(KEY_ENGINE_LABEL_POSITION, "title"));
         settings.put("sort_mode", appPrefs.getString(KEY_SORT_MODE, "recent"));
         settings.put("background_video_sound", appPrefs.getBoolean(KEY_BACKGROUND_VIDEO_SOUND, false));
         settings.put("kr_compat_mode", appPrefs.getBoolean(KEY_KR_COMPAT_MODE, false));
+        settings.put("kr_engine_version", appPrefs.getString(KEY_KR_ENGINE_VERSION, "auto"));
+        settings.put("kr_scoped_save_dir", appPrefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false));
+        settings.put("artemis_scoped_save_dir", appPrefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false));
         settings.put("ui_font_scale", appPrefs.getFloat(KEY_UI_FONT_SCALE, 1.0f));
         // 不同步自定义背景文件引用：本地图片/视频路径跨设备通常无效，且视频背景不应进入同步逻辑。
         settings.put("background_dim_enabled", appPrefs.getBoolean(KEY_BACKGROUND_DIM_ENABLED, true));
@@ -305,7 +311,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
             SharedPreferences.Editor e = appPrefs.edit();
             String source = settings.optString("metadata_source", "");
             if (SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) e.putString(KEY_METADATA_SOURCE, source);
-            // 兼容旧备份：忽略 last_scan_root_uri，避免导入跨设备无效路径或泄露本机目录。
+            // 兼容旧备份：忽略扫描目录（last_scan_root_uri/scan_root_uris），避免导入跨设备无效路径或泄露本机目录。
             if (settings.has("auto_scan_on_startup")) e.putBoolean(KEY_AUTO_SCAN_ON_STARTUP, settings.optBoolean("auto_scan_on_startup", false));
             if (settings.has("startup_scan_depth")) e.putInt(KEY_STARTUP_SCAN_DEPTH, Math.max(1, Math.min(4, settings.optInt("startup_scan_depth", 2))));
             if (settings.has("engine_label_position")) e.putString(KEY_ENGINE_LABEL_POSITION, "cover".equals(settings.optString("engine_label_position", "title")) ? "cover" : "title");
@@ -315,6 +321,12 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
             }
             if (settings.has("background_video_sound")) e.putBoolean(KEY_BACKGROUND_VIDEO_SOUND, settings.optBoolean("background_video_sound", false));
             if (settings.has("kr_compat_mode")) e.putBoolean(KEY_KR_COMPAT_MODE, settings.optBoolean("kr_compat_mode", false));
+            if (settings.has("kr_engine_version")) {
+                String krVersion = settings.optString("kr_engine_version", "auto");
+                if ("auto".equals(krVersion) || "1.3.9".equals(krVersion) || "1.3.4".equals(krVersion)) e.putString(KEY_KR_ENGINE_VERSION, krVersion);
+            }
+            if (settings.has("kr_scoped_save_dir")) e.putBoolean(KEY_KR_SCOPED_SAVE_DIR, settings.optBoolean("kr_scoped_save_dir", false));
+            if (settings.has("artemis_scoped_save_dir")) e.putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, settings.optBoolean("artemis_scoped_save_dir", false));
             if (settings.has("ui_font_scale")) e.putFloat(KEY_UI_FONT_SCALE, (float) Math.max(0.85d, Math.min(1.30d, settings.optDouble("ui_font_scale", 1.0d))));
             // 不导入 custom_background/custom_background_type，避免旧备份里的本地图片/视频路径污染新设备。
             if (settings.has("background_dim_enabled")) e.putBoolean(KEY_BACKGROUND_DIM_ENABLED, settings.optBoolean("background_dim_enabled", true));

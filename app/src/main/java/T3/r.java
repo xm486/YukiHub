@@ -11,7 +11,6 @@ import android.widget.Toast;
 import java.io.File;
 
 import bridge.NativeBridge;
-import com.yuki.yukihub.krkr.KrkrSaveHook;
 import org.tvp.kirikiri2.KR2Activity;
 
 public abstract class r extends KR2Activity {
@@ -49,8 +48,10 @@ public abstract class r extends KR2Activity {
         boolean initialized = NativeBridge.initialize(soName());
         Log.i(TAG, "native initialize result=" + initialized + " so=" + soName());
         Intent intent = getIntent();
-        if (intent == null || !intent.getBooleanExtra("scopedSaveDir", false)) {
-            Log.i(TAG, "native interceptor skipped: scoped save disabled");
+        boolean scopedSaveDir = intent != null && intent.getBooleanExtra("scopedSaveDir", false);
+        boolean safFileFallback = intent != null && intent.getBooleanExtra("safFileFallback", false);
+        if (intent == null || (!scopedSaveDir && !safFileFallback)) {
+            Log.i(TAG, "native interceptor skipped: scoped save and SAF fallback disabled");
             return;
         }
         String prefix = null;
@@ -63,9 +64,7 @@ public abstract class r extends KR2Activity {
                 if (root != null) {
                     File saveRoot = new File(new File(getExternalFilesDir(null), "save"), safeSaveName(root.getAbsolutePath()));
                     if (saveRoot.exists() || saveRoot.mkdirs()) {
-                        File originalSaveDir = new File(root, "savedata");
-                        boolean yhHook = KrkrSaveHook.enable(originalSaveDir.getAbsolutePath(), saveRoot.getAbsolutePath());
-                        Log.i(TAG, "yukihub KRKR save hook original=" + originalSaveDir.getAbsolutePath() + " private=" + saveRoot.getAbsolutePath() + " ok=" + yhHook);
+                        Log.i(TAG, scopedSaveDir ? "KRKR scoped save uses private mirror root; native save hook enabled" : "KRKR SAF file fallback hook enabled");
                         prefix = storagePrefix(root.getAbsolutePath());
                     }
                 }

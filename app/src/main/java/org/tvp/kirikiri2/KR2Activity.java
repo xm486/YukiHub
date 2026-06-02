@@ -16,6 +16,7 @@ import android.view.inputmethod.InputMethodManager;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import bridge.NativeBridge;
 import java.util.Locale;
 import org.cocos2dx.lib.Cocos2dxActivity;
 import org.cocos2dx.lib.Cocos2dxGLSurfaceView;
@@ -42,9 +43,12 @@ public class KR2Activity extends Cocos2dxActivity {
         try {
             File f = new File(redirectScopedSavePath(path));
             boolean ok = f.exists() || f.mkdirs();
+            if (!ok && isSafFallbackEnabled()) ok = NativeBridge.createDirectoryViaSafIfPossible(path);
             android.util.Log.i("KR2Activity", "CreateFolders " + path + " -> " + f.getAbsolutePath() + " ok=" + ok);
             return ok;
-        } catch (Throwable t) { return false; }
+        } catch (Throwable t) {
+            return isSafFallbackEnabled() && NativeBridge.createDirectoryViaSafIfPossible(path);
+        }
     }
 
     public static boolean DeleteFile(String path) {
@@ -56,6 +60,7 @@ public class KR2Activity extends Cocos2dxActivity {
             if (mapped.exists()) ok = mapped.delete();
             if (original.exists()) ok = original.delete() && ok;
             if (!existed) ok = true;
+            if ((!ok || !existed) && isSafFallbackEnabled()) ok = NativeBridge.deleteViaSafIfPossible(path) || ok;
             android.util.Log.i("KR2Activity", "DeleteFile " + path + " mapped=" + mapped.getAbsolutePath() + " original=" + original.getAbsolutePath() + " existed=" + existed + " ok=" + ok);
             return ok;
         } catch (Throwable t) { return false; }
@@ -72,10 +77,15 @@ public class KR2Activity extends Cocos2dxActivity {
             boolean ok;
             boolean srcExisted = src.exists();
             if (!srcExisted) {
-                ok = true;
+                if (isSafFallbackEnabled() && NativeBridge.existsViaSafIfPossible(from)) {
+                    ok = NativeBridge.renameViaSafIfPossible(from, to);
+                } else {
+                    ok = true;
+                }
             } else {
                 ok = src.renameTo(dst);
                 if (!ok) ok = copyThenDelete(src, dst);
+                if (!ok && isSafFallbackEnabled()) ok = NativeBridge.renameViaSafIfPossible(from, to);
             }
             android.util.Log.i("KR2Activity", "RenameFile " + from + " -> " + to + " mappedSrc=" + mappedSrc.getAbsolutePath() + " originalSrc=" + originalSrc.getAbsolutePath() + " dst=" + dst.getAbsolutePath() + " srcExisted=" + srcExisted + " ok=" + ok);
             return ok;
@@ -87,13 +97,18 @@ public class KR2Activity extends Cocos2dxActivity {
             String mapped = redirectScopedSavePath(path);
             File f = new File(mapped);
             File parent = f.getParentFile();
-            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
-            FileOutputStream fos = new FileOutputStream(f);
-            if (data != null) fos.write(data);
-            fos.close();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+                if (isSafFallbackEnabled()) return NativeBridge.writeViaSafIfPossible(path, data);
+                return false;
+            }
+            try (FileOutputStream fos = new FileOutputStream(f)) {
+                if (data != null) fos.write(data);
+            }
             android.util.Log.i("KR2Activity", "WriteFile " + path + " -> " + f.getAbsolutePath() + " bytes=" + (data == null ? 0 : data.length));
             return true;
-        } catch (Throwable t) { return false; }
+        } catch (Throwable t) {
+            return isSafFallbackEnabled() && NativeBridge.writeViaSafIfPossible(path, data);
+        }
     }
 
     public static void MessageController(int what, int arg1, int arg2) {
@@ -211,6 +226,15 @@ public class KR2Activity extends Cocos2dxActivity {
         if (p.startsWith("storage/")) p = "/" + p;
         while (p.contains("//")) p = p.replace("//", "/");
         return p;
+    }
+
+    private static boolean isSafFallbackEnabled() {
+        try {
+            Intent intent = sInstance != null ? sInstance.getIntent() : null;
+            return intent != null && intent.getBooleanExtra("safFileFallback", false);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static String redirectScopedSavePath(String path) {

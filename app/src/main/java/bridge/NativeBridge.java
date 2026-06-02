@@ -110,17 +110,129 @@ public final class NativeBridge {
         }
     }
 
+    public static boolean writeViaSafIfPossible(String path, byte[] data) {
+        try {
+            Uri uri = storagePathToPersistedDocumentUri(path, OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_TRUNC);
+            if (uri == null) return false;
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity == null) return false;
+            try (java.io.OutputStream out = activity.getContentResolver().openOutputStream(uri, "wt")) {
+                if (out == null) return false;
+                if (data != null) out.write(data);
+                out.flush();
+            }
+            Log.i("NativeBridge", "write SAF " + path + " -> " + uri + " bytes=" + (data == null ? 0 : data.length));
+            return true;
+        } catch (Throwable t) {
+            Log.w("NativeBridge", "write SAF failed path=" + path, t);
+            return false;
+        }
+    }
+
+    public static boolean createDirectoryViaSafIfPossible(String path) {
+        try {
+            Uri uri = storagePathToPersistedDocumentUri(path + "/.yukihub_dir_probe", OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_TRUNC);
+            if (uri == null) return false;
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity != null) {
+                try { DocumentsContract.deleteDocument(activity.getContentResolver(), uri); } catch (Throwable ignored) { }
+            }
+            Log.i("NativeBridge", "mkdir SAF " + path);
+            return true;
+        } catch (Throwable t) {
+            Log.w("NativeBridge", "mkdir SAF failed path=" + path, t);
+            return false;
+        }
+    }
+
+    public static boolean deleteViaSafIfPossible(String path) {
+        try {
+            Uri uri = storagePathToPersistedDocumentUri(path, OsConstants.O_RDONLY);
+            if (uri == null) return false;
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity == null) return false;
+            boolean ok = DocumentsContract.deleteDocument(activity.getContentResolver(), uri);
+            Log.i("NativeBridge", "delete SAF " + path + " -> " + uri + " ok=" + ok);
+            return ok;
+        } catch (Throwable t) {
+            Log.w("NativeBridge", "delete SAF failed path=" + path, t);
+            return false;
+        }
+    }
+
+    public static boolean existsViaSafIfPossible(String path) {
+        try {
+            Uri uri = storagePathToPersistedDocumentUri(path, OsConstants.O_RDONLY);
+            if (uri == null) return false;
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity == null) return false;
+            try (java.io.InputStream in = activity.getContentResolver().openInputStream(uri)) {
+                return in != null;
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean renameViaSafIfPossible(String from, String to) {
+        try {
+            Uri src = storagePathToPersistedDocumentUri(from, OsConstants.O_RDONLY);
+            if (src == null) return false;
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity == null) return false;
+            ContentResolver resolver = activity.getContentResolver();
+            try (java.io.InputStream in = resolver.openInputStream(src)) {
+                if (in == null) return false;
+                Uri dst = storagePathToPersistedDocumentUri(to, OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_TRUNC);
+                if (dst == null) return false;
+                try (java.io.OutputStream out = resolver.openOutputStream(dst, "wt")) {
+                    if (out == null) return false;
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    out.flush();
+                }
+                try { DocumentsContract.deleteDocument(resolver, src); } catch (Throwable ignored) { }
+                Log.i("NativeBridge", "rename SAF " + from + " -> " + to + " src=" + src);
+                return true;
+            }
+        } catch (Throwable t) {
+            Log.w("NativeBridge", "rename SAF failed " + from + " -> " + to, t);
+            return false;
+        }
+    }
+
     private static Uri storagePathToPersistedDocumentUri(String path, int mode) {
         if (path == null) return null;
         String p = normalizeFilePath(path);
-        if (!p.startsWith("/storage/")) return null;
-        if (p.startsWith("/storage/emulated/0/")) return null;
-        String rest = p.substring("/storage/".length());
-        int slash = rest.indexOf('/');
-        if (slash <= 0) return null;
-        String volume = rest.substring(0, slash);
-        String rel = rest.substring(slash + 1);
-        if (volume.isEmpty() || rel.isEmpty()) return null;
+        if (!p.startsWith("/storage/") && !p.startsWith("/sdcard")) return null;
+        String volume;
+        String rel;
+        if (p.startsWith("/storage/emulated/0/")) {
+            volume = "primary";
+            rel = p.substring("/storage/emulated/0/".length());
+        } else if ("/storage/emulated/0".equals(p)) {
+            volume = "primary";
+            rel = "";
+        } else if (p.startsWith("/sdcard/")) {
+            volume = "primary";
+            rel = p.substring("/sdcard/".length());
+        } else if ("/sdcard".equals(p)) {
+            volume = "primary";
+            rel = "";
+        } else {
+            String rest = p.substring("/storage/".length());
+            int slash = rest.indexOf('/');
+            if (slash <= 0) return null;
+            volume = rest.substring(0, slash);
+            rel = rest.substring(slash + 1);
+        }
+        if (volume == null || volume.isEmpty() || rel == null) return null;
 
         KR2Activity activity = KR2Activity.getInstance();
         if (activity == null) activity = KR2Activity.GetInstance();

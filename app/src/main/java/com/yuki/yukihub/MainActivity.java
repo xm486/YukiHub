@@ -5,8 +5,10 @@ import android.animation.ObjectAnimator;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.UriPermission;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.LauncherApps;
 import android.content.pm.ShortcutInfo;
@@ -123,6 +125,8 @@ import java.util.Calendar;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends AppCompatActivity {
     @Override
@@ -157,8 +161,11 @@ private VnMetadata currentSideMetadata;
 private long runningSessionId = -1;
 private long sessionStart = 0;
 private boolean launchedExternal = false;
+private StorageProbeResult lastStorageProbeResult;
+private long lastStorageProbeAt;
 private static final long MIN_PLAY_SESSION_MS = 0L;
 private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
+private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private boolean coverScanRunning = false;
     private boolean coverMaintenanceDone = false;
     private boolean autoLibraryScanRunning = false;
@@ -169,6 +176,8 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private SharedPreferences prefs;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
+private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
+private static final int MAX_SCAN_ROOTS = 3;
     private static final String KEY_STARTUP_SCAN_DEPTH = "startup_scan_depth";
     private static final String KEY_AUTO_SCAN_ON_STARTUP = "auto_scan_on_startup";
     private static final String KEY_ENGINE_LABEL_POSITION = "engine_label_position";
@@ -213,6 +222,9 @@ private static final String KEY_BACKGROUND_VIDEO_SOUND = "background_video_sound
 private static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
 private static final String KEY_DISCLAIMER_ACCEPTED_AT = "disclaimer_accepted_at";
 private static final int DISCLAIMER_VERSION = 1;
+private int pendingScanRootReplaceIndex = -2;
+private LinearLayout activeScanRootList;
+private TextView activeScanRootInfo;
 
     private ActivityResultLauncher<Uri> scanDirLauncher;
     private ActivityResultLauncher<Uri> editDirLauncher;
@@ -338,12 +350,18 @@ View.SYSTEM_UI_FLAG_FULLSCREEN
 
     private void setupLaunchers() {
         scanDirLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
-            if (uri != null) {
-                takeFlags(uri);
-                prefs.edit().putString(KEY_LAST_SCAN_ROOT_URI, uri.toString()).apply();
-                runLibraryScan(uri, true);
-            }
-        });
+if (uri != null) {
+takeFlags(uri);
+boolean changed = addOrReplaceScanRoot(uri.toString(), pendingScanRootReplaceIndex);
+pendingScanRootReplaceIndex = -2;
+if (changed) {
+refreshActiveScanRootListUi();
+Toast.makeText(this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
+}
+} else {
+pendingScanRootReplaceIndex = -2;
+}
+});
         editDirLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
             if (uri != null) {
                 takeFlags(uri);
@@ -825,7 +843,7 @@ applyTopActionFeedback(scanButton);
 applyTopActionFeedback(settingsButton);
 addButton.setOnClickListener(v -> { clickFeedback(v); showEditDialog(null); });
 scanButton.setOnClickListener(v -> { clickFeedback(v); scanLastRootOrChoose(); });
-scanButton.setOnLongClickListener(v -> { clickFeedback(v); scanDirLauncher.launch(null); return true; });
+scanButton.setOnLongClickListener(v -> { clickFeedback(v); launchScanRootPicker(-1); return true; });
 settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
         View friendsChatPanel = findViewById(R.id.friendsChatPanel);
 if (friendsChatPanel != null) friendsChatPanel.setOnClickListener(v -> { clickFeedback(v); showFriendsChatPlaceholder(); });
@@ -2811,18 +2829,44 @@ String rematchItem = "重新匹配" + sourceLabel;
     }
 
     private void showSettingsDialog() {
-        String scanRoot = prefs.getString(KEY_LAST_SCAN_ROOT_URI, "未绑定");
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundResource(R.drawable.bg_dialog);
         int pad = dp(16);
         root.setPadding(pad, dp(12), pad, dp(8));
 
+        TextView scanTitle = new TextView(this);
+        scanTitle.setText("扫描目录");
+        scanTitle.setTextColor(getColorCompat(R.color.yh_text));
+        scanTitle.setTextSize(14);
+        scanTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(scanTitle);
+
         TextView scanInfo = new TextView(this);
-        scanInfo.setText("当前扫描目录：\n" + scanRoot);
         scanInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
-        scanInfo.setTextSize(12);
+        scanInfo.setTextSize(11);
+        scanInfo.setPadding(0, dp(4), 0, dp(8));
         root.addView(scanInfo, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout scanRootList = new LinearLayout(this);
+        scanRootList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(scanRootList);
+        activeScanRootList = scanRootList;
+        activeScanRootInfo = scanInfo;
+        refreshScanRootListUi(scanRootList, scanInfo);
+
+        Button addScanRootButton = krButton("+ 添加扫描目录");
+        addScanRootButton.setTextColor(getColorCompat(R.color.yh_primary));
+        addScanRootButton.setOnClickListener(v -> {
+            if (getScanRootUris().size() >= MAX_SCAN_ROOTS) {
+                Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            launchScanRootPicker(-1);
+        });
+        LinearLayout.LayoutParams addScanRootLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+        addScanRootLp.setMargins(0, dp(4), 0, dp(8));
+        root.addView(addScanRootButton, addScanRootLp);
 
         TextView scanDepthTitle = new TextView(this);
         scanDepthTitle.setText("\n启动时扫描最大深度");
@@ -3150,7 +3194,7 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(krTitle);
 
         TextView krInfo = new TextView(this);
-        krInfo.setText("启动参数兼容模式会补齐旧式参数；引擎版本由此处统一指定。若部分机型因外部存储授权导致闪退，可开启独立存档目录。");
+        krInfo.setText("华为等部分机型如因存储权限导致引擎崩溃或闪退，可开启对应引擎的独立存档目录。");
         krInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
         krInfo.setTextSize(11);
         krInfo.setPadding(0, dp(4), 0, dp(6));
@@ -3161,8 +3205,8 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(krEngineVersion);
 
         CheckBox krCompatMode = krCheckBox("KR 启动参数兼容模式", prefs.getBoolean(KEY_KR_COMPAT_MODE, false));
-        CheckBox krScopedSaveDir = krCheckBox("KR 独立存档目录（App 外部私有目录，实验）", prefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false));
-        CheckBox artemisScopedSaveDir = krCheckBox("Artemis 独立存档目录（实验，暂不建议开启）", prefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false));
+        CheckBox krScopedSaveDir = krCheckBox("KR 独立存档目录（权限异常闪退时开启）", prefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false));
+        CheckBox artemisScopedSaveDir = krCheckBox("Artemis 独立存档目录（权限异常闪退时开启）", prefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false));
         root.addView(krCompatMode);
         root.addView(krScopedSaveDir);
         root.addView(artemisScopedSaveDir);
@@ -3189,7 +3233,7 @@ LinearLayout accountActions = new LinearLayout(this);
                 .setTitle("设置")
                 .setView(scroll)
                 .setPositiveButton("保存", null)
-                .setNeutralButton("更换扫描目录", null)
+                .setNeutralButton("添加目录", null)
                 .setNegativeButton("关闭", null)
                 .show();
         styleAlertDialogDark(dialog);
@@ -3248,12 +3292,166 @@ LinearLayout accountActions = new LinearLayout(this);
             Toast.makeText(this, "已恢复默认背景", Toast.LENGTH_SHORT).show();
         });
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-            dialog.dismiss();
-            scanDirLauncher.launch(null);
+            if (getScanRootUris().size() >= MAX_SCAN_ROOTS) {
+                Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            launchScanRootPicker(-1);
+        });
+        dialog.setOnDismissListener(d -> {
+            activeScanRootList = null;
+            activeScanRootInfo = null;
         });
     }
 
-    private void openExternalUrl(String url) {
+    private List<String> getScanRootUris() {
+List<String> roots = new ArrayList<>();
+if (prefs == null) return roots;
+String joined = prefs.getString(KEY_SCAN_ROOT_URIS, "");
+if (joined != null && !joined.trim().isEmpty()) {
+for (String part : joined.split("\\n")) {
+String s = part == null ? "" : part.trim();
+if (!s.isEmpty() && !roots.contains(s)) roots.add(s);
+if (roots.size() >= MAX_SCAN_ROOTS) break;
+}
+}
+String legacy = prefs.getString(KEY_LAST_SCAN_ROOT_URI, "");
+if (roots.isEmpty() && legacy != null && !legacy.trim().isEmpty()) roots.add(legacy.trim());
+return roots;
+}
+
+private void saveScanRootUris(List<String> roots) {
+if (prefs == null) return;
+List<String> cleaned = new ArrayList<>();
+if (roots != null) {
+for (String r : roots) {
+String s = r == null ? "" : r.trim();
+if (!s.isEmpty() && !cleaned.contains(s)) cleaned.add(s);
+if (cleaned.size() >= MAX_SCAN_ROOTS) break;
+}
+}
+StringBuilder joined = new StringBuilder();
+for (String r : cleaned) {
+if (joined.length() > 0) joined.append('\n');
+joined.append(r);
+}
+SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.toString());
+if (!cleaned.isEmpty()) e.putString(KEY_LAST_SCAN_ROOT_URI, cleaned.get(0)); else e.remove(KEY_LAST_SCAN_ROOT_URI);
+e.apply();
+}
+
+private boolean addOrReplaceScanRoot(String uri, int replaceIndex) {
+if (uri == null || uri.trim().isEmpty()) return false;
+List<String> roots = getScanRootUris();
+String value = uri.trim();
+roots.remove(value);
+if (replaceIndex >= 0 && replaceIndex < roots.size()) roots.set(replaceIndex, value);
+else if (roots.size() < MAX_SCAN_ROOTS) roots.add(value);
+else {
+Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
+return false;
+}
+saveScanRootUris(roots);
+return true;
+}
+
+private void removeScanRootAt(int index) {
+List<String> roots = getScanRootUris();
+if (index < 0 || index >= roots.size()) return;
+roots.remove(index);
+saveScanRootUris(roots);
+}
+
+private String scanRootsSummary() {
+List<String> roots = getScanRootUris();
+if (roots.isEmpty()) return "未绑定";
+StringBuilder sb = new StringBuilder();
+for (int i = 0; i < roots.size(); i++) {
+if (i > 0) sb.append('\n');
+sb.append(i + 1).append(". ").append(roots.get(i));
+}
+return sb.toString();
+}
+
+private String compactUriLabel(String uri) {
+if (uri == null || uri.trim().isEmpty()) return "未绑定";
+String s = uri.trim();
+try {
+Uri u = Uri.parse(s);
+String last = u.getLastPathSegment();
+if (last != null && !last.isEmpty()) return java.net.URLDecoder.decode(last, "UTF-8").replace("primary:", "/storage/emulated/0/");
+} catch (Throwable ignored) { }
+return s.length() > 72 ? "..." + s.substring(s.length() - 72) : s;
+}
+
+private void launchScanRootPicker(int replaceIndex) {
+pendingScanRootReplaceIndex = replaceIndex;
+scanDirLauncher.launch(null);
+}
+
+private LinearLayout scanRootCard(String uri, int index, Runnable refresh) {
+LinearLayout card = new LinearLayout(this);
+card.setOrientation(LinearLayout.HORIZONTAL);
+card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+card.setBackgroundResource(R.drawable.bg_input);
+card.setPadding(dp(10), dp(8), dp(8), dp(8));
+TextView text = new TextView(this);
+text.setText((index + 1) + ". " + compactUriLabel(uri));
+text.setTextColor(getColorCompat(R.color.yh_text));
+text.setTextSize(11);
+text.setSingleLine(false);
+card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+TextView change = new TextView(this);
+change.setText("更换");
+change.setTextColor(getColorCompat(R.color.yh_primary));
+change.setTextSize(12);
+change.setTypeface(null, android.graphics.Typeface.BOLD);
+change.setPadding(dp(10), 0, dp(8), 0);
+change.setOnClickListener(v -> launchScanRootPicker(index));
+card.addView(change);
+TextView remove = new TextView(this);
+remove.setText("移除");
+remove.setTextColor(getColorCompat(R.color.yh_warning));
+remove.setTextSize(12);
+remove.setTypeface(null, android.graphics.Typeface.BOLD);
+remove.setPadding(dp(8), 0, 0, 0);
+remove.setOnClickListener(v -> {
+removeScanRootAt(index);
+if (refresh != null) refresh.run();
+});
+card.addView(remove);
+return card;
+}
+
+private void refreshActiveScanRootListUi() {
+if (activeScanRootList != null) refreshScanRootListUi(activeScanRootList, activeScanRootInfo);
+}
+
+private void refreshScanRootListUi(LinearLayout container, TextView info) {
+if (container == null) return;
+container.removeAllViews();
+List<String> roots = getScanRootUris();
+if (info != null) info.setText("已绑定 " + roots.size() + "/" + MAX_SCAN_ROOTS + " 个目录，扫描时会合并扫描。" + (roots.isEmpty() ? "\n请先添加扫描目录。" : ""));
+if (roots.isEmpty()) {
+TextView empty = new TextView(this);
+empty.setText("暂无扫描目录");
+empty.setTextColor(getColorCompat(R.color.yh_text_muted));
+empty.setTextSize(12);
+empty.setGravity(android.view.Gravity.CENTER);
+empty.setBackgroundResource(R.drawable.bg_input);
+container.addView(empty, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+return;
+}
+for (int i = 0; i < roots.size(); i++) {
+final int index = i;
+LinearLayout card = scanRootCard(roots.get(i), index, () -> refreshScanRootListUi(container, info));
+LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+lp.setMargins(0, 0, 0, dp(6));
+container.addView(card, lp);
+}
+}
+
+private void openExternalUrl(String url) {
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             startActivity(intent);
@@ -4896,22 +5094,25 @@ private void showScanResults(List<ScanResult> results) {
         d.show();
     }
 
-    private void runLibraryScan(Uri rootUri, boolean showToast) {
-if (rootUri == null) return;
+    private void runLibraryScan(List<String> rootUris, boolean showToast) {
+if (rootUris == null || rootUris.isEmpty()) return;
 if (autoLibraryScanRunning) return;
 autoLibraryScanRunning = true;
 runOnUiThread(() -> setScanLoading(true));
-if (showToast) Toast.makeText(this, "正在扫描，请稍候...", Toast.LENGTH_SHORT).show();
+if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目录，请稍候...", Toast.LENGTH_SHORT).show();
         int scanDepth = prefs == null ? DEFAULT_STARTUP_SCAN_DEPTH : prefs.getInt(KEY_STARTUP_SCAN_DEPTH, DEFAULT_STARTUP_SCAN_DEPTH);
         scanDepth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, scanDepth));
         final int finalScanDepth = scanDepth;
+        final List<String> scanRoots = new ArrayList<>(rootUris);
         AppExecutors.runOnSingle(() -> {
-            List<ScanResult> results;
-            try {
-                results = GameScanner.scan(this, rootUri, finalScanDepth);
-            } catch (Throwable t) {
-                Log.w("YukiHub", "library scan failed", t);
-                results = new ArrayList<>();
+            List<ScanResult> results = new ArrayList<>();
+            for (String root : scanRoots) {
+                if (root == null || root.trim().isEmpty()) continue;
+                try {
+                    results.addAll(GameScanner.scan(this, Uri.parse(root), finalScanDepth));
+                } catch (Throwable t) {
+                    Log.w("YukiHub", "library scan failed root=" + root, t);
+                }
             }
             ScanImportStats stats = importScannedGames(results);
             if (stats.added > 0) AppExecutors.runOnIo(() -> autoMatchVndbForImportedGames(stats.importedGames));
@@ -4919,24 +5120,31 @@ if (showToast) Toast.makeText(this, "正在扫描，请稍候...", Toast.LENGTH_
                 autoLibraryScanRunning = false;
                 setScanLoading(false);
                 loadGames();
-                if (showToast) Toast.makeText(this, "新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
+                if (showToast) Toast.makeText(this, "扫描 " + scanRoots.size() + " 个目录：新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
             });
         });
     }
 
+    private void runLibraryScan(Uri rootUri, boolean showToast) {
+        if (rootUri == null) return;
+        List<String> roots = new ArrayList<>();
+        roots.add(rootUri.toString());
+        runLibraryScan(roots, showToast);
+    }
+
     private void scanLastRootOrChoose() {
-        String last = prefs.getString(KEY_LAST_SCAN_ROOT_URI, null);
-        if (last == null || last.isEmpty()) {
-            scanDirLauncher.launch(null);
+        List<String> roots = getScanRootUris();
+        if (roots.isEmpty()) {
+            launchScanRootPicker(-1);
             return;
         }
-        runLibraryScan(Uri.parse(last), true);
+        runLibraryScan(roots, true);
     }
 
     private void autoScanLastRootIfAvailable() {
-        String last = prefs.getString(KEY_LAST_SCAN_ROOT_URI, null);
-        if (last == null || last.isEmpty()) return;
-        runLibraryScan(Uri.parse(last), false);
+        List<String> roots = getScanRootUris();
+        if (roots.isEmpty()) return;
+        runLibraryScan(roots, false);
     }
 
     private void setScanButtonLoadingState(boolean loading) {
@@ -5072,6 +5280,16 @@ try {
     }
 
     private void launchGame(Game game) {
+        lastStorageProbeResult = null;
+        lastStorageProbeAt = 0L;
+        if (shouldProbeStorageBeforeLaunch(game)) {
+            launchGameWithStorageProbe(game);
+            return;
+        }
+        doLaunchGame(game);
+    }
+
+    private void doLaunchGame(Game game) {
         String emulatorPackage = game.emulatorPackage == null ? "" : game.emulatorPackage.trim();
         if (emulatorPackage.isEmpty() && game.engine == EngineType.KIRIKIRI) emulatorPackage = "internal.krkr";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.ONS) emulatorPackage = "internal.ons";
@@ -5104,13 +5322,381 @@ try {
         }
     }
 
+    private boolean shouldProbeStorageBeforeLaunch(Game game) {
+        if (game == null || game.rootUri == null || game.rootUri.trim().isEmpty()) return false;
+        // If the user explicitly enabled YukiHub/app-private save redirection,
+        // keep the old scoped-save path and do not enable the SAF file fallback hook.
+        if (isScopedSaveEnabledFor(game.engine)) return false;
+        if (game.engine == EngineType.KIRIKIRI) return true;
+        if (game.engine == EngineType.ARTEMIS) return true;
+        return false;
+    }
+
+    private void launchGameWithStorageProbe(Game game) {
+        final Game target = game;
+        final AtomicBoolean launched = new AtomicBoolean(false);
+        Future<?> future = AppExecutors.io().submit(() -> {
+            StorageProbeResult result = probeGameStorage(target);
+            Log.i("YukiStorageProbe", result.toLogLine());
+            runOnUiThread(() -> {
+                if (!launched.compareAndSet(false, true)) return;
+                handleStorageProbeResultBeforeLaunch(target, result);
+            });
+        });
+        AppExecutors.schedule(() -> runOnUiThread(() -> {
+            if (!launched.compareAndSet(false, true)) return;
+            Log.w("YukiStorageProbe", "probe timeout after " + STORAGE_PROBE_TIMEOUT_MS + "ms root=" + (target == null ? null : target.rootUri));
+            try { future.cancel(true); } catch (Throwable ignored) { }
+            doLaunchGame(target);
+        }), STORAGE_PROBE_TIMEOUT_MS);
+    }
+
+    private void handleStorageProbeResultBeforeLaunch(Game game, StorageProbeResult result) {
+        lastStorageProbeResult = result;
+        lastStorageProbeAt = System.currentTimeMillis();
+        if (game == null) return;
+        if (result != null && result.rawResolved && !result.rawWriteOk) {
+            boolean scopedEnabled = isScopedSaveEnabledFor(game.engine);
+            boolean safCanHandle = canUseKrSafFileFallback(game, result);
+            String engine = game.engine == null ? "引擎" : game.engine.getDisplayName();
+            Log.w("YukiStorageProbe", "raw write unavailable for " + engine + ", scopedSaveEnabled=" + scopedEnabled + ", safCanHandle=" + safCanHandle + ", rawPath=" + result.rawPath + ", err=" + result.writeError + ", safErr=" + result.safError);
+            if (!scopedEnabled && !safCanHandle) {
+                Toast.makeText(this, "检测到游戏目录可能无法写入，若闪退或无法存档，请在设置中开启" + engine + "独立存档目录。", Toast.LENGTH_LONG).show();
+            }
+        }
+        if (result != null && result.rawResolved && !result.rawReadOk) {
+            Log.w("YukiStorageProbe", "raw read unavailable rawPath=" + result.rawPath + ", err=" + result.readError + ", safErr=" + result.safError);
+        }
+        doLaunchGame(game);
+    }
+
+    private boolean isScopedSaveEnabledFor(EngineType engine) {
+        if (prefs == null || engine == null) return false;
+        if (engine == EngineType.KIRIKIRI) return prefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false);
+        if (engine == EngineType.ARTEMIS) return prefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false);
+        return false;
+    }
+
+    private boolean shouldUseKrSafFileFallback(Game game) {
+        return canUseKrSafFileFallback(game, lastStorageProbeResult)
+                && System.currentTimeMillis() - lastStorageProbeAt <= 5000L;
+    }
+
+    private boolean canUseKrSafFileFallback(Game game, StorageProbeResult r) {
+        if (game == null || game.engine != EngineType.KIRIKIRI) return false;
+        if (isScopedSaveEnabledFor(game.engine)) return false;
+        if (r == null || !r.rawResolved || !r.safWriteOk) return false;
+        boolean readCovered = r.rawReadOk || r.safReadOk;
+        boolean writeCovered = r.rawWriteOk || r.safWriteOk;
+        return readCovered && writeCovered && (!r.rawReadOk || !r.rawWriteOk);
+    }
+
+    private StorageProbeResult probeGameStorage(Game game) {
+        long start = System.currentTimeMillis();
+        StorageProbeResult result = new StorageProbeResult();
+        result.engine = game == null || game.engine == null ? "unknown" : game.engine.name();
+        result.rootUri = game == null ? null : game.rootUri;
+        result.rawPath = fastRawPathFromUri(result.rootUri);
+        result.rawResolved = result.rawPath != null && result.rawPath.startsWith("/");
+        try {
+            File appExternal = getExternalFilesDir(null);
+            result.appPrivateWriteOk = quickWriteProbe(appExternal, ".yukihub_app_probe");
+        } catch (Throwable t) {
+            result.appPrivateError = shortError(t);
+        }
+        if (!result.rawResolved) {
+            result.elapsedMs = System.currentTimeMillis() - start;
+            result.readError = "raw path unavailable";
+            return result;
+        }
+        File root = new File(result.rawPath);
+        try {
+            result.rawExists = root.exists();
+            result.rawIsDirectory = root.isDirectory();
+            if (result.rawIsDirectory) {
+                String[] names = root.list();
+                result.rawReadOk = names != null;
+            } else {
+                result.rawReadOk = root.isFile() && root.canRead();
+            }
+        } catch (Throwable t) {
+            result.readError = shortError(t);
+        }
+        if (!result.rawReadOk && result.readError == null) result.readError = "list/canRead failed";
+        try {
+            File writeDir = root.isDirectory() ? root : root.getParentFile();
+            result.rawWriteOk = quickWriteProbe(writeDir, ".yukihub_write_probe");
+        } catch (Throwable t) {
+            result.writeError = shortError(t);
+        }
+        if (!result.rawWriteOk && result.writeError == null) result.writeError = "create/write/delete failed";
+        if (!result.rawReadOk || !result.rawWriteOk) probeSafWriteFallback(result);
+        result.elapsedMs = System.currentTimeMillis() - start;
+        return result;
+    }
+
+    private void probeSafWriteFallback(StorageProbeResult result) {
+        if (result == null || !result.rawResolved || result.rawPath == null || result.rawPath.trim().isEmpty()) return;
+        result.safCandidate = result.rawPath.startsWith("/storage/") || result.rawPath.startsWith("/sdcard");
+        if (!result.safCandidate) return;
+        try {
+            SafPath safPath = toSafPath(result.rawPath);
+            if (safPath == null || safPath.volume == null || safPath.rel == null) {
+                result.safError = "raw path cannot map to SAF doc id";
+                return;
+            }
+            ContentResolver resolver = getContentResolver();
+            if (resolver == null) {
+                result.safError = "content resolver unavailable";
+                return;
+            }
+            for (UriPermission perm : resolver.getPersistedUriPermissions()) {
+                if (perm == null || perm.getUri() == null) continue;
+                String treeId;
+                try { treeId = DocumentsContract.getTreeDocumentId(perm.getUri()); } catch (Throwable ignored) { continue; }
+                if (treeId == null) continue;
+                String decodedTreeId = Uri.decode(treeId);
+                if (decodedTreeId == null || !decodedTreeId.startsWith(safPath.volume + ":")) continue;
+                String treeRel = decodedTreeId.substring((safPath.volume + ":").length());
+                if (!treeRel.isEmpty() && !safPath.rel.equals(treeRel) && !safPath.rel.startsWith(treeRel + "/")) continue;
+                result.safTreeCoversPath = true;
+                result.safReadOk = perm.isReadPermission();
+                boolean safTargetIsDirectory = result.rawIsDirectory || isSafTargetDirectory(perm.getUri(), decodedTreeId, safPath);
+                if (!perm.isWritePermission()) {
+                    result.safError = "persisted SAF tree is read-only";
+                    return;
+                }
+                Uri probeUri = createSafProbeDocument(resolver, perm.getUri(), decodedTreeId, safPath, safTargetIsDirectory, ".yukihub_saf_probe_" + android.os.Process.myPid() + "_" + System.nanoTime() + ".tmp");
+                if (probeUri == null) {
+                    result.safError = "create SAF probe failed";
+                    return;
+                }
+                try (OutputStream out = resolver.openOutputStream(probeUri, "wt")) {
+                    if (out == null) {
+                        result.safError = "open SAF probe output failed";
+                        return;
+                    }
+                    out.write(new byte[]{'Y', 'H'});
+                    out.flush();
+                } finally {
+                    try { DocumentsContract.deleteDocument(resolver, probeUri); } catch (Throwable ignored) { }
+                }
+                result.safWriteOk = true;
+                result.safError = null;
+                return;
+            }
+            result.safError = "no persisted SAF tree covers raw path";
+        } catch (Throwable t) {
+            result.safError = shortError(t);
+        }
+    }
+
+    private SafPath toSafPath(String path) {
+        if (path == null) return null;
+        String p = path.trim();
+        if (p.startsWith("file://")) p = p.substring("file://".length());
+        while (p.contains("//")) p = p.replace("//", "/");
+        String volume;
+        String rel;
+        if (p.startsWith("/storage/emulated/0/")) {
+            volume = "primary";
+            rel = p.substring("/storage/emulated/0/".length());
+        } else if ("/storage/emulated/0".equals(p)) {
+            volume = "primary";
+            rel = "";
+        } else if (p.startsWith("/sdcard/")) {
+            volume = "primary";
+            rel = p.substring("/sdcard/".length());
+        } else if ("/sdcard".equals(p)) {
+            volume = "primary";
+            rel = "";
+        } else if (p.startsWith("/storage/")) {
+            String rest = p.substring("/storage/".length());
+            int slash = rest.indexOf('/');
+            if (slash <= 0) return null;
+            volume = rest.substring(0, slash);
+            rel = rest.substring(slash + 1);
+        } else {
+            return null;
+        }
+        if (volume == null || volume.isEmpty() || rel == null) return null;
+        return new SafPath(volume, rel);
+    }
+
+    private boolean isSafTargetDirectory(Uri tree, String decodedTreeId, SafPath safPath) {
+        try {
+            if (tree == null || safPath == null) return false;
+            DocumentFile current = DocumentFile.fromTreeUri(this, tree);
+            if (current == null) return false;
+            String treePrefix = safPath.volume + ":";
+            String localRel = safPath.rel;
+            String treeRel = decodedTreeId != null && decodedTreeId.startsWith(treePrefix) ? decodedTreeId.substring(treePrefix.length()) : "";
+            if (!treeRel.isEmpty()) {
+                if (localRel.equals(treeRel)) localRel = "";
+                else if (localRel.startsWith(treeRel + "/")) localRel = localRel.substring(treeRel.length() + 1);
+            }
+            if (localRel == null || localRel.isEmpty()) return current.isDirectory();
+            String[] parts = localRel.split("/");
+            for (String part : parts) {
+                if (part == null || part.isEmpty() || ".".equals(part)) continue;
+                current = current.findFile(part);
+                if (current == null) return false;
+            }
+            return current.isDirectory();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private Uri createSafProbeDocument(ContentResolver resolver, Uri tree, String decodedTreeId, SafPath safPath, boolean rawIsDirectory, String probeName) {
+        try {
+            if (resolver == null || tree == null || safPath == null || probeName == null || probeName.trim().isEmpty()) return null;
+            DocumentFile dir = DocumentFile.fromTreeUri(this, tree);
+            if (dir == null) return null;
+            String treePrefix = safPath.volume + ":";
+            String localRel = safPath.rel;
+            String treeRel = decodedTreeId != null && decodedTreeId.startsWith(treePrefix) ? decodedTreeId.substring(treePrefix.length()) : "";
+            if (!treeRel.isEmpty()) {
+                if (localRel.equals(treeRel)) localRel = "";
+                else if (localRel.startsWith(treeRel + "/")) localRel = localRel.substring(treeRel.length() + 1);
+            }
+            String[] parts = localRel.split("/");
+            DocumentFile current = dir;
+            int end = rawIsDirectory ? parts.length : Math.max(0, parts.length - 1);
+            for (int i = 0; i < end; i++) {
+                String part = parts[i];
+                if (part == null || part.isEmpty() || ".".equals(part)) continue;
+                DocumentFile child = current.findFile(part);
+                if (child == null) child = current.createDirectory(part);
+                if (child == null || !child.isDirectory()) return null;
+                current = child;
+            }
+            DocumentFile existing = current.findFile(probeName);
+            if (existing != null) {
+                try { existing.delete(); } catch (Throwable ignored) { }
+            }
+            DocumentFile probe = current.createFile("application/octet-stream", probeName);
+            return probe == null ? null : probe.getUri();
+        } catch (Throwable t) {
+            Log.w("YukiStorageProbe", "create SAF probe failed", t);
+            return null;
+        }
+    }
+
+    private static class SafPath {
+        final String volume;
+        final String rel;
+        SafPath(String volume, String rel) {
+            this.volume = volume;
+            this.rel = rel;
+        }
+    }
+
+    private boolean quickWriteProbe(File dir, String prefix) throws Exception {
+        if (dir == null || !dir.isDirectory()) return false;
+        File probe = new File(dir, prefix + "_" + android.os.Process.myPid() + "_" + System.nanoTime() + ".tmp");
+        boolean ok = false;
+        try (FileOutputStream out = new FileOutputStream(probe, false)) {
+            out.write(new byte[]{'Y', 'H'});
+            out.flush();
+            ok = probe.isFile() && probe.length() >= 2;
+        } finally {
+            if (probe.exists() && !probe.delete()) Log.w("YukiStorageProbe", "probe delete failed " + probe.getAbsolutePath());
+        }
+        return ok;
+    }
+
+    private String fastRawPathFromUri(String value) {
+        if (value == null || value.trim().isEmpty()) return value;
+        String s = value.trim();
+        if (s.startsWith("file://")) {
+            try { return Uri.parse(s).getPath(); } catch (Throwable ignored) { return s.substring("file://".length()); }
+        }
+        if (s.startsWith("/")) return s;
+        try {
+            Uri uri = Uri.parse(s);
+            String docId = null;
+            String path = uri.getPath();
+            if (path != null && path.contains("/document/")) {
+                try { docId = DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
+            }
+            if (docId == null || docId.isEmpty()) {
+                try { docId = DocumentsContract.getTreeDocumentId(uri); } catch (Throwable ignored) { }
+            }
+            if (docId == null || docId.isEmpty()) {
+                try { docId = DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
+            }
+            if (docId != null && !docId.isEmpty()) {
+                int colon = docId.indexOf(':');
+                String volume = colon >= 0 ? docId.substring(0, colon) : docId;
+                String rel = colon >= 0 ? docId.substring(colon + 1) : "";
+                if ("primary".equalsIgnoreCase(volume)) return rel.isEmpty() ? "/storage/emulated/0" : "/storage/emulated/0/" + rel;
+                if (volume != null && !volume.isEmpty()) return rel.isEmpty() ? "/storage/" + volume : "/storage/" + volume + "/" + rel;
+            }
+            String p = uri.getPath();
+            return p == null ? s : p;
+        } catch (Throwable t) {
+            return s;
+        }
+    }
+
+    private String shortError(Throwable t) {
+        if (t == null) return null;
+        String msg = t.getMessage();
+        String name = t.getClass().getSimpleName();
+        return msg == null || msg.trim().isEmpty() ? name : name + ": " + msg;
+    }
+
+    private static class StorageProbeResult {
+        String engine;
+        String rootUri;
+        String rawPath;
+        boolean rawResolved;
+        boolean rawExists;
+        boolean rawIsDirectory;
+        boolean rawReadOk;
+        boolean rawWriteOk;
+        boolean safCandidate;
+        boolean safTreeCoversPath;
+        boolean safReadOk;
+        boolean safWriteOk;
+        boolean appPrivateWriteOk;
+        String readError;
+        String writeError;
+        String safError;
+        String appPrivateError;
+        long elapsedMs;
+
+        String toLogLine() {
+            return "engine=" + engine
+                    + " rawResolved=" + rawResolved
+                    + " rawExists=" + rawExists
+                    + " rawDir=" + rawIsDirectory
+                    + " rawReadOk=" + rawReadOk
+                    + " rawWriteOk=" + rawWriteOk
+                    + " safCandidate=" + safCandidate
+                    + " safCovers=" + safTreeCoversPath
+                    + " safReadOk=" + safReadOk
+                    + " safWriteOk=" + safWriteOk
+                    + " appPrivateWriteOk=" + appPrivateWriteOk
+                    + " elapsedMs=" + elapsedMs
+                    + " rawPath=" + rawPath
+                    + " readErr=" + readError
+                    + " writeErr=" + writeError
+                    + " safErr=" + safError
+                    + " appErr=" + appPrivateError;
+        }
+    }
+
     private boolean launchGameInternal(Game game, String emulatorPackage, String launchTarget) {
         if (game == null || emulatorPackage == null || emulatorPackage.trim().isEmpty()) return false;
         String pkg = emulatorPackage.trim();
         if (pkg.startsWith("internal.krkr") || pkg.equals("org.tvp.kirikiri2.internal")) {
 boolean compatMode = prefs != null && prefs.getBoolean(KEY_KR_COMPAT_MODE, false);
 String krEngineVersion = prefs == null ? "auto" : prefs.getString(KEY_KR_ENGINE_VERSION, "auto");
-return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.rootUri, launchTarget, false, compatMode, krEngineVersion));
+boolean safFileFallback = shouldUseKrSafFileFallback(game);
+if (safFileFallback) Log.i("YukiStorageProbe", "enable KR SAF file fallback for root=" + game.rootUri);
+return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.rootUri, launchTarget, false, compatMode, krEngineVersion, safFileFallback));
 }
         if (pkg.startsWith("internal.tyrano") || pkg.equals("com.yuki.yukihub.tyrano")) {
             return startActivitySafely(EmulatorLauncher.buildInternalTyranoIntent(this, game.rootUri, launchTarget));
