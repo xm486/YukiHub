@@ -55,9 +55,13 @@ public class GameRepository {
     public boolean existsByRootUri(String rootUri) {
         if (rootUri == null || rootUri.trim().isEmpty()) return false;
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id FROM games WHERE root_uri=? LIMIT 1", new String[]{rootUri});
+        String key = normalizeRootUriKey(rootUri);
+        Cursor c = db.rawQuery("SELECT root_uri FROM games WHERE root_uri IS NOT NULL AND root_uri != ''", null);
         try {
-            return c.moveToFirst();
+            while (c.moveToNext()) {
+                if (key.equals(normalizeRootUriKey(c.getString(0)))) return true;
+            }
+            return false;
         } finally {
             c.close();
         }
@@ -69,6 +73,18 @@ public class GameRepository {
         Cursor c = db.rawQuery("SELECT root_uri FROM games WHERE root_uri IS NOT NULL AND root_uri != ''", null);
         try {
             while (c.moveToNext()) set.add(c.getString(0));
+        } finally {
+            c.close();
+        }
+        return set;
+    }
+
+    public Set<String> getRootUriKeySet() {
+        Set<String> set = new HashSet<>();
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT root_uri FROM games WHERE root_uri IS NOT NULL AND root_uri != ''", null);
+        try {
+            while (c.moveToNext()) set.add(normalizeRootUriKey(c.getString(0)));
         } finally {
             c.close();
         }
@@ -518,10 +534,14 @@ g.description = o.optString("description", g.description);
     private Game findByRootUri(String rootUri) {
         if (rootUri == null || rootUri.trim().isEmpty()) return null;
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor c = db.query("games", null, "root_uri=?", new String[]{rootUri}, null, null, null, "1");
+        String key = normalizeRootUriKey(rootUri);
+        Cursor c = db.query("games", null, "root_uri IS NOT NULL AND root_uri != ''", null, null, null, null);
         try {
-            if (!c.moveToFirst()) return null;
-            return fromCursor(c);
+            while (c.moveToNext()) {
+                Game g = fromCursor(c);
+                if (key.equals(normalizeRootUriKey(g.rootUri))) return g;
+            }
+            return null;
         } finally {
             c.close();
         }
@@ -685,5 +705,25 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    public static String normalizeRootUriKey(String value) {
+        if (value == null) return "";
+        String s = value.trim();
+        if (s.startsWith("file://")) s = s.substring("file://".length());
+        try {
+            if (s.startsWith("content://")) {
+                android.net.Uri uri = android.net.Uri.parse(s);
+                String docId = null;
+                try { docId = android.provider.DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
+                if (docId == null || docId.isEmpty()) {
+                    try { docId = android.provider.DocumentsContract.getTreeDocumentId(uri); } catch (Throwable ignored) { }
+                }
+                if (docId != null && !docId.isEmpty()) s = android.net.Uri.decode(docId);
+            }
+        } catch (Throwable ignored) { }
+        while (s.contains("//")) s = s.replace("//", "/");
+        while (s.endsWith("/") && s.length() > 1) s = s.substring(0, s.length() - 1);
+        return s.toLowerCase(java.util.Locale.ROOT);
     }
 }

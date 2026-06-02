@@ -41,7 +41,7 @@ public class KR2Activity extends Cocos2dxActivity {
 
     public static boolean CreateFolders(String path) {
         try {
-            File f = new File(redirectScopedSavePath(path));
+            File f = new File(canonicalizeKrStoragePath(redirectScopedSavePath(path)));
             boolean ok = f.exists() || f.mkdirs();
             if (!ok && isSafFallbackEnabled()) ok = NativeBridge.createDirectoryViaSafIfPossible(path);
             android.util.Log.i("KR2Activity", "CreateFolders " + path + " -> " + f.getAbsolutePath() + " ok=" + ok);
@@ -53,12 +53,12 @@ public class KR2Activity extends Cocos2dxActivity {
 
     public static boolean DeleteFile(String path) {
         try {
-            File mapped = new File(redirectScopedSavePath(path));
-            File original = new File(normalizeKrFilePath(path));
+            File mapped = new File(canonicalizeKrStoragePath(redirectScopedSavePath(path)));
+            File original = new File(canonicalizeKrStoragePath(path));
             boolean existed = mapped.exists() || original.exists();
             boolean ok = true;
             if (mapped.exists()) ok = mapped.delete();
-            if (original.exists()) ok = original.delete() && ok;
+            if (!sameFilePath(mapped, original) && original.exists()) ok = original.delete() && ok;
             if (!existed) ok = true;
             if ((!ok || !existed) && isSafFallbackEnabled()) ok = NativeBridge.deleteViaSafIfPossible(path) || ok;
             android.util.Log.i("KR2Activity", "DeleteFile " + path + " mapped=" + mapped.getAbsolutePath() + " original=" + original.getAbsolutePath() + " existed=" + existed + " ok=" + ok);
@@ -66,11 +66,16 @@ public class KR2Activity extends Cocos2dxActivity {
         } catch (Throwable t) { return false; }
     }
 
+    @Override
+    public boolean deleteFile(String path) { return DeleteFile(path); }
+
+    public static boolean removeFile(String path) { return DeleteFile(path); }
+
     public static boolean RenameFile(String from, String to) {
         try {
-            File mappedSrc = new File(redirectScopedSavePath(from));
-            File originalSrc = new File(normalizeKrFilePath(from));
-            File dst = new File(redirectScopedSavePath(to));
+            File mappedSrc = new File(canonicalizeKrStoragePath(redirectScopedSavePath(from)));
+            File originalSrc = new File(canonicalizeKrStoragePath(from));
+            File dst = new File(canonicalizeKrStoragePath(redirectScopedSavePath(to)));
             File parent = dst.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
             File src = mappedSrc.exists() ? mappedSrc : originalSrc;
@@ -94,7 +99,7 @@ public class KR2Activity extends Cocos2dxActivity {
 
     public static boolean WriteFile(String path, byte[] data) {
         try {
-            String mapped = redirectScopedSavePath(path);
+            String mapped = canonicalizeKrStoragePath(redirectScopedSavePath(path));
             File f = new File(mapped);
             File parent = f.getParentFile();
             if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
@@ -218,6 +223,15 @@ public class KR2Activity extends Cocos2dxActivity {
         }
     }
 
+    private static boolean sameFilePath(File a, File b) {
+        try {
+            if (a == null || b == null) return false;
+            return a.getAbsolutePath().equals(b.getAbsolutePath());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static String normalizeKrFilePath(String path) {
         if (path == null) return "";
         String p = path.trim();
@@ -226,6 +240,42 @@ public class KR2Activity extends Cocos2dxActivity {
         if (p.startsWith("storage/")) p = "/" + p;
         while (p.contains("//")) p = p.replace("//", "/");
         return p;
+    }
+
+    private static String canonicalizeKrStoragePath(String path) {
+        String p = normalizeKrFilePath(path);
+        try {
+            if (sInstance == null || p == null || !p.startsWith("/")) return p;
+            File appExternal = sInstance.getExternalFilesDir(null);
+            if (appExternal != null) p = replacePrefixIgnoreCase(p, appExternal.getAbsolutePath());
+            Intent intent = sInstance.getIntent();
+            if (intent != null) {
+                p = replacePrefixIgnoreCase(p, normalizeKrFilePath(intent.getStringExtra("projectRoot")));
+                p = replacePrefixIgnoreCase(p, normalizeKrFilePath(intent.getStringExtra("gamedir")));
+                p = replacePrefixIgnoreCase(p, normalizeKrFilePath(intent.getStringExtra("rootUri")));
+                String gamePath = normalizeKrFilePath(intent.getStringExtra("gamePath"));
+                if (gamePath != null && !gamePath.isEmpty()) {
+                    File game = new File(gamePath);
+                    File root = game.isFile() ? game.getParentFile() : game;
+                    if (root != null) p = replacePrefixIgnoreCase(p, root.getAbsolutePath());
+                }
+            }
+        } catch (Throwable ignored) { }
+        return p;
+    }
+
+    private static String replacePrefixIgnoreCase(String path, String prefix) {
+        if (path == null || prefix == null) return path;
+        String clean = normalizeKrFilePath(prefix);
+        if (clean == null || clean.length() <= 1 || !clean.startsWith("/")) return path;
+        while (clean.endsWith("/") && clean.length() > 1) clean = clean.substring(0, clean.length() - 1);
+        if (path.length() == clean.length() && path.regionMatches(true, 0, clean, 0, clean.length())) return clean;
+        if (path.length() > clean.length()
+                && path.regionMatches(true, 0, clean, 0, clean.length())
+                && path.charAt(clean.length()) == '/') {
+            return clean + path.substring(clean.length());
+        }
+        return path;
     }
 
     private static boolean isSafFallbackEnabled() {

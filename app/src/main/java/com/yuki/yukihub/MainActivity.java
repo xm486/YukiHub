@@ -13,6 +13,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.LauncherApps;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -4026,26 +4027,8 @@ private void showDetailDialog(Game game) {
             dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.74f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
         }
 
-        AppExecutors.runOnSingle(() -> {
-            List<AppPickItem> items = new ArrayList<>();
-            try {
-                PackageManager pm = getPackageManager();
-                List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
-                for (ApplicationInfo app : apps) {
-                    if (app == null || app.packageName == null) continue;
-                    Intent launchIntent = pm.getLaunchIntentForPackage(app.packageName);
-                    if (launchIntent == null) continue;
-                    String label;
-                    try { label = String.valueOf(pm.getApplicationLabel(app)); }
-                    catch (Throwable ignored) { label = app.packageName; }
-                    Drawable icon = null;
-                    try { icon = pm.getApplicationIcon(app); } catch (Throwable ignored) { }
-                    items.add(new AppPickItem(label, app.packageName, icon));
-                }
-                items.sort((a, b) -> a.label.compareToIgnoreCase(b.label));
-            } catch (Throwable t) {
-                Log.w("YukiHub", "load installed apps failed", t);
-            }
+        AppExecutors.runOnIo(() -> {
+            List<AppPickItem> items = loadLaunchableAppsForPicker();
             runOnUiThread(() -> {
                 if (!dialog.isShowing()) return;
                 loading.setVisibility(View.GONE);
@@ -4075,6 +4058,45 @@ private void showDetailDialog(Game game) {
     }
 
     private interface AppPickCallback { void onPick(AppPickItem item); }
+
+    private List<AppPickItem> loadLaunchableAppsForPicker() {
+        LinkedHashMap<String, AppPickItem> map = new LinkedHashMap<>();
+        try {
+            PackageManager pm = getPackageManager();
+            Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> launchers = pm.queryIntentActivities(launcher, 0);
+            if (launchers != null) {
+                for (ResolveInfo ri : launchers) {
+                    if (ri == null || ri.activityInfo == null || ri.activityInfo.packageName == null) continue;
+                    addAppPickItem(map, pm, ri.activityInfo.applicationInfo);
+                }
+            }
+            List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            if (apps != null) {
+                for (ApplicationInfo app : apps) {
+                    if (app == null || app.packageName == null) continue;
+                    if (pm.getLaunchIntentForPackage(app.packageName) != null) addAppPickItem(map, pm, app);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w("YukiHub", "load launchable apps failed", t);
+        }
+        List<AppPickItem> items = new ArrayList<>(map.values());
+        items.sort((a, b) -> a.label.compareToIgnoreCase(b.label));
+        return items;
+    }
+
+    private void addAppPickItem(Map<String, AppPickItem> map, PackageManager pm, ApplicationInfo app) {
+        if (map == null || pm == null || app == null || app.packageName == null) return;
+        String key = app.packageName;
+        if (map.containsKey(key)) return;
+        String label;
+        try { label = String.valueOf(pm.getApplicationLabel(app)); }
+        catch (Throwable ignored) { label = app.packageName; }
+        Drawable icon = null;
+        try { icon = pm.getApplicationIcon(app); } catch (Throwable ignored) { }
+        map.put(key, new AppPickItem(label, app.packageName, icon));
+    }
 
     private static class AppPickItem {
         final String label;
@@ -5230,10 +5252,11 @@ try {
     private ScanImportStats importScannedGames(List<ScanResult> results) {
         ScanImportStats stats = new ScanImportStats();
         if (results == null || results.isEmpty()) return stats;
-        Set<String> existing = repository.getRootUriSet();
+        Set<String> existing = repository.getRootUriKeySet();
         for (ScanResult r : results) {
             if (r == null || r.uri == null || r.uri.trim().isEmpty()) continue;
-            if (existing.contains(r.uri)) {
+            String rootKey = GameRepository.normalizeRootUriKey(r.uri);
+            if (existing.contains(rootKey)) {
                 stats.skipped++;
                 continue;
             }
@@ -5263,7 +5286,7 @@ try {
             long newId = repository.insertIfNotExists(g);
             if (newId > 0) {
                 g.id = newId;
-                existing.add(r.uri);
+                existing.add(rootKey);
                 stats.added++;
                 stats.importedGames.add(g);
             } else {
@@ -5385,10 +5408,8 @@ try {
     private boolean canUseKrSafFileFallback(Game game, StorageProbeResult r) {
         if (game == null || game.engine != EngineType.KIRIKIRI) return false;
         if (isScopedSaveEnabledFor(game.engine)) return false;
-        if (r == null || !r.rawResolved || !r.safWriteOk) return false;
-        boolean readCovered = r.rawReadOk || r.safReadOk;
-        boolean writeCovered = r.rawWriteOk || r.safWriteOk;
-        return readCovered && writeCovered && (!r.rawReadOk || !r.rawWriteOk);
+        if (r == null || !r.rawResolved || !r.safTreeCoversPath || !r.safWriteOk) return false;
+        return r.rawReadOk || r.safReadOk;
     }
 
     private StorageProbeResult probeGameStorage(Game game) {
@@ -5430,7 +5451,11 @@ try {
             result.writeError = shortError(t);
         }
         if (!result.rawWriteOk && result.writeError == null) result.writeError = "create/write/delete failed";
-        if (!result.rawReadOk || !result.rawWriteOk) probeSafWriteFallback(result);
+        if (game != null && game.engine == EngineType.KIRIKIRI) {
+            probeSafWriteFallback(result);
+        } else if (!result.rawReadOk || !result.rawWriteOk) {
+            probeSafWriteFallback(result);
+        }
         result.elapsedMs = System.currentTimeMillis() - start;
         return result;
     }

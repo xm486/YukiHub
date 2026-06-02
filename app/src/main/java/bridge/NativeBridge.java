@@ -31,7 +31,7 @@ public final class NativeBridge {
     public static native boolean write(String path, byte[] data);
 
     public static synchronized int open(String path, int mode) {
-        String normalized = normalizeFilePath(path);
+        String normalized = canonicalizeKrStoragePath(normalizeFilePath(path));
         String redirected = redirectKrScopedSavePath(normalized, mode);
         if (redirected != null) normalized = redirected;
         String javaMode;
@@ -49,8 +49,10 @@ public final class NativeBridge {
             Log.i("NativeBridge", "open " + fd + " " + javaMode + " " + path);
             return fd;
         } catch (Throwable directError) {
-            int safFd = openViaSaf(normalized, mode, directError);
-            if (safFd >= 0) return safFd;
+            if (isSafFallbackEnabled()) {
+                int safFd = openViaSaf(normalized, mode, directError);
+                if (safFd >= 0) return safFd;
+            }
             Log.e("NativeBridge", "open failed mode=" + mode + " path=" + path, directError);
             return -1;
         }
@@ -90,6 +92,17 @@ public final class NativeBridge {
         }
     }
 
+    private static boolean isSafFallbackEnabled() {
+        try {
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            android.content.Intent intent = activity == null ? null : activity.getIntent();
+            return intent != null && intent.getBooleanExtra("safFileFallback", false);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static int openViaSaf(String path, int mode, Throwable directError) {
         try {
             Uri uri = storagePathToPersistedDocumentUri(path, mode);
@@ -112,6 +125,7 @@ public final class NativeBridge {
 
     public static boolean writeViaSafIfPossible(String path, byte[] data) {
         try {
+            path = canonicalizeKrStoragePath(path);
             Uri uri = storagePathToPersistedDocumentUri(path, OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_TRUNC);
             if (uri == null) return false;
             KR2Activity activity = KR2Activity.getInstance();
@@ -132,6 +146,7 @@ public final class NativeBridge {
 
     public static boolean createDirectoryViaSafIfPossible(String path) {
         try {
+            path = canonicalizeKrStoragePath(path);
             Uri uri = storagePathToPersistedDocumentUri(path + "/.yukihub_dir_probe", OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_TRUNC);
             if (uri == null) return false;
             KR2Activity activity = KR2Activity.getInstance();
@@ -149,6 +164,7 @@ public final class NativeBridge {
 
     public static boolean deleteViaSafIfPossible(String path) {
         try {
+            path = canonicalizeKrStoragePath(path);
             Uri uri = storagePathToPersistedDocumentUri(path, OsConstants.O_RDONLY);
             if (uri == null) return false;
             KR2Activity activity = KR2Activity.getInstance();
@@ -165,6 +181,7 @@ public final class NativeBridge {
 
     public static boolean existsViaSafIfPossible(String path) {
         try {
+            path = canonicalizeKrStoragePath(path);
             Uri uri = storagePathToPersistedDocumentUri(path, OsConstants.O_RDONLY);
             if (uri == null) return false;
             KR2Activity activity = KR2Activity.getInstance();
@@ -180,6 +197,8 @@ public final class NativeBridge {
 
     public static boolean renameViaSafIfPossible(String from, String to) {
         try {
+            from = canonicalizeKrStoragePath(from);
+            to = canonicalizeKrStoragePath(to);
             Uri src = storagePathToPersistedDocumentUri(from, OsConstants.O_RDONLY);
             if (src == null) return false;
             KR2Activity activity = KR2Activity.getInstance();
@@ -287,7 +306,7 @@ public final class NativeBridge {
                 String part = parts[i];
                 if (part == null || part.isEmpty() || ".".equals(part)) continue;
                 boolean last = i == parts.length - 1;
-                DocumentFile child = current.findFile(part);
+                DocumentFile child = findChildDocument(current, part);
                 if (last) {
                     if (child == null) child = current.createFile(guessMime(part), part);
                     return child == null ? null : child.getUri();
@@ -308,9 +327,66 @@ public final class NativeBridge {
         return "application/octet-stream";
     }
 
+    private static DocumentFile findChildDocument(DocumentFile dir, String name) {
+        if (dir == null || name == null) return null;
+        try {
+            DocumentFile child = dir.findFile(name);
+            if (child != null) return child;
+            DocumentFile[] files = dir.listFiles();
+            if (files == null) return null;
+            for (DocumentFile f : files) {
+                String n = f == null ? null : f.getName();
+                if (n != null && n.equalsIgnoreCase(name)) return f;
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
     private static String normalizeFilePath(String path) {
         if (path == null) return path;
-        if (path.startsWith("file://")) return path.substring("file://".length());
+        String p = path.trim();
+        if (p.startsWith("file://")) p = p.substring("file://".length());
+        while (p.startsWith("./")) p = p.substring(2);
+        if (p.startsWith("storage/")) p = "/" + p;
+        while (p.contains("//")) p = p.replace("//", "/");
+        return p;
+    }
+
+    private static String canonicalizeKrStoragePath(String path) {
+        String p = normalizeFilePath(path);
+        try {
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity == null || p == null || !p.startsWith("/")) return p;
+            File appExternal = activity.getExternalFilesDir(null);
+            if (appExternal != null) p = replacePrefixIgnoreCase(p, appExternal.getAbsolutePath());
+            android.content.Intent intent = activity.getIntent();
+            if (intent != null) {
+                p = replacePrefixIgnoreCase(p, normalizeFilePath(intent.getStringExtra("projectRoot")));
+                p = replacePrefixIgnoreCase(p, normalizeFilePath(intent.getStringExtra("gamedir")));
+                p = replacePrefixIgnoreCase(p, normalizeFilePath(intent.getStringExtra("rootUri")));
+                String gamePath = normalizeFilePath(intent.getStringExtra("gamePath"));
+                if (gamePath != null && !gamePath.isEmpty()) {
+                    File game = new File(gamePath);
+                    File root = game.isFile() ? game.getParentFile() : game;
+                    if (root != null) p = replacePrefixIgnoreCase(p, root.getAbsolutePath());
+                }
+            }
+        } catch (Throwable ignored) { }
+        return p;
+    }
+
+    private static String replacePrefixIgnoreCase(String path, String prefix) {
+        if (path == null || prefix == null) return path;
+        String clean = normalizeFilePath(prefix);
+        if (clean == null || clean.length() <= 1 || !clean.startsWith("/")) return path;
+        while (clean.endsWith("/") && clean.length() > 1) clean = clean.substring(0, clean.length() - 1);
+        if (path.length() == clean.length() && path.regionMatches(true, 0, clean, 0, clean.length())) return clean;
+        if (path.length() > clean.length()
+                && path.regionMatches(true, 0, clean, 0, clean.length())
+                && path.charAt(clean.length()) == '/') {
+            return clean + path.substring(clean.length());
+        }
         return path;
     }
 
