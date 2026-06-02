@@ -64,4 +64,13 @@ final class MetadataUtils {
     static String readAndClose(InputStream is) throws Exception {
         return readAll(is);
     }
+
+    static void sleepBeforeRetry(long delayMs) throws InterruptedException {
+        try {
+            Thread.sleep(Math.max(0L, delayMs));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+    }
 }

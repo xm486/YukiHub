@@ -201,7 +201,7 @@ public class GameScanner {
 
     private static boolean markSeen(Set<String> seenUris, String uri) {
         if (seenUris == null) return true;
-        String key = uri == null ? "" : uri.trim();
+        String key = com.yuki.yukihub.data.GameRepository.normalizeRootUriKey(uri);
         if (key.isEmpty()) return true;
         return seenUris.add(key);
     }

@@ -62,7 +62,7 @@ public class BangumiClient {
                 if (code < 200 || code >= 300) {
                     if (code == 429 || code >= 500) {
                         if (attempt < MAX_RETRIES) {
-                            Thread.sleep(RETRY_DELAY_MS * (attempt + 1));
+                            MetadataUtils.sleepBeforeRetry(RETRY_DELAY_MS * (attempt + 1));
                             continue;
                         }
                         throw new RuntimeException("Bangumi HTTP " + code + ": " + text);
@@ -84,10 +84,7 @@ public class BangumiClient {
                 throw e;
             } catch (Exception e) {
                 if (attempt < MAX_RETRIES) {
-                    try { Thread.sleep(RETRY_DELAY_MS * (attempt + 1)); } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw ie;
-                    }
+                    MetadataUtils.sleepBeforeRetry(RETRY_DELAY_MS * (attempt + 1));
                     continue;
                 }
                 throw e;
