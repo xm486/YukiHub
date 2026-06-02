@@ -66,11 +66,6 @@ public class KR2Activity extends Cocos2dxActivity {
         } catch (Throwable t) { return false; }
     }
 
-    @Override
-    public boolean deleteFile(String path) { return DeleteFile(path); }
-
-    public static boolean removeFile(String path) { return DeleteFile(path); }
-
     public static boolean RenameFile(String from, String to) {
         try {
             File mappedSrc = new File(canonicalizeKrStoragePath(redirectScopedSavePath(from)));
