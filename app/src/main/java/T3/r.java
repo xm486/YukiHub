@@ -179,5 +179,41 @@ public abstract class r extends KR2Activity {
         if (hasFocus || forceFocus) doSetSystemUiVisibility();
     }
 
+    @Override
+    public void onDestroy() {
+        boolean terminateProcess = shouldTerminateProcessAfterDestroy();
+        try {
+            mask = null;
+            if (app == this) app = null;
+        } catch (Throwable ignored) { }
+        super.onDestroy();
+        if (!isChangingConfigurations() && terminateProcess) {
+            Log.i(TAG, "terminate Huawei KR wrapper process after destroy to avoid stale native state");
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
+    }
+
+    private boolean shouldTerminateProcessAfterDestroy() {
+        try {
+            Intent intent = getIntent();
+            if (intent == null) return false;
+            boolean safRoot = false;
+            String rootUri = intent.getStringExtra("rootUri");
+            if (rootUri != null) safRoot = rootUri.trim().toLowerCase(java.util.Locale.ROOT).startsWith("content://");
+            boolean specialLaunch = safRoot
+                    || intent.getBooleanExtra("compatMode", false)
+                    || intent.getBooleanExtra("safFileFallback", false)
+                    || intent.getBooleanExtra("scopedSaveDir", false)
+                    || "1.3.4".equals(intent.getStringExtra("krEngineVersion"));
+            if (!specialLaunch) return false;
+            String brand = String.valueOf(android.os.Build.BRAND).toLowerCase(java.util.Locale.ROOT);
+            String manufacturer = String.valueOf(android.os.Build.MANUFACTURER).toLowerCase(java.util.Locale.ROOT);
+            return brand.contains("huawei") || brand.contains("honor")
+                    || manufacturer.contains("huawei") || manufacturer.contains("honor");
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     public abstract String soName();
 }
