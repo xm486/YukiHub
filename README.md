@@ -10,8 +10,11 @@
   <img src="https://img.shields.io/badge/Status-Open%20Source-7A5CFA" alt="Open Source" />
 </p>
 
+<p align="center">
 [![GitHub release](https://img.shields.io/github/v/release/xm486/YukiHub?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases/latest)
 [![GitHub downloads](https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases)
+[![Download](https://img.shields.io/badge/Download-立即下载-blue?style=for-the-badge&logo=github)](https://yuki.rinne.cyou/)
+</p>
 
 **YukiHub** 是一款面向 Android 平台的Galgame/视觉小说管理与启动工具，适合用于管理本地游戏、安卓应用型，模拟器游戏入口、外部程序快捷方式以及游玩记录。
 
