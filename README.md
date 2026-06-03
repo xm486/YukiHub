@@ -10,6 +10,9 @@
   <img src="https://img.shields.io/badge/Status-Open%20Source-7A5CFA" alt="Open Source" />
 </p>
 
+[![GitHub release](https://img.shields.io/github/v/release/xm486/YukiHub?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases/latest)
+[![GitHub downloads](https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases)
+
 **YukiHub** 是一款面向 Android 平台的Galgame/视觉小说管理与启动工具，适合用于管理本地游戏、安卓应用型，模拟器游戏入口、外部程序快捷方式以及游玩记录。
 
 它的目标是把“游戏库管理、快捷启动、数据同步、使用声明”整合到一个统一的深色界面中。
