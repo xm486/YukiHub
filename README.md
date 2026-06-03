@@ -5,6 +5,10 @@
 </p>
 
 <p align="center">
+  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="GPL-3.0" />
   <img src="https://img.shields.io/badge/Status-Open%20Source-7A5CFA" alt="Open Source" />
@@ -17,9 +21,10 @@
 同时欢迎各位开发者积极构建不同的分支版本，作为移动端的第一个gal前端，还有很多不足，一起加油喵(⌯ᵔᗜᵔ⌯)/
 
 - **下载区**
-[![GitHub release](https://img.shields.io/github/v/release/xm486/YukiHub?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases/latest)
-[![GitHub downloads](https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases)
-[![Download](https://img.shields.io/badge/Download-镜像源下载-blue?style=for-the-badge&logo=github)](https://yuki.rinne.cyou/)
+
+- [![GitHub release](https://img.shields.io/github/v/release/xm486/YukiHub?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases/latest)
+- [![GitHub downloads](https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases)
+- [![Download](https://img.shields.io/badge/Download-镜像源下载-blue?style=for-the-badge&logo=github)](https://yuki.rinne.cyou/)
 
 > 本项目采用 **GPL-3.0** 开源协议。
 
