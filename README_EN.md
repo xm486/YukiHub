@@ -11,7 +11,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="GPL-3.0" />
-  <img src="https://img.shields.io/badge/Status-Open%20Source-7A5CFA" alt="Open Source" />
+  <a href="https://github.com/xm486/YukiHub/releases">
+    <img src="https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github" alt="downloads">
+  </a>
 </p>
 
 **YukiHub** is a Galgame / visual novel management and launcher tool for Android. It is suitable for managing local games, Android app-style games, emulator game entries, external program shortcuts, and play records.
@@ -19,14 +21,6 @@
 Its goal is to integrate "game library management, quick launch, data synchronization, and usage statements" into a unified dark interface.
 
 Developers are also welcome to actively build different branch versions. As the first mobile Gal frontend, there are still many shortcomings. Let's keep improving it together meow (⌯ᵔᗜᵔ⌯)/
-
-- **Download Area**
-
-[![GitHub release](https://img.shields.io/github/v/release/xm486/YukiHub?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases/latest)
-
-[![GitHub downloads](https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github)](https://github.com/xm486/YukiHub/releases)
-
-[![Download](https://img.shields.io/badge/Download-Mirror-blue?style=for-the-badge&logo=github)](https://yuki.rinne.cyou/)
 
 > This project is open-sourced under the **GPL-3.0** license.
 
@@ -137,9 +131,6 @@ For empty-directory entries, title matching is prioritized.
   <a href="https://b23.tv/Qixj22k">
     <img src="https://img.shields.io/badge/Bilibili-Watch%20Tutorial-00A1D6?logo=bilibili&logoColor=white" alt="Bilibili Tutorial" />
   </a>
-  <a href="https://1822484704.share.123pan.cn/123pan/OsyJjv-wI1lh?pwd=8elD#">
-    <img src="https://img.shields.io/badge/123pan-Modified%20Emulator%20Download-2B7FFF" alt="123pan" />
-  </a>
   <a href="https://github.com/xm486/YukiHub/releases/tag/v0.1.0">
   <img src="https://img.shields.io/badge/Modified%20Emulator-Direct%20Download-181717?logo=github&logoColor=blue" alt="GitHub Download" />
 </a>
@@ -148,8 +139,6 @@ For empty-directory entries, title matching is prioritized.
 - Notes:
   - The modified Winlator emulator package is based on the modified version by hostei2. `XServerDisplayActivity exported=false` was changed to `android:exported="true"` to expose the Activity for direct launch.
   - G-station games are based on the original version 5.3.5, with MT file extractor injection and Activity exposure. That is, add or change `android:exported="true"` for `android:name="com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity"` in AndroidManifest.
-
-Extraction code: `8elD`
 
 ### Tutorial for using WebDAV data cloud synchronization
 
