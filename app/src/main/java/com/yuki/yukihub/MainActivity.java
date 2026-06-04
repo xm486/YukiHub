@@ -3623,8 +3623,9 @@ private void showDetailDialog(Game game) {
                     if (items.isEmpty()) {
                         new AlertDialog.Builder(this)
                                 .setTitle("导入快捷方式")
-                                .setMessage("没有读取到可用的 GameHub 快捷方式。\n\n请确认：1）Shizuku 正在运行并已授权；2）GameHub 已创建桌面快捷方式；3）补丁包包名为 com.xiaoji.egggamz 或原包 com.xiaoji.egggame。也可以粘贴 shortcut dump 参数导入。")
+                                .setMessage("没有读取到可用的 GameHub 快捷方式。\n\n请确认：1）Shizuku 正在运行并已授权；2）GameHub 已创建桌面快捷方式；3）补丁包包名为 com.xiaoji.egggamz 或原包 com.xiaoji.egggame。\n\n如果是 iQOO/OriginOS 等设备，可点击“复制诊断”把 Shizuku/Shortcut 输出发给开发者排查。也可以粘贴 shortcut dump 参数导入。")
                                 .setPositiveButton("粘贴参数", (x, w) -> showGameHubShortcutTextImport(titleTarget, pkgTarget, gamehubIdTarget))
+                                .setNeutralButton("复制诊断", (x, w) -> copyGameHubShortcutDiagnostics())
                                 .setNegativeButton("知道了", null)
                                 .show();
                         return;
@@ -3774,16 +3775,36 @@ private void showDetailDialog(Game game) {
     private GameHubShortcutItem parseGameHubShortcutText(String text) {
         if (text == null) return null;
         text = text.replace('\0', ' ');
-        String localGameId = matchFirst(text, "localGameId\\s*=\\s*([^,}\\]\\s]+)");
-        if (localGameId == null || localGameId.trim().isEmpty()) localGameId = matchFirst(text, "local_[0-9a-fA-F\\-]{8,}");
-        String steamAppId = matchFirst(text, "steamAppI[dD]\\s*=\\s*([^,}\\]\\s]+)");
+        String localGameId = matchFirst(text, "(?i)\\blocalGameId\\b\\s*[:=]\\s*([^,}\\]\\s]+)");
+        localGameId = cleanGameHubValue(localGameId);
+        if (localGameId == null || localGameId.trim().isEmpty()) localGameId = matchFirst(text, "\\blocal_[0-9a-fA-F\\-]{8,}\\b");
+        localGameId = cleanGameHubValue(localGameId);
+        String steamAppId = matchFirst(text, "(?i)\\bsteamAppI[dD]\\b\\s*[:=]\\s*[^0-9]*([0-9]+)");
+        steamAppId = cleanGameHubValue(steamAppId);
         String storedId = localGameId == null || localGameId.trim().isEmpty() ? null : localGameId.trim();
         if ((storedId == null || storedId.isEmpty()) && steamAppId != null && !steamAppId.trim().isEmpty() && !"0".equals(steamAppId.trim())) storedId = "steam:" + steamAppId.trim();
         if (storedId == null || storedId.trim().isEmpty()) return null;
-        String localAppName = matchFirst(text, "localAppName\\s*=\\s*([^,}\\]]+)");
-        if (localAppName == null || localAppName.trim().isEmpty()) localAppName = matchFirst(text, "gameName\\s*=\\s*([^,}\\]]+)");
+        String localAppName = extractGameHubNameFromText(text);
         if (localAppName == null || localAppName.trim().isEmpty()) localAppName = storedId;
         return new GameHubShortcutItem(localAppName.trim(), localAppName.trim(), storedId.trim());
+    }
+
+    private String extractGameHubNameFromText(String text) {
+        String name = matchFirst(text, "(?i)\\blocalAppName\\b\\s*[:=]\\s*([^,}\\]\\r\\n]+)");
+        if (name == null || name.trim().isEmpty()) name = matchFirst(text, "(?i)\\bgameName\\b\\s*[:=]\\s*([^,}\\]\\r\\n]+)");
+        if (name == null || name.trim().isEmpty()) name = matchFirst(text, "(?i)\\bshortLabel\\b\\s*[:=]\\s*([^,}\\]\\r\\n]+)");
+        if (name == null || name.trim().isEmpty()) name = matchFirst(text, "(?i)\\blabel\\b\\s*[:=]\\s*([^,}\\]\\r\\n]+)");
+        return cleanGameHubValue(name);
+    }
+
+    private String cleanGameHubValue(String value) {
+        if (value == null) return null;
+        String v = value.replace('\0', ' ').trim();
+        while (v.startsWith("\"") || v.startsWith("'") || v.startsWith("[")) v = v.substring(1).trim();
+        while (v.endsWith("\"") || v.endsWith("'") || v.endsWith(",") || v.endsWith("}") || v.endsWith("]")) v = v.substring(0, v.length() - 1).trim();
+        if (v.startsWith("String:")) v = v.substring("String:".length()).trim();
+        if ("null".equalsIgnoreCase(v)) return null;
+        return v;
     }
 
     private String matchFirst(String text, String regex) {
@@ -3854,31 +3875,105 @@ private void showDetailDialog(Game game) {
         List<GameHubShortcutItem> items = new ArrayList<>();
         try {
             if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) return items;
-            String cmd = "cmd shortcut get-shortcuts --user 0 --flags 31 com.xiaoji.egggamz; cmd shortcut get-shortcuts --user 0 --flags 31 com.xiaoji.egggame";
-            Process p = null;
-            try {
-                Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
-                m.setAccessible(true);
-                p = (Process) m.invoke(null, new Object[]{new String[]{"/system/bin/sh", "-c", cmd}, null, null});
-            } catch (Throwable reflectError) {
-                throw new RuntimeException("Shizuku newProcess unavailable", reflectError);
-            }
-            String out = readProcessStream(p.getInputStream()) + "\n" + readProcessStream(p.getErrorStream());
-            try { p.waitFor(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            String out = runGameHubShizukuCommand(buildGameHubShortcutDumpCommand(false));
             java.util.HashSet<String> seen = new java.util.HashSet<>();
-            String[] lines = out.split("\\r?\\n");
-            for (String line : lines) {
-                if (line == null || (!line.contains("localGameId") && !line.contains("local_") && !line.contains("steamAppId") && !line.contains("steamAppid"))) continue;
-                GameHubShortcutItem item = parseGameHubShortcutText(line);
-                if (item == null || item.localGameId == null || item.localGameId.isEmpty() || seen.contains(item.localGameId)) continue;
-                seen.add(item.localGameId);
-                items.add(item);
-            }
+            addGameHubShortcutItemsFromText(out, items, seen);
             items.sort((a, b) -> a.displayLabel.compareToIgnoreCase(b.displayLabel));
         } catch (Throwable t) {
             Log.w("YukiHub", "loadGameHubShortcutsFromShizuku failed", t);
         }
         return items;
+    }
+
+    private void addGameHubShortcutItemsFromText(String text, List<GameHubShortcutItem> out, java.util.HashSet<String> seen) {
+        if (text == null || out == null || seen == null) return;
+        String normalized = text.replace('\0', ' ');
+        String[] lines = normalized.split("\\r?\\n");
+        for (String line : lines) {
+            addGameHubShortcutItemIfValid(parseGameHubShortcutText(line), out, seen);
+        }
+        try {
+            Matcher m = Pattern.compile("(?i)(localGameId\\s*[:=]\\s*([^,}\\]\\s]+)|\\blocal_[0-9a-fA-F\\-]{8,}\\b|steamAppI[dD]\\s*[:=]\\s*[^0-9]*([0-9]+))").matcher(normalized);
+            while (m.find()) {
+                int start = Math.max(0, m.start() - 700);
+                int end = Math.min(normalized.length(), m.end() + 1600);
+                addGameHubShortcutItemIfValid(parseGameHubShortcutText(normalized.substring(start, end)), out, seen);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private void addGameHubShortcutItemIfValid(GameHubShortcutItem item, List<GameHubShortcutItem> out, java.util.HashSet<String> seen) {
+        if (item == null || item.localGameId == null || item.localGameId.trim().isEmpty()) return;
+        String key = item.localGameId.trim().toLowerCase(Locale.ROOT);
+        if (seen.contains(key)) return;
+        seen.add(key);
+        out.add(item);
+    }
+
+    private String buildGameHubShortcutDumpCommand(boolean diagnostic) {
+        StringBuilder cmd = new StringBuilder();
+        cmd.append("uid=$(am get-current-user 2>/dev/null | tr -d '\\r' | head -n 1); ");
+        cmd.append("case \"$uid\" in ''|*[!0-9]*) uid=0;; esac; ");
+        cmd.append("echo '--- YukiHub GameHub shortcut dump ---'; ");
+        cmd.append("echo user=$uid; ");
+        cmd.append("echo sdk=$(getprop ro.build.version.sdk 2>/dev/null) release=$(getprop ro.build.version.release 2>/dev/null); ");
+        cmd.append("echo brand=$(getprop ro.product.brand 2>/dev/null) manufacturer=$(getprop ro.product.manufacturer 2>/dev/null) model=$(getprop ro.product.model 2>/dev/null); ");
+        cmd.append("echo '--- packages ---'; pm path com.xiaoji.egggamz 2>&1; pm path com.xiaoji.egggame 2>&1; ");
+        cmd.append("for u in $uid 0; do ");
+        cmd.append("echo --- cmd shortcut user=$u package=com.xiaoji.egggamz ---; cmd shortcut get-shortcuts --user $u --flags 31 com.xiaoji.egggamz 2>&1; ");
+        cmd.append("echo --- cmd shortcut user=$u package=com.xiaoji.egggame ---; cmd shortcut get-shortcuts --user $u --flags 31 com.xiaoji.egggame 2>&1; ");
+        cmd.append("done; ");
+        cmd.append("echo '--- dumpsys shortcut filtered ---'; ");
+        cmd.append("dumpsys shortcut 2>&1 | grep -i -A 40 -B 12 'com.xiaoji.egggamz\\|com.xiaoji.egggame\\|localGameId\\|local_\\|steamAppId' 2>&1; ");
+        if (diagnostic) {
+            cmd.append("echo '--- launcher packages ---'; pm list packages | grep -i 'launcher\\|bbk\\|vivo\\|origin' 2>&1; ");
+        }
+        return cmd.toString();
+    }
+
+    private String runGameHubShizukuCommand(String cmd) throws Exception {
+        Process p;
+        try {
+            Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+            m.setAccessible(true);
+            p = (Process) m.invoke(null, new Object[]{new String[]{"/system/bin/sh", "-c", cmd}, null, null});
+        } catch (Throwable reflectError) {
+            throw new RuntimeException("Shizuku newProcess unavailable", reflectError);
+        }
+        String out = readProcessStream(p.getInputStream()) + "\n" + readProcessStream(p.getErrorStream());
+        try { p.waitFor(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        return out;
+    }
+
+    private void copyGameHubShortcutDiagnostics() {
+        if (requestShizukuPermissionIfNeeded()) return;
+        Toast.makeText(this, "正在生成 GameHub 快捷方式诊断...", Toast.LENGTH_SHORT).show();
+        AppExecutors.runOnSingle(() -> {
+            String result;
+            try {
+                if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                    result = "Shizuku 未运行或未授权。";
+                } else {
+                    result = runGameHubShizukuCommand(buildGameHubShortcutDumpCommand(true));
+                }
+            } catch (Throwable t) {
+                result = "生成诊断失败：" + t.getClass().getName() + "\n" + String.valueOf(t.getMessage());
+            }
+            final String text = result == null ? "" : (result.length() > 180000 ? result.substring(0, 180000) + "\n--- truncated by YukiHub ---" : result);
+            runOnUiThread(() -> {
+                try {
+                    Object service = getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (service instanceof android.content.ClipboardManager) {
+                        ((android.content.ClipboardManager) service).setPrimaryClip(android.content.ClipData.newPlainText("YukiHub GameHub shortcut diagnostics", text));
+                        Toast.makeText(this, "诊断信息已复制，可发给开发者排查", Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this, "复制失败：无法获取剪贴板服务", Toast.LENGTH_LONG).show();
+                    }
+                } catch (Throwable t) {
+                    Toast.makeText(this, "复制诊断失败：" + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+                }
+            });
+        });
     }
 
     private String readProcessStream(InputStream in) {
@@ -3950,7 +4045,11 @@ private void showDetailDialog(Game game) {
                     if (extras != null) {
                         String localGameId = extras.getString("localGameId");
                         if (localGameId != null && !localGameId.trim().isEmpty()) return localGameId.trim();
+                        GameHubShortcutItem fromExtras = parseGameHubShortcutText(extras.toString());
+                        if (fromExtras != null && fromExtras.localGameId != null && !fromExtras.localGameId.trim().isEmpty()) return fromExtras.localGameId.trim();
                     }
+                    GameHubShortcutItem fromIntent = parseGameHubShortcutText(intent.toUri(0));
+                    if (fromIntent != null && fromIntent.localGameId != null && !fromIntent.localGameId.trim().isEmpty()) return fromIntent.localGameId.trim();
                 }
             }
         } catch (Throwable ignored) { }
@@ -3959,7 +4058,13 @@ private void showDetailDialog(Game game) {
             if (extras != null) {
                 String localGameId = extras.getString("localGameId");
                 if (localGameId != null && !localGameId.trim().isEmpty()) return localGameId.trim();
+                GameHubShortcutItem fromExtras = parseGameHubShortcutText(extras.toString());
+                if (fromExtras != null && fromExtras.localGameId != null && !fromExtras.localGameId.trim().isEmpty()) return fromExtras.localGameId.trim();
             }
+        } catch (Throwable ignored) { }
+        try {
+            GameHubShortcutItem fromShortcut = parseGameHubShortcutText(si.toString());
+            if (fromShortcut != null && fromShortcut.localGameId != null && !fromShortcut.localGameId.trim().isEmpty()) return fromShortcut.localGameId.trim();
         } catch (Throwable ignored) { }
         return null;
     }
@@ -3976,7 +4081,11 @@ private void showDetailDialog(Game game) {
                     if (extras != null) {
                         String name = extras.getString("localAppName");
                         if (name != null && !name.trim().isEmpty()) return name.trim();
+                        name = extractGameHubNameFromText(extras.toString());
+                        if (name != null && !name.trim().isEmpty()) return name.trim();
                     }
+                    String name = extractGameHubNameFromText(intent.toUri(0));
+                    if (name != null && !name.trim().isEmpty()) return name.trim();
                 }
             }
         } catch (Throwable ignored) { }
@@ -3985,7 +4094,13 @@ private void showDetailDialog(Game game) {
             if (extras != null) {
                 String name = extras.getString("localAppName");
                 if (name != null && !name.trim().isEmpty()) return name.trim();
+                name = extractGameHubNameFromText(extras.toString());
+                if (name != null && !name.trim().isEmpty()) return name.trim();
             }
+        } catch (Throwable ignored) { }
+        try {
+            String name = extractGameHubNameFromText(si.toString());
+            if (name != null && !name.trim().isEmpty()) return name.trim();
         } catch (Throwable ignored) { }
         CharSequence shortLabel = null;
         try { shortLabel = si.getShortLabel(); } catch (Throwable ignored) { }
