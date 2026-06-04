@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="GPL-3.0" />
   <a href="https://github.com/xm486/YukiHub/releases">
-    <img src="https://img.shields.io/github/downloads/xm486/YukiHub/total?style=for-the-badge&logo=github" alt="downloads">
+    <img src="https://img.shields.io/github/downloads/xm486/YukiHub/total?style=flat-square&logo=github" alt="downloads">
   </a>
 </p>
 
