@@ -181,6 +181,11 @@ private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
 private static final int MAX_SCAN_ROOTS = 3;
     private static final String KEY_STARTUP_SCAN_DEPTH = "startup_scan_depth";
     private static final String KEY_AUTO_SCAN_ON_STARTUP = "auto_scan_on_startup";
+    private static final String KEY_CHECK_UPDATE_ON_STARTUP = "check_update_on_startup";
+    private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
+    private static final long UPDATE_AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
+    private static final String UPDATE_API_URL = "https://api.github.com/repos/xm486/YukiHub/releases/latest";
+    private static final String UPDATE_REPO_URL = "https://github.com/xm486/YukiHub";
     private static final String KEY_ENGINE_LABEL_POSITION = "engine_label_position";
     private static final String KEY_SIDE_TRANSLATED_PREFIX = "side_translated_";
     private static final int DEFAULT_STARTUP_SCAN_DEPTH = 2;
@@ -258,6 +263,7 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
         if (prefs != null && prefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, false)) {
             autoScanLastRootIfAvailable();
         }
+        checkUpdateOnStartupIfEnabled();
         ensureStoragePermissionForInternalKrkr();
     }
 
@@ -3081,6 +3087,13 @@ LinearLayout accountActions = new LinearLayout(this);
         aboutInfo.setPadding(0, dp(4), 0, dp(6));
         root.addView(aboutInfo);
 
+        Button updateButton = krButton("检查更新");
+        updateButton.setTextColor(getColorCompat(R.color.yh_primary));
+        updateButton.setOnClickListener(v -> checkUpdateManually());
+        CheckBox updateOnStartupCheck = krCheckBox("启动时自动检查更新", prefs == null || prefs.getBoolean(KEY_CHECK_UPDATE_ON_STARTUP, true));
+        root.addView(updateButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+        root.addView(updateOnStartupCheck);
+
         LinearLayout githubButton = linkCardButton("GitHub 仓库", R.drawable.ic_github);
         LinearLayout websiteButton = linkCardButton("官方网站", android.R.drawable.ic_menu_view);
         LinearLayout groupButton = linkCardButton("QQ 交流群", android.R.drawable.ic_dialog_email);
@@ -3261,6 +3274,7 @@ LinearLayout accountActions = new LinearLayout(this);
                     .putString(KEY_BANGUMI_TOKEN, token)
                     .putInt(KEY_STARTUP_SCAN_DEPTH, depth)
                     .putBoolean(KEY_AUTO_SCAN_ON_STARTUP, autoScanCheck.isChecked())
+                    .putBoolean(KEY_CHECK_UPDATE_ON_STARTUP, updateOnStartupCheck.isChecked())
                     .putString(KEY_ENGINE_LABEL_POSITION, engineLabelSpinner.getSelectedItemPosition() == 1 ? "cover" : "title")
                     .putString(KEY_SORT_MODE, sortMode)
                     .putBoolean(KEY_BACKGROUND_DIM_ENABLED, bgDimEnabled.isChecked())
@@ -3452,7 +3466,171 @@ container.addView(card, lp);
 }
 }
 
-private void openExternalUrl(String url) {
+private void checkUpdateOnStartupIfEnabled() {
+        try {
+            if (prefs == null || !prefs.getBoolean(KEY_CHECK_UPDATE_ON_STARTUP, true)) return;
+            long last = prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L);
+            if (last > 0 && System.currentTimeMillis() - last < UPDATE_AUTO_CHECK_INTERVAL_MS) return;
+            checkUpdate(false);
+        } catch (Throwable t) {
+            Log.w("YukiHub", "startup update check skipped", t);
+        }
+    }
+
+    private void checkUpdateManually() {
+        Toast.makeText(this, "正在检查更新...", Toast.LENGTH_SHORT).show();
+        checkUpdate(true);
+    }
+
+    private void checkUpdate(boolean manual) {
+        AppExecutors.runOnIo(() -> {
+            try {
+                UpdateInfo info = fetchLatestRelease();
+                if (prefs != null) prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, System.currentTimeMillis()).apply();
+                String current = getCurrentVersionName();
+                boolean newer = info != null && isNewerVersion(info.version, current);
+                runOnUiThread(() -> {
+                    if (newer) {
+                        showUpdateDialog(info, current);
+                    } else if (manual) {
+                        Toast.makeText(this, "已是最新版本：" + emptyText(current, "未知"), Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Throwable t) {
+                Log.w("YukiHub", "check update failed", t);
+                if (manual) {
+                    runOnUiThread(() -> Toast.makeText(this, "检查更新失败：" + emptyText(t.getMessage(), "请稍后重试"), Toast.LENGTH_LONG).show());
+                }
+            }
+        });
+    }
+
+    private UpdateInfo fetchLatestRelease() throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(UPDATE_API_URL).openConnection();
+        c.setRequestMethod("GET");
+        c.setInstanceFollowRedirects(true);
+        c.setConnectTimeout(12000);
+        c.setReadTimeout(15000);
+        c.setRequestProperty("Accept", "application/vnd.github+json");
+        c.setRequestProperty("User-Agent", "YukiHub-Android/" + getCurrentVersionName());
+        int code = c.getResponseCode();
+        String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
+        if (code < 200 || code >= 300) throw new RuntimeException("GitHub HTTP " + code + ": " + trimForDialog(text, 160));
+        JSONObject o = new JSONObject(text == null ? "{}" : text);
+        UpdateInfo info = new UpdateInfo();
+        info.tagName = o.optString("tag_name", "");
+        info.version = normalizeVersion(info.tagName);
+        info.name = o.optString("name", info.tagName);
+        info.body = o.optString("body", "");
+        info.releaseUrl = o.optString("html_url", UPDATE_REPO_URL + "/releases");
+        JSONArray assets = o.optJSONArray("assets");
+        if (assets != null) {
+            for (int i = 0; i < assets.length(); i++) {
+                JSONObject a = assets.optJSONObject(i);
+                if (a == null) continue;
+                String assetName = a.optString("name", "");
+                String url = a.optString("browser_download_url", "");
+                if (url == null || url.trim().isEmpty()) continue;
+                if (info.downloadUrl == null || info.downloadUrl.isEmpty()) info.downloadUrl = url;
+                String lowerName = assetName.toLowerCase(Locale.ROOT);
+                String lowerUrl = url.toLowerCase(Locale.ROOT);
+                if (lowerName.endsWith(".apk") || lowerUrl.contains(".apk")) {
+                    info.apkUrl = url;
+                    break;
+                }
+            }
+        }
+        if (info.version == null || info.version.isEmpty()) info.version = normalizeVersion(info.name);
+        if (info.downloadUrl == null || info.downloadUrl.isEmpty()) info.downloadUrl = info.releaseUrl;
+        if (info.apkUrl == null || info.apkUrl.isEmpty()) info.apkUrl = info.releaseUrl;
+        return info;
+    }
+
+    private String getCurrentVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private boolean isNewerVersion(String latest, String current) {
+        String l = normalizeVersion(latest);
+        String c = normalizeVersion(current);
+        if (l.isEmpty() || c.isEmpty()) return !l.equals(c);
+        String[] la = l.split("\\.");
+        String[] ca = c.split("\\.");
+        int n = Math.max(la.length, ca.length);
+        for (int i = 0; i < n; i++) {
+            long lv = i < la.length ? parseVersionPart(la[i]) : 0L;
+            long cv = i < ca.length ? parseVersionPart(ca[i]) : 0L;
+            if (lv > cv) return true;
+            if (lv < cv) return false;
+        }
+        return false;
+    }
+
+    private long parseVersionPart(String part) {
+        try {
+            if (part == null) return 0L;
+            String digits = part.replaceAll("[^0-9]", "");
+            return digits.isEmpty() ? 0L : Long.parseLong(digits);
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    private String normalizeVersion(String value) {
+        if (value == null) return "";
+        String v = value.trim();
+        Matcher m = Pattern.compile("(\\d+(?:\\.\\d+){1,5})").matcher(v);
+        if (m.find()) return m.group(1);
+        v = v.replaceFirst("^[vV]", "").replaceAll("[^0-9.]", "");
+        while (v.startsWith(".")) v = v.substring(1);
+        while (v.endsWith(".")) v = v.substring(0, v.length() - 1);
+        return v;
+    }
+
+    private void showUpdateDialog(UpdateInfo info, String currentVersion) {
+        if (info == null || isFinishing()) return;
+        String latestLabel = emptyText(info.tagName, info.version);
+        StringBuilder msg = new StringBuilder();
+        msg.append("当前版本：").append(emptyText(currentVersion, "未知")).append("\n");
+        msg.append("最新版本：").append(emptyText(latestLabel, "未知")).append("\n\n");
+        String body = trimForDialog(info.body, 1600);
+        if (body != null && !body.trim().isEmpty()) {
+            msg.append("更新内容：\n").append(body.trim());
+        } else {
+            msg.append("发现新的 GitHub Release，可前往发布页查看详情。");
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("发现新版本 " + emptyText(latestLabel, ""))
+                .setMessage(msg.toString())
+                .setPositiveButton("前往下载", (d, w) -> openExternalUrl(emptyText(info.apkUrl, info.releaseUrl)))
+                .setNeutralButton("发布页", (d, w) -> openExternalUrl(emptyText(info.releaseUrl, UPDATE_REPO_URL + "/releases")))
+                .setNegativeButton("稍后", null)
+                .show();
+        styleAlertDialogDark(dialog);
+    }
+
+    private String trimForDialog(String text, int max) {
+        if (text == null) return "";
+        String t = text.trim();
+        if (max <= 0 || t.length() <= max) return t;
+        return t.substring(0, max) + "\n...";
+    }
+
+    private static class UpdateInfo {
+        String tagName;
+        String version;
+        String name;
+        String body;
+        String releaseUrl;
+        String downloadUrl;
+        String apkUrl;
+    }
+
+    private void openExternalUrl(String url) {
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             startActivity(intent);

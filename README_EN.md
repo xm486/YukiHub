@@ -11,9 +11,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="GPL-3.0" />
-  <a href="https://github.com/xm486/YukiHub/releases">
-    <img src="https://img.shields.io/github/downloads/xm486/YukiHub/total?&logo=github" alt="downloads">
-  </a>
+  <img src="https://img.shields.io/github/downloads/xm486/YukiHub/total?logo=github" alt="Downloads">
+  <img src="https://img.shields.io/github/v/release/xm486/YukiHub?logo=github&color=green" alt="release">
 </p>
 
 **YukiHub** is a Galgame / visual novel management and launcher tool for Android. It is suitable for managing local games, Android app-style games, emulator game entries, external program shortcuts, and play records.
