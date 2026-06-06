@@ -114,8 +114,11 @@ import com.yuki.yukihub.scanner.ScanResult;
 import com.yuki.yukihub.ui.GameAdapter;
 import com.yuki.yukihub.ui.ScanResultAdapter;
 import com.yuki.yukihub.util.AppExecutors;
+import com.yuki.yukihub.util.BackgroundManager;
+import com.yuki.yukihub.util.StorageProbeHelper;
 import com.yuki.yukihub.util.TimeFormatUtil;
 import com.yuki.yukihub.util.UiScaleUtil;
+import com.yuki.yukihub.util.UpdateChecker;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -162,8 +165,8 @@ private VnMetadata currentSideMetadata;
 private long runningSessionId = -1;
 private long sessionStart = 0;
 private boolean launchedExternal = false;
-private StorageProbeResult lastStorageProbeResult;
-private long lastStorageProbeAt;
+private StorageProbeHelper.StorageProbeResult lastStorageProbeResult;
+    private long lastStorageProbeAt;
 private static final long MIN_PLAY_SESSION_MS = 0L;
 private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
 private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
@@ -183,9 +186,6 @@ private static final int MAX_SCAN_ROOTS = 3;
     private static final String KEY_AUTO_SCAN_ON_STARTUP = "auto_scan_on_startup";
     private static final String KEY_CHECK_UPDATE_ON_STARTUP = "check_update_on_startup";
     private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
-    private static final long UPDATE_AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
-    private static final String UPDATE_API_URL = "https://api.github.com/repos/xm486/YukiHub/releases/latest";
-    private static final String UPDATE_REPO_URL = "https://github.com/xm486/YukiHub";
     private static final String KEY_ENGINE_LABEL_POSITION = "engine_label_position";
     private static final String KEY_SIDE_TRANSLATED_PREFIX = "side_translated_";
     private static final int DEFAULT_STARTUP_SCAN_DEPTH = 2;
@@ -238,8 +238,9 @@ private ActivityResultLauncher<String> coverLauncher;
 private ActivityResultLauncher<String> profileAvatarLauncher;
 private ActivityResultLauncher<String> backgroundPickerLauncher;
 private ActivityResultLauncher<String> videoBackgroundPickerLauncher;
-private MediaPlayer backgroundMediaPlayer;
-private Uri pendingBackgroundVideoUri;
+private final UpdateChecker updateChecker = new UpdateChecker(this);
+private final StorageProbeHelper storageProbeHelper = new StorageProbeHelper(this);
+private final BackgroundManager backgroundManager = new BackgroundManager(this);
 private ActivityResultLauncher<String> backupCreateLauncher;
 private ActivityResultLauncher<String[]> backupOpenLauncher;
 
@@ -515,182 +516,48 @@ private void deleteInternalFileUri(String uriText) {
 }
 
 private void replaceCustomBackground(String bg, String type) {
-    String old = prefs == null ? null : prefs.getString(KEY_CUSTOM_BACKGROUND, "");
-    if (prefs != null) prefs.edit().putString(KEY_CUSTOM_BACKGROUND, bg).putString(KEY_CUSTOM_BACKGROUND_TYPE, type).apply();
-    if (old != null && !old.equals(bg)) deleteInternalFileUri(old);
+    backgroundManager.replaceCustomBackground(bg, type);
 }
 
 private String copyCoverToInternalStorage(Uri uri) {
-return copyImageToInternalStorage(uri, "covers", "cover_", 720, 88);
+    return backgroundManager.copyCoverToInternalStorage(uri);
 }
 
 private void applyCustomBackground() {
-    if (prefs == null) return;
-    ImageView bgImage = findViewById(R.id.customBackgroundImage);
-    TextureView bgVideo = findViewById(R.id.customBackgroundVideo);
-    View bgDim = findViewById(R.id.customBackgroundDim);
-    View dynamicBg = findViewById(R.id.dynamicBackground);
-    if (bgImage == null || bgVideo == null || bgDim == null || dynamicBg == null) return;
-    String bg = prefs.getString(KEY_CUSTOM_BACKGROUND, "");
-    String type = prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image");
-    boolean dimEnabled = prefs.getBoolean(KEY_BACKGROUND_DIM_ENABLED, true);
-    if (bg == null || bg.isEmpty()) {
-        stopBackgroundVideo();
-        bgImage.setImageDrawable(null);
-        bgImage.setVisibility(View.GONE);
-        bgVideo.setVisibility(View.GONE);
-        bgDim.setVisibility(View.GONE);
-        dynamicBg.setVisibility(View.VISIBLE);
-        return;
-    }
-    try {
-        if ("video".equals(type)) {
-            bgImage.setImageDrawable(null);
-            bgImage.setVisibility(View.GONE);
-            dynamicBg.setVisibility(View.GONE);
-            bgVideo.setVisibility(View.VISIBLE);
-            bgDim.setVisibility(dimEnabled ? View.VISIBLE : View.GONE);
-            playBackgroundVideo(bgVideo, Uri.parse(bg), true);
-        } else {
-            stopBackgroundVideo();
-            bgVideo.setVisibility(View.GONE);
-            bgImage.setImageURI(Uri.parse(bg));
-            bgImage.setVisibility(View.VISIBLE);
-            bgDim.setVisibility(dimEnabled ? View.VISIBLE : View.GONE);
-            dynamicBg.setVisibility(View.GONE);
-        }
-    } catch (Throwable t) {
-        prefs.edit().remove(KEY_CUSTOM_BACKGROUND).remove(KEY_CUSTOM_BACKGROUND_TYPE).apply();
-        stopBackgroundVideo();
-        bgImage.setImageDrawable(null);
-        bgImage.setVisibility(View.GONE);
-        bgVideo.setVisibility(View.GONE);
-        bgDim.setVisibility(View.GONE);
-        dynamicBg.setVisibility(View.VISIBLE);
-    }
+    backgroundManager.applyCustomBackground(
+            findViewById(R.id.customBackgroundImage),
+            findViewById(R.id.customBackgroundVideo),
+            findViewById(R.id.customBackgroundDim),
+            findViewById(R.id.dynamicBackground));
 }
 
 private void playBackgroundVideo(TextureView textureView, Uri uri, boolean forceRestart) {
-    pendingBackgroundVideoUri = uri;
-    if (forceRestart) releaseBackgroundMediaPlayer();
-    textureView.setSurfaceTextureListener(null);
-    if (textureView.isAvailable()) {
-        textureView.post(() -> startBackgroundMediaPlayer(textureView, uri));
-    } else {
-        textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                startBackgroundMediaPlayer(textureView, uri);
-            }
-            @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-                applyVideoCenterCrop(textureView, backgroundMediaPlayer);
-            }
-            @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-                releaseBackgroundMediaPlayer();
-                return true;
-            }
-            @Override public void onSurfaceTextureUpdated(SurfaceTexture surface) { }
-        });
-    }
+    backgroundManager.playBackgroundVideo(textureView, uri, forceRestart);
 }
 
 private void startBackgroundMediaPlayer(TextureView textureView, Uri uri) {
-    try {
-        releaseBackgroundMediaPlayer();
-        MediaPlayer mp = new MediaPlayer();
-        backgroundMediaPlayer = mp;
-        mp.setDataSource(this, uri);
-        Surface surface = new Surface(textureView.getSurfaceTexture());
-        mp.setSurface(surface);
-        surface.release();
-        mp.setLooping(true);
-        boolean soundOn = prefs != null && prefs.getBoolean(KEY_BACKGROUND_VIDEO_SOUND, false);
-        mp.setVolume(soundOn ? 1f : 0f, soundOn ? 1f : 0f);
-        mp.setOnPreparedListener(player -> {
-            applyVideoCenterCrop(textureView, player);
-            player.start();
-        });
-        mp.setOnErrorListener((player, what, extra) -> {
-            Toast.makeText(this, "视频背景播放失败，请尝试更换视频格式", Toast.LENGTH_SHORT).show();
-            releaseBackgroundMediaPlayer();
-            return true;
-        });
-        mp.prepareAsync();
-    } catch (Throwable t) {
-        if (prefs != null) prefs.edit().remove(KEY_CUSTOM_BACKGROUND).remove(KEY_CUSTOM_BACKGROUND_TYPE).apply();
-        applyCustomBackground();
-    }
+    backgroundManager.startBackgroundMediaPlayer(textureView, uri);
 }
 
 private void applyVideoCenterCrop(TextureView textureView, MediaPlayer player) {
-    if (textureView == null || player == null) return;
-    int viewW = textureView.getWidth();
-    int viewH = textureView.getHeight();
-    int videoW = player.getVideoWidth();
-    int videoH = player.getVideoHeight();
-    if (viewW <= 0 || viewH <= 0 || videoW <= 0 || videoH <= 0) return;
-    float scale = Math.max((float) viewW / videoW, (float) viewH / videoH);
-    float scaledW = videoW * scale;
-    float scaledH = videoH * scale;
-    Matrix matrix = new Matrix();
-    matrix.setScale(scaledW / viewW, scaledH / viewH, viewW / 2f, viewH / 2f);
-    textureView.setTransform(matrix);
+    backgroundManager.applyVideoCenterCrop(textureView, player);
 }
 
 private void releaseBackgroundMediaPlayer() {
-    if (backgroundMediaPlayer == null) return;
-    try { backgroundMediaPlayer.stop(); } catch (Throwable ignored) { }
-    try { backgroundMediaPlayer.release(); } catch (Throwable ignored) { }
-    backgroundMediaPlayer = null;
+    backgroundManager.releaseBackgroundMediaPlayer();
 }
 
 private void stopBackgroundVideo() {
-    pendingBackgroundVideoUri = null;
-    releaseBackgroundMediaPlayer();
+    backgroundManager.stopBackgroundVideo();
 }
 
 private String copyVideoToInternalStorage(Uri uri) {
-    try {
-        java.io.File dir = new java.io.File(getFilesDir(), "backgrounds");
-        if (!dir.exists()) dir.mkdirs();
-        java.io.File file = new java.io.File(dir, "bg_video_" + System.currentTimeMillis() + ".mp4");
-        try (InputStream in = getContentResolver().openInputStream(uri); java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
-            if (in == null) return null;
-            byte[] buf = new byte[8192];
-            int len;
-            while ((len = in.read(buf)) != -1) out.write(buf, 0, len);
-            out.flush();
-        }
-        return Uri.fromFile(file).toString();
-    } catch (Throwable t) {
-        return null;
-    }
+    return backgroundManager.copyVideoToInternalStorage(uri);
 }
 
 private String copyImageToInternalStorage(Uri uri, String folder, String prefix, int max, int quality) {
-        try {
-            Bitmap bitmap = BitmapFactory.decodeStream(getContentResolver().openInputStream(uri));
-            if (bitmap == null) return null;
-            int w = bitmap.getWidth();
-            int h = bitmap.getHeight();
-            if (w > max || h > max) {
-                float scale = Math.min(max / (float) w, max / (float) h);
-                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, Math.max(1, (int) (w * scale)), Math.max(1, (int) (h * scale)), true);
-                bitmap.recycle();
-                bitmap = scaled;
-            }
-            java.io.File dir = new java.io.File(getFilesDir(), folder == null ? "images" : folder);
-            if (!dir.exists()) dir.mkdirs();
-            java.io.File file = new java.io.File(dir, (prefix == null ? "image_" : prefix) + System.currentTimeMillis() + ".jpg");
-            java.io.FileOutputStream out = new java.io.FileOutputStream(file);
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out);
-            out.flush();
-            out.close();
-            bitmap.recycle();
-            return Uri.fromFile(file).toString();
-        } catch (Exception e) {
-            return null;
-        }
-    }
+    return backgroundManager.copyImageToInternalStorage(uri, folder, prefix, max, quality);
+}
 
     private void takeFlags(Uri uri) {
         if (uri == null) return;
@@ -3467,167 +3334,50 @@ container.addView(card, lp);
 }
 
 private void checkUpdateOnStartupIfEnabled() {
-        try {
-            if (prefs == null || !prefs.getBoolean(KEY_CHECK_UPDATE_ON_STARTUP, true)) return;
-            long last = prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L);
-            if (last > 0 && System.currentTimeMillis() - last < UPDATE_AUTO_CHECK_INTERVAL_MS) return;
-            checkUpdate(false);
-        } catch (Throwable t) {
-            Log.w("YukiHub", "startup update check skipped", t);
-        }
+        updateChecker.checkOnStartupIfNeeded(new UpdateChecker.UpdateCallback() {
+            @Override public void onUpdateAvailable(UpdateChecker.UpdateInfo info, String currentVersion) {
+                runOnUiThread(() -> showUpdateDialog(info, currentVersion));
+            }
+            @Override public void onUpToDate(String currentVersion) {}
+            @Override public void onError(String message) {}
+        });
     }
 
     private void checkUpdateManually() {
         Toast.makeText(this, "正在检查更新...", Toast.LENGTH_SHORT).show();
-        checkUpdate(true);
-    }
-
-    private void checkUpdate(boolean manual) {
-        AppExecutors.runOnIo(() -> {
-            try {
-                UpdateInfo info = fetchLatestRelease();
-                if (prefs != null) prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, System.currentTimeMillis()).apply();
-                String current = getCurrentVersionName();
-                boolean newer = info != null && isNewerVersion(info.version, current);
-                runOnUiThread(() -> {
-                    if (newer) {
-                        showUpdateDialog(info, current);
-                    } else if (manual) {
-                        Toast.makeText(this, "已是最新版本：" + emptyText(current, "未知"), Toast.LENGTH_SHORT).show();
-                    }
-                });
-            } catch (Throwable t) {
-                Log.w("YukiHub", "check update failed", t);
-                if (manual) {
-                    runOnUiThread(() -> Toast.makeText(this, "检查更新失败：" + emptyText(t.getMessage(), "请稍后重试"), Toast.LENGTH_LONG).show());
-                }
+        updateChecker.checkUpdateManually(new UpdateChecker.UpdateCallback() {
+            @Override public void onUpdateAvailable(UpdateChecker.UpdateInfo info, String currentVersion) {
+                runOnUiThread(() -> showUpdateDialog(info, currentVersion));
+            }
+            @Override public void onUpToDate(String currentVersion) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "已是最新版本：" + currentVersion, Toast.LENGTH_SHORT).show());
+            }
+            @Override public void onError(String message) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show());
             }
         });
     }
 
-    private UpdateInfo fetchLatestRelease() throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(UPDATE_API_URL).openConnection();
-        c.setRequestMethod("GET");
-        c.setInstanceFollowRedirects(true);
-        c.setConnectTimeout(12000);
-        c.setReadTimeout(15000);
-        c.setRequestProperty("Accept", "application/vnd.github+json");
-        c.setRequestProperty("User-Agent", "YukiHub-Android/" + getCurrentVersionName());
-        int code = c.getResponseCode();
-        String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
-        if (code < 200 || code >= 300) throw new RuntimeException("GitHub HTTP " + code + ": " + trimForDialog(text, 160));
-        JSONObject o = new JSONObject(text == null ? "{}" : text);
-        UpdateInfo info = new UpdateInfo();
-        info.tagName = o.optString("tag_name", "");
-        info.version = normalizeVersion(info.tagName);
-        info.name = o.optString("name", info.tagName);
-        info.body = o.optString("body", "");
-        info.releaseUrl = o.optString("html_url", UPDATE_REPO_URL + "/releases");
-        JSONArray assets = o.optJSONArray("assets");
-        if (assets != null) {
-            for (int i = 0; i < assets.length(); i++) {
-                JSONObject a = assets.optJSONObject(i);
-                if (a == null) continue;
-                String assetName = a.optString("name", "");
-                String url = a.optString("browser_download_url", "");
-                if (url == null || url.trim().isEmpty()) continue;
-                if (info.downloadUrl == null || info.downloadUrl.isEmpty()) info.downloadUrl = url;
-                String lowerName = assetName.toLowerCase(Locale.ROOT);
-                String lowerUrl = url.toLowerCase(Locale.ROOT);
-                if (lowerName.endsWith(".apk") || lowerUrl.contains(".apk")) {
-                    info.apkUrl = url;
-                    break;
-                }
-            }
-        }
-        if (info.version == null || info.version.isEmpty()) info.version = normalizeVersion(info.name);
-        if (info.downloadUrl == null || info.downloadUrl.isEmpty()) info.downloadUrl = info.releaseUrl;
-        if (info.apkUrl == null || info.apkUrl.isEmpty()) info.apkUrl = info.releaseUrl;
-        return info;
-    }
-
-    private String getCurrentVersionName() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (Throwable ignored) {
-            return "";
-        }
-    }
-
-    private boolean isNewerVersion(String latest, String current) {
-        String l = normalizeVersion(latest);
-        String c = normalizeVersion(current);
-        if (l.isEmpty() || c.isEmpty()) return !l.equals(c);
-        String[] la = l.split("\\.");
-        String[] ca = c.split("\\.");
-        int n = Math.max(la.length, ca.length);
-        for (int i = 0; i < n; i++) {
-            long lv = i < la.length ? parseVersionPart(la[i]) : 0L;
-            long cv = i < ca.length ? parseVersionPart(ca[i]) : 0L;
-            if (lv > cv) return true;
-            if (lv < cv) return false;
-        }
-        return false;
-    }
-
-    private long parseVersionPart(String part) {
-        try {
-            if (part == null) return 0L;
-            String digits = part.replaceAll("[^0-9]", "");
-            return digits.isEmpty() ? 0L : Long.parseLong(digits);
-        } catch (Throwable ignored) {
-            return 0L;
-        }
-    }
-
-    private String normalizeVersion(String value) {
-        if (value == null) return "";
-        String v = value.trim();
-        Matcher m = Pattern.compile("(\\d+(?:\\.\\d+){1,5})").matcher(v);
-        if (m.find()) return m.group(1);
-        v = v.replaceFirst("^[vV]", "").replaceAll("[^0-9.]", "");
-        while (v.startsWith(".")) v = v.substring(1);
-        while (v.endsWith(".")) v = v.substring(0, v.length() - 1);
-        return v;
-    }
-
-    private void showUpdateDialog(UpdateInfo info, String currentVersion) {
+    private void showUpdateDialog(UpdateChecker.UpdateInfo info, String currentVersion) {
         if (info == null || isFinishing()) return;
-        String latestLabel = emptyText(info.tagName, info.version);
+        String latestLabel = UpdateChecker.emptyText(info.tagName, info.version);
         StringBuilder msg = new StringBuilder();
-        msg.append("当前版本：").append(emptyText(currentVersion, "未知")).append("\n");
-        msg.append("最新版本：").append(emptyText(latestLabel, "未知")).append("\n\n");
-        String body = trimForDialog(info.body, 1600);
+        msg.append("当前版本：").append(UpdateChecker.emptyText(currentVersion, "未知")).append("\n");
+        msg.append("最新版本：").append(UpdateChecker.emptyText(latestLabel, "未知")).append("\n\n");
+        String body = UpdateChecker.trimForDialog(info.body, 1600);
         if (body != null && !body.trim().isEmpty()) {
             msg.append("更新内容：\n").append(body.trim());
         } else {
             msg.append("发现新的 GitHub Release，可前往发布页查看详情。");
         }
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("发现新版本 " + emptyText(latestLabel, ""))
+                .setTitle("发现新版本 " + UpdateChecker.emptyText(latestLabel, ""))
                 .setMessage(msg.toString())
-                .setPositiveButton("前往下载", (d, w) -> openExternalUrl(emptyText(info.apkUrl, info.releaseUrl)))
-                .setNeutralButton("发布页", (d, w) -> openExternalUrl(emptyText(info.releaseUrl, UPDATE_REPO_URL + "/releases")))
+                .setPositiveButton("前往下载", (d, w) -> openExternalUrl(UpdateChecker.emptyText(info.apkUrl, info.releaseUrl)))
+                .setNeutralButton("发布页", (d, w) -> openExternalUrl(UpdateChecker.emptyText(info.releaseUrl, updateChecker.getRepoUrl() + "/releases")))
                 .setNegativeButton("稍后", null)
                 .show();
         styleAlertDialogDark(dialog);
-    }
-
-    private String trimForDialog(String text, int max) {
-        if (text == null) return "";
-        String t = text.trim();
-        if (max <= 0 || t.length() <= max) return t;
-        return t.substring(0, max) + "\n...";
-    }
-
-    private static class UpdateInfo {
-        String tagName;
-        String version;
-        String name;
-        String body;
-        String releaseUrl;
-        String downloadUrl;
-        String apkUrl;
     }
 
     private void openExternalUrl(String url) {
@@ -5620,20 +5370,14 @@ try {
     }
 
     private boolean shouldProbeStorageBeforeLaunch(Game game) {
-        if (game == null || game.rootUri == null || game.rootUri.trim().isEmpty()) return false;
-        // If the user explicitly enabled YukiHub/app-private save redirection,
-        // keep the old scoped-save path and do not enable the SAF file fallback hook.
-        if (isScopedSaveEnabledFor(game.engine)) return false;
-        if (game.engine == EngineType.KIRIKIRI) return true;
-        if (game.engine == EngineType.ARTEMIS) return true;
-        return false;
+        return storageProbeHelper.shouldProbeBeforeLaunch(game);
     }
 
     private void launchGameWithStorageProbe(Game game) {
         final Game target = game;
         final AtomicBoolean launched = new AtomicBoolean(false);
         Future<?> future = AppExecutors.io().submit(() -> {
-            StorageProbeResult result = probeGameStorage(target);
+            StorageProbeHelper.StorageProbeResult result = storageProbeHelper.probeGameStorage(target);
             Log.i("YukiStorageProbe", result.toLogLine());
             runOnUiThread(() -> {
                 if (!launched.compareAndSet(false, true)) return;
@@ -5648,13 +5392,13 @@ try {
         }), STORAGE_PROBE_TIMEOUT_MS);
     }
 
-    private void handleStorageProbeResultBeforeLaunch(Game game, StorageProbeResult result) {
+    private void handleStorageProbeResultBeforeLaunch(Game game, StorageProbeHelper.StorageProbeResult result) {
         lastStorageProbeResult = result;
         lastStorageProbeAt = System.currentTimeMillis();
         if (game == null) return;
         if (result != null && result.rawResolved && !result.rawWriteOk) {
-            boolean scopedEnabled = isScopedSaveEnabledFor(game.engine);
-            boolean safCanHandle = canUseKrSafFileFallback(game, result);
+            boolean scopedEnabled = storageProbeHelper.isScopedSaveEnabledFor(game.engine);
+            boolean safCanHandle = storageProbeHelper.canUseKrSafFileFallback(game, result);
             String engine = game.engine == null ? "引擎" : game.engine.getDisplayName();
             Log.w("YukiStorageProbe", "raw write unavailable for " + engine + ", scopedSaveEnabled=" + scopedEnabled + ", safCanHandle=" + safCanHandle + ", rawPath=" + result.rawPath + ", err=" + result.writeError + ", safErr=" + result.safError);
             if (!scopedEnabled && !safCanHandle) {
@@ -5667,324 +5411,8 @@ try {
         doLaunchGame(game);
     }
 
-    private boolean isScopedSaveEnabledFor(EngineType engine) {
-        if (prefs == null || engine == null) return false;
-        if (engine == EngineType.KIRIKIRI) return prefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false);
-        if (engine == EngineType.ARTEMIS) return prefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false);
-        return false;
-    }
-
     private boolean shouldUseKrSafFileFallback(Game game) {
-        return canUseKrSafFileFallback(game, lastStorageProbeResult)
-                && System.currentTimeMillis() - lastStorageProbeAt <= 5000L;
-    }
-
-    private boolean canUseKrSafFileFallback(Game game, StorageProbeResult r) {
-        if (game == null || game.engine != EngineType.KIRIKIRI) return false;
-        if (isScopedSaveEnabledFor(game.engine)) return false;
-        if (r == null || !r.rawResolved || !r.safTreeCoversPath || !r.safWriteOk) return false;
-        return r.rawReadOk || r.safReadOk;
-    }
-
-    private StorageProbeResult probeGameStorage(Game game) {
-        long start = System.currentTimeMillis();
-        StorageProbeResult result = new StorageProbeResult();
-        result.engine = game == null || game.engine == null ? "unknown" : game.engine.name();
-        result.rootUri = game == null ? null : game.rootUri;
-        result.rawPath = fastRawPathFromUri(result.rootUri);
-        result.rawResolved = result.rawPath != null && result.rawPath.startsWith("/");
-        try {
-            File appExternal = getExternalFilesDir(null);
-            result.appPrivateWriteOk = quickWriteProbe(appExternal, ".yukihub_app_probe");
-        } catch (Throwable t) {
-            result.appPrivateError = shortError(t);
-        }
-        if (!result.rawResolved) {
-            result.elapsedMs = System.currentTimeMillis() - start;
-            result.readError = "raw path unavailable";
-            return result;
-        }
-        File root = new File(result.rawPath);
-        try {
-            result.rawExists = root.exists();
-            result.rawIsDirectory = root.isDirectory();
-            if (result.rawIsDirectory) {
-                String[] names = root.list();
-                result.rawReadOk = names != null;
-            } else {
-                result.rawReadOk = root.isFile() && root.canRead();
-            }
-        } catch (Throwable t) {
-            result.readError = shortError(t);
-        }
-        if (!result.rawReadOk && result.readError == null) result.readError = "list/canRead failed";
-        try {
-            File writeDir = root.isDirectory() ? root : root.getParentFile();
-            result.rawWriteOk = quickWriteProbe(writeDir, ".yukihub_write_probe");
-        } catch (Throwable t) {
-            result.writeError = shortError(t);
-        }
-        if (!result.rawWriteOk && result.writeError == null) result.writeError = "create/write/delete failed";
-        if (game != null && game.engine == EngineType.KIRIKIRI) {
-            probeSafWriteFallback(result);
-        } else if (!result.rawReadOk || !result.rawWriteOk) {
-            probeSafWriteFallback(result);
-        }
-        result.elapsedMs = System.currentTimeMillis() - start;
-        return result;
-    }
-
-    private void probeSafWriteFallback(StorageProbeResult result) {
-        if (result == null || !result.rawResolved || result.rawPath == null || result.rawPath.trim().isEmpty()) return;
-        result.safCandidate = result.rawPath.startsWith("/storage/") || result.rawPath.startsWith("/sdcard");
-        if (!result.safCandidate) return;
-        try {
-            SafPath safPath = toSafPath(result.rawPath);
-            if (safPath == null || safPath.volume == null || safPath.rel == null) {
-                result.safError = "raw path cannot map to SAF doc id";
-                return;
-            }
-            ContentResolver resolver = getContentResolver();
-            if (resolver == null) {
-                result.safError = "content resolver unavailable";
-                return;
-            }
-            for (UriPermission perm : resolver.getPersistedUriPermissions()) {
-                if (perm == null || perm.getUri() == null) continue;
-                String treeId;
-                try { treeId = DocumentsContract.getTreeDocumentId(perm.getUri()); } catch (Throwable ignored) { continue; }
-                if (treeId == null) continue;
-                String decodedTreeId = Uri.decode(treeId);
-                if (decodedTreeId == null || !decodedTreeId.startsWith(safPath.volume + ":")) continue;
-                String treeRel = decodedTreeId.substring((safPath.volume + ":").length());
-                if (!treeRel.isEmpty() && !safPath.rel.equals(treeRel) && !safPath.rel.startsWith(treeRel + "/")) continue;
-                result.safTreeCoversPath = true;
-                result.safReadOk = perm.isReadPermission();
-                boolean safTargetIsDirectory = result.rawIsDirectory || isSafTargetDirectory(perm.getUri(), decodedTreeId, safPath);
-                if (!perm.isWritePermission()) {
-                    result.safError = "persisted SAF tree is read-only";
-                    return;
-                }
-                Uri probeUri = createSafProbeDocument(resolver, perm.getUri(), decodedTreeId, safPath, safTargetIsDirectory, ".yukihub_saf_probe_" + android.os.Process.myPid() + "_" + System.nanoTime() + ".tmp");
-                if (probeUri == null) {
-                    result.safError = "create SAF probe failed";
-                    return;
-                }
-                try (OutputStream out = resolver.openOutputStream(probeUri, "wt")) {
-                    if (out == null) {
-                        result.safError = "open SAF probe output failed";
-                        return;
-                    }
-                    out.write(new byte[]{'Y', 'H'});
-                    out.flush();
-                } finally {
-                    try { DocumentsContract.deleteDocument(resolver, probeUri); } catch (Throwable ignored) { }
-                }
-                result.safWriteOk = true;
-                result.safError = null;
-                return;
-            }
-            result.safError = "no persisted SAF tree covers raw path";
-        } catch (Throwable t) {
-            result.safError = shortError(t);
-        }
-    }
-
-    private SafPath toSafPath(String path) {
-        if (path == null) return null;
-        String p = path.trim();
-        if (p.startsWith("file://")) p = p.substring("file://".length());
-        while (p.contains("//")) p = p.replace("//", "/");
-        String volume;
-        String rel;
-        if (p.startsWith("/storage/emulated/0/")) {
-            volume = "primary";
-            rel = p.substring("/storage/emulated/0/".length());
-        } else if ("/storage/emulated/0".equals(p)) {
-            volume = "primary";
-            rel = "";
-        } else if (p.startsWith("/sdcard/")) {
-            volume = "primary";
-            rel = p.substring("/sdcard/".length());
-        } else if ("/sdcard".equals(p)) {
-            volume = "primary";
-            rel = "";
-        } else if (p.startsWith("/storage/")) {
-            String rest = p.substring("/storage/".length());
-            int slash = rest.indexOf('/');
-            if (slash <= 0) return null;
-            volume = rest.substring(0, slash);
-            rel = rest.substring(slash + 1);
-        } else {
-            return null;
-        }
-        if (volume == null || volume.isEmpty() || rel == null) return null;
-        return new SafPath(volume, rel);
-    }
-
-    private boolean isSafTargetDirectory(Uri tree, String decodedTreeId, SafPath safPath) {
-        try {
-            if (tree == null || safPath == null) return false;
-            DocumentFile current = DocumentFile.fromTreeUri(this, tree);
-            if (current == null) return false;
-            String treePrefix = safPath.volume + ":";
-            String localRel = safPath.rel;
-            String treeRel = decodedTreeId != null && decodedTreeId.startsWith(treePrefix) ? decodedTreeId.substring(treePrefix.length()) : "";
-            if (!treeRel.isEmpty()) {
-                if (localRel.equals(treeRel)) localRel = "";
-                else if (localRel.startsWith(treeRel + "/")) localRel = localRel.substring(treeRel.length() + 1);
-            }
-            if (localRel == null || localRel.isEmpty()) return current.isDirectory();
-            String[] parts = localRel.split("/");
-            for (String part : parts) {
-                if (part == null || part.isEmpty() || ".".equals(part)) continue;
-                current = current.findFile(part);
-                if (current == null) return false;
-            }
-            return current.isDirectory();
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private Uri createSafProbeDocument(ContentResolver resolver, Uri tree, String decodedTreeId, SafPath safPath, boolean rawIsDirectory, String probeName) {
-        try {
-            if (resolver == null || tree == null || safPath == null || probeName == null || probeName.trim().isEmpty()) return null;
-            DocumentFile dir = DocumentFile.fromTreeUri(this, tree);
-            if (dir == null) return null;
-            String treePrefix = safPath.volume + ":";
-            String localRel = safPath.rel;
-            String treeRel = decodedTreeId != null && decodedTreeId.startsWith(treePrefix) ? decodedTreeId.substring(treePrefix.length()) : "";
-            if (!treeRel.isEmpty()) {
-                if (localRel.equals(treeRel)) localRel = "";
-                else if (localRel.startsWith(treeRel + "/")) localRel = localRel.substring(treeRel.length() + 1);
-            }
-            String[] parts = localRel.split("/");
-            DocumentFile current = dir;
-            int end = rawIsDirectory ? parts.length : Math.max(0, parts.length - 1);
-            for (int i = 0; i < end; i++) {
-                String part = parts[i];
-                if (part == null || part.isEmpty() || ".".equals(part)) continue;
-                DocumentFile child = current.findFile(part);
-                if (child == null) child = current.createDirectory(part);
-                if (child == null || !child.isDirectory()) return null;
-                current = child;
-            }
-            DocumentFile existing = current.findFile(probeName);
-            if (existing != null) {
-                try { existing.delete(); } catch (Throwable ignored) { }
-            }
-            DocumentFile probe = current.createFile("application/octet-stream", probeName);
-            return probe == null ? null : probe.getUri();
-        } catch (Throwable t) {
-            Log.w("YukiStorageProbe", "create SAF probe failed", t);
-            return null;
-        }
-    }
-
-    private static class SafPath {
-        final String volume;
-        final String rel;
-        SafPath(String volume, String rel) {
-            this.volume = volume;
-            this.rel = rel;
-        }
-    }
-
-    private boolean quickWriteProbe(File dir, String prefix) throws Exception {
-        if (dir == null || !dir.isDirectory()) return false;
-        File probe = new File(dir, prefix + "_" + android.os.Process.myPid() + "_" + System.nanoTime() + ".tmp");
-        boolean ok = false;
-        try (FileOutputStream out = new FileOutputStream(probe, false)) {
-            out.write(new byte[]{'Y', 'H'});
-            out.flush();
-            ok = probe.isFile() && probe.length() >= 2;
-        } finally {
-            if (probe.exists() && !probe.delete()) Log.w("YukiStorageProbe", "probe delete failed " + probe.getAbsolutePath());
-        }
-        return ok;
-    }
-
-    private String fastRawPathFromUri(String value) {
-        if (value == null || value.trim().isEmpty()) return value;
-        String s = value.trim();
-        if (s.startsWith("file://")) {
-            try { return Uri.parse(s).getPath(); } catch (Throwable ignored) { return s.substring("file://".length()); }
-        }
-        if (s.startsWith("/")) return s;
-        try {
-            Uri uri = Uri.parse(s);
-            String docId = null;
-            String path = uri.getPath();
-            if (path != null && path.contains("/document/")) {
-                try { docId = DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
-            }
-            if (docId == null || docId.isEmpty()) {
-                try { docId = DocumentsContract.getTreeDocumentId(uri); } catch (Throwable ignored) { }
-            }
-            if (docId == null || docId.isEmpty()) {
-                try { docId = DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
-            }
-            if (docId != null && !docId.isEmpty()) {
-                int colon = docId.indexOf(':');
-                String volume = colon >= 0 ? docId.substring(0, colon) : docId;
-                String rel = colon >= 0 ? docId.substring(colon + 1) : "";
-                if ("primary".equalsIgnoreCase(volume)) return rel.isEmpty() ? "/storage/emulated/0" : "/storage/emulated/0/" + rel;
-                if (volume != null && !volume.isEmpty()) return rel.isEmpty() ? "/storage/" + volume : "/storage/" + volume + "/" + rel;
-            }
-            String p = uri.getPath();
-            return p == null ? s : p;
-        } catch (Throwable t) {
-            return s;
-        }
-    }
-
-    private String shortError(Throwable t) {
-        if (t == null) return null;
-        String msg = t.getMessage();
-        String name = t.getClass().getSimpleName();
-        return msg == null || msg.trim().isEmpty() ? name : name + ": " + msg;
-    }
-
-    private static class StorageProbeResult {
-        String engine;
-        String rootUri;
-        String rawPath;
-        boolean rawResolved;
-        boolean rawExists;
-        boolean rawIsDirectory;
-        boolean rawReadOk;
-        boolean rawWriteOk;
-        boolean safCandidate;
-        boolean safTreeCoversPath;
-        boolean safReadOk;
-        boolean safWriteOk;
-        boolean appPrivateWriteOk;
-        String readError;
-        String writeError;
-        String safError;
-        String appPrivateError;
-        long elapsedMs;
-
-        String toLogLine() {
-            return "engine=" + engine
-                    + " rawResolved=" + rawResolved
-                    + " rawExists=" + rawExists
-                    + " rawDir=" + rawIsDirectory
-                    + " rawReadOk=" + rawReadOk
-                    + " rawWriteOk=" + rawWriteOk
-                    + " safCandidate=" + safCandidate
-                    + " safCovers=" + safTreeCoversPath
-                    + " safReadOk=" + safReadOk
-                    + " safWriteOk=" + safWriteOk
-                    + " appPrivateWriteOk=" + appPrivateWriteOk
-                    + " elapsedMs=" + elapsedMs
-                    + " rawPath=" + rawPath
-                    + " readErr=" + readError
-                    + " writeErr=" + writeError
-                    + " safErr=" + safError
-                    + " appErr=" + appPrivateError;
-        }
+        return storageProbeHelper.shouldUseKrSafFileFallback(game, lastStorageProbeResult, lastStorageProbeAt);
     }
 
     private boolean launchGameInternal(Game game, String emulatorPackage, String launchTarget) {
@@ -6103,18 +5531,11 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
 }
 
 private void resumeBackgroundVideoIfNeeded() {
-    if (prefs == null || !"video".equals(prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image"))) return;
-    if (backgroundMediaPlayer != null) {
-        try { if (!backgroundMediaPlayer.isPlaying()) backgroundMediaPlayer.start(); } catch (Throwable ignored) { }
-    } else if (pendingBackgroundVideoUri != null) {
-        TextureView textureView = findViewById(R.id.customBackgroundVideo);
-        if (textureView != null && textureView.getVisibility() == View.VISIBLE) playBackgroundVideo(textureView, pendingBackgroundVideoUri, false);
-    }
+    backgroundManager.resumeBackgroundVideoIfNeeded(findViewById(R.id.customBackgroundVideo));
 }
 
 private void pauseBackgroundVideoIfNeeded() {
-    if (prefs == null || !"video".equals(prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image"))) return;
-    try { if (backgroundMediaPlayer != null && backgroundMediaPlayer.isPlaying()) backgroundMediaPlayer.pause(); } catch (Throwable ignored) { }
+    backgroundManager.pauseBackgroundVideoIfNeeded();
 }
 
     private String emptyText(String s, String fallback) { return s == null || s.trim().isEmpty() ? fallback : s; }
