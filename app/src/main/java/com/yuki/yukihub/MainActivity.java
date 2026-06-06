@@ -3072,42 +3072,6 @@ LinearLayout accountActions = new LinearLayout(this);
         disclaimerButton.setOnClickListener(v -> showDisclaimerDialog());
         root.addView(disclaimerButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
 
-        TextView aboutTitle = new TextView(this);
-        aboutTitle.setText("\n关于我们");
-        aboutTitle.setTextColor(getColorCompat(R.color.yh_text));
-        aboutTitle.setTextSize(14);
-        aboutTitle.setTypeface(null, android.graphics.Typeface.BOLD);
-        root.addView(aboutTitle);
-
-        TextView aboutInfo = new TextView(this);
-        aboutInfo.setText("这里可以找到项目主页、官网和交流群，方便查看更新、反馈问题和获取帮助。\n");
-        aboutInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
-        aboutInfo.setTextSize(11);
-        aboutInfo.setLineSpacing(dp(2), 1.0f);
-        aboutInfo.setPadding(0, dp(4), 0, dp(6));
-        root.addView(aboutInfo);
-
-        Button updateButton = krButton("检查更新");
-        updateButton.setTextColor(getColorCompat(R.color.yh_primary));
-        updateButton.setOnClickListener(v -> checkUpdateManually());
-        CheckBox updateOnStartupCheck = krCheckBox("启动时自动检查更新", prefs == null || prefs.getBoolean(KEY_CHECK_UPDATE_ON_STARTUP, true));
-        root.addView(updateButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
-        root.addView(updateOnStartupCheck);
-
-        LinearLayout githubButton = linkCardButton("GitHub 仓库", R.drawable.ic_github);
-        LinearLayout websiteButton = linkCardButton("官方网站", android.R.drawable.ic_menu_view);
-        LinearLayout groupButton = linkCardButton("QQ 交流群", android.R.drawable.ic_dialog_email);
-        githubButton.setOnClickListener(v -> openExternalUrl("https://github.com/xm486/YukiHub"));
-        websiteButton.setOnClickListener(v -> openExternalUrl("https://yukihub.kesug.com/"));
-        groupButton.setOnClickListener(v -> openExternalUrl("https://qun.qq.com/universal-share/share?ac=1&authKey=nZMa0s3mxxG1A0f%2BY0nAWmBYpul7FWTEDI6UWrzqb2IgKC4aDkUhvkV2AekAkW%2F1&busi_data=eyJncm91cENvZGUiOiIxNjM2MDM2MzUiLCJ0b2tlbiI6Im93eFRyY0tqNDdxK3FGQXlVZ0lhMEZGbWZWemphZnpYYW1kWWpPN1ViL3A0SkRUd1dEclMwZkM1bWI0UEYxME4iLCJ1aW4iOiIzMDg2Njc4NzU1In0%3D&data=bwoLG7XAPzqsvtfneNCQUUlu-HpX1yCn-6dkgd8ubDeBJKEPgd7wKYa6ym-EbW07Vapc3xm_o-iy0GbFHhZk5Q&svctype=4&tempid=h5_group_info"));
-        root.addView(githubButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
-        LinearLayout.LayoutParams websiteLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
-        websiteLp.topMargin = dp(8);
-        root.addView(websiteButton, websiteLp);
-        LinearLayout.LayoutParams groupLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
-        groupLp.topMargin = dp(8);
-        root.addView(groupButton, groupLp);
-
         TextView sourceTitle = new TextView(this);
         sourceTitle.setText("\n右侧资料源");
         sourceTitle.setTextColor(getColorCompat(R.color.yh_text));
@@ -3237,6 +3201,42 @@ LinearLayout accountActions = new LinearLayout(this);
         LinearLayout.LayoutParams nativeKrkrLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
         nativeKrkrLp.setMargins(0, dp(10), 0, dp(4));
         root.addView(nativeKrkrButton, nativeKrkrLp);
+
+        TextView aboutTitle = new TextView(this);
+        aboutTitle.setText("\n关于我们");
+        aboutTitle.setTextColor(getColorCompat(R.color.yh_text));
+        aboutTitle.setTextSize(14);
+        aboutTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(aboutTitle);
+
+        TextView aboutInfo = new TextView(this);
+        aboutInfo.setText("这里可以找到项目主页、官网和交流群，方便查看更新、反馈问题和获取帮助。\n");
+        aboutInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        aboutInfo.setTextSize(11);
+        aboutInfo.setLineSpacing(dp(2), 1.0f);
+        aboutInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(aboutInfo);
+
+        Button updateButton = krButton("检查更新");
+        updateButton.setTextColor(getColorCompat(R.color.yh_primary));
+        updateButton.setOnClickListener(v -> checkUpdateManually());
+        CheckBox updateOnStartupCheck = krCheckBox("启动时自动检查更新", prefs == null || prefs.getBoolean(KEY_CHECK_UPDATE_ON_STARTUP, true));
+        root.addView(updateButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+        root.addView(updateOnStartupCheck);
+
+        LinearLayout githubButton = linkCardButton("GitHub 仓库", R.drawable.ic_github);
+        LinearLayout websiteButton = linkCardButton("官方网站", android.R.drawable.ic_menu_view);
+        LinearLayout groupButton = linkCardButton("QQ 交流群", android.R.drawable.ic_dialog_email);
+        githubButton.setOnClickListener(v -> openExternalUrl("https://github.com/xm486/YukiHub"));
+        websiteButton.setOnClickListener(v -> openExternalUrl("https://yukihub.kesug.com/"));
+        groupButton.setOnClickListener(v -> openExternalUrl("https://qun.qq.com/universal-share/share?ac=1&authKey=nZMa0s3mxxG1A0f%2BY0nAWmBYpul7FWTEDI6UWrzqb2IgKC4aDkUhvkV2AekAkW%2F1&busi_data=eyJncm91cENvZGUiOiIxNjM2MDM2MzUiLCJ0b2tlbiI6Im93eFRyY0tqNDdxK3FGQXlVZ0lhMEZGbWZWemphZnpYYW1kWWpPN1ViL3A0SkRUd1dEclMwZkM1bWI0UEYxME4iLCJ1aW4iOiIzMDg2Njc4NzU1In0%3D&data=bwoLG7XAPzqsvtfneNCQUUlu-HpX1yCn-6dkgd8ubDeBJKEPgd7wKYa6ym-EbW07Vapc3xm_o-iy0GbFHhZk5Q&svctype=4&tempid=h5_group_info"));
+        root.addView(githubButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+        LinearLayout.LayoutParams websiteLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        websiteLp.topMargin = dp(8);
+        root.addView(websiteButton, websiteLp);
+        LinearLayout.LayoutParams groupLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        groupLp.topMargin = dp(8);
+        root.addView(groupButton, groupLp);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
