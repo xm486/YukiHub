@@ -398,6 +398,95 @@ public class KR2Activity extends Cocos2dxActivity {
                 return new String[]{dir.getAbsolutePath()};
             }
         } catch (Throwable ignored) { }
-        return new String[]{Environment.getExternalStorageDirectory().getAbsolutePath()};
+
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
+        try {
+            Intent intent = getIntent();
+            if (intent != null) {
+                addKrStoragePathFromIntent(paths, intent, "projectRoot");
+                addKrStoragePathFromIntent(paths, intent, "gamedir");
+                addKrStoragePathFromIntent(paths, intent, "gamePath");
+                addKrStoragePathFromIntent(paths, intent, "path");
+                addKrStoragePathFromIntent(paths, intent, "rootUri");
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("KR2Activity", "collect intent storage path failed", t);
+        }
+        try {
+            File appExternal = getExternalFilesDir(null);
+            if (appExternal != null) addKrStoragePath(paths, appExternal.getAbsolutePath());
+        } catch (Throwable ignored) { }
+        addKrStoragePath(paths, Environment.getExternalStorageDirectory().getAbsolutePath());
+        if (paths.isEmpty()) return new String[]{Environment.getExternalStorageDirectory().getAbsolutePath()};
+        String[] out = paths.toArray(new String[0]);
+        android.util.Log.i("KR2Activity", "getStoragePath " + java.util.Arrays.toString(out));
+        return out;
+    }
+
+    private static void addKrStoragePathFromIntent(java.util.LinkedHashSet<String> out, Intent intent, String key) {
+        if (intent == null || key == null) return;
+        addKrStoragePath(out, intent.getStringExtra(key));
+    }
+
+    private static void addKrStoragePath(java.util.LinkedHashSet<String> out, String rawPath) {
+        if (out == null || rawPath == null) return;
+        String p = normalizeKrFilePath(rawPath);
+        if (p == null || p.trim().isEmpty()) return;
+        if (p.startsWith("content://")) p = contentUriToRawPath(p);
+        p = normalizeKrFilePath(p);
+        if (p == null || !p.startsWith("/")) return;
+        while (p.endsWith("/") && p.length() > 1) p = p.substring(0, p.length() - 1);
+        String lower = p.toLowerCase(Locale.ROOT);
+        if (lower.equals("/sdcard") || lower.startsWith("/sdcard/")) {
+            out.add("/sdcard");
+            return;
+        }
+        if (lower.equals("/storage/emulated/0") || lower.startsWith("/storage/emulated/0/")) {
+            out.add("/storage/emulated/0");
+            return;
+        }
+        if (lower.startsWith("/storage/")) {
+            String rest = p.substring("/storage/".length());
+            int slash = rest.indexOf('/');
+            if (slash > 0) {
+                out.add("/storage/" + rest.substring(0, slash));
+                return;
+            }
+            out.add(p);
+            return;
+        }
+        try {
+            File f = new File(p);
+            if (f.isFile()) {
+                File parent = f.getParentFile();
+                if (parent != null) out.add(parent.getAbsolutePath());
+            } else {
+                out.add(f.getAbsolutePath());
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private static String contentUriToRawPath(String value) {
+        try {
+            android.net.Uri uri = android.net.Uri.parse(value);
+            String docId = null;
+            String path = uri.getPath();
+            if (path != null && path.contains("/document/")) {
+                try { docId = android.provider.DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
+            }
+            if (docId == null || docId.isEmpty()) {
+                try { docId = android.provider.DocumentsContract.getTreeDocumentId(uri); } catch (Throwable ignored) { }
+            }
+            if (docId == null || docId.isEmpty()) {
+                try { docId = android.provider.DocumentsContract.getDocumentId(uri); } catch (Throwable ignored) { }
+            }
+            if (docId == null || docId.isEmpty()) return value;
+            int colon = docId.indexOf(':');
+            String volume = colon >= 0 ? docId.substring(0, colon) : docId;
+            String rel = colon >= 0 ? docId.substring(colon + 1) : "";
+            if ("primary".equalsIgnoreCase(volume)) return rel.isEmpty() ? "/storage/emulated/0" : "/storage/emulated/0/" + rel;
+            if (volume != null && !volume.isEmpty()) return rel.isEmpty() ? "/storage/" + volume : "/storage/" + volume + "/" + rel;
+        } catch (Throwable ignored) { }
+        return value;
     }
 }

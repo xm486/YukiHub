@@ -63,6 +63,29 @@ public class MetadataRepository {
         db.insertWithOnConflict("metadata_cache", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    public VnMetadata getYmgal(long gameId) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT json FROM metadata_cache WHERE game_id=? AND source='ymgal' LIMIT 1", new String[]{String.valueOf(gameId)});
+        try {
+            if (!c.moveToFirst()) return null;
+            return VnMetadata.fromJson(c.getString(0));
+        } finally {
+            c.close();
+        }
+    }
+
+    public void saveYmgal(long gameId, VnMetadata data) {
+        if (gameId <= 0 || data == null) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        ContentValues v = new ContentValues();
+        v.put("game_id", gameId);
+        v.put("source", "ymgal");
+        v.put("source_id", data.id);
+        v.put("json", data.toJson().toString());
+        v.put("updated_at", System.currentTimeMillis());
+        db.insertWithOnConflict("metadata_cache", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
     public JSONArray exportMetadataJson() throws Exception {
         JSONArray arr = new JSONArray();
         SQLiteDatabase db = helper.getReadableDatabase();
@@ -148,5 +171,10 @@ public class MetadataRepository {
     public void clearBangumi(long gameId) {
         SQLiteDatabase db = helper.getWritableDatabase();
         db.delete("metadata_cache", "game_id=? AND source='bangumi'", new String[]{String.valueOf(gameId)});
+    }
+
+    public void clearYmgal(long gameId) {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        db.delete("metadata_cache", "game_id=? AND source='ymgal'", new String[]{String.valueOf(gameId)});
     }
 }

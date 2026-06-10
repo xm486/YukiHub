@@ -188,7 +188,7 @@ public abstract class r extends KR2Activity {
         } catch (Throwable ignored) { }
         super.onDestroy();
         if (!isChangingConfigurations() && terminateProcess) {
-            Log.i(TAG, "terminate Huawei KR wrapper process after destroy to avoid stale native state");
+            Log.i(TAG, "terminate KR wrapper process after destroy to avoid stale native state");
             android.os.Process.killProcess(android.os.Process.myPid());
         }
     }
@@ -197,13 +197,15 @@ public abstract class r extends KR2Activity {
         try {
             Intent intent = getIntent();
             if (intent == null) return false;
+            if (intent.getBooleanExtra("terminateKrProcessOnDestroy", false)) return true;
+            if (intent.getBooleanExtra("autoKrMirror", false)) return true;
+            if (intent.getBooleanExtra("scopedSaveDir", false)) return true;
+            if (intent.getBooleanExtra("safFileFallback", false)) return true;
             boolean safRoot = false;
             String rootUri = intent.getStringExtra("rootUri");
             if (rootUri != null) safRoot = rootUri.trim().toLowerCase(java.util.Locale.ROOT).startsWith("content://");
             boolean specialLaunch = safRoot
                     || intent.getBooleanExtra("compatMode", false)
-                    || intent.getBooleanExtra("safFileFallback", false)
-                    || intent.getBooleanExtra("scopedSaveDir", false)
                     || "1.3.4".equals(intent.getStringExtra("krEngineVersion"));
             if (!specialLaunch) return false;
             String brand = String.valueOf(android.os.Build.BRAND).toLowerCase(java.util.Locale.ROOT);

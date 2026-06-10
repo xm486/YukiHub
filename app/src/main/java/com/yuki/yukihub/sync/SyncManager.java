@@ -33,7 +33,8 @@ public class SyncManager {
     private static final String KEY_METADATA_SOURCE = "metadata_source";
     private static final String SOURCE_VNDB = "vndb";
     private static final String SOURCE_BANGUMI = "bangumi";
-    private static final String SOURCE_BANGUMI_MIRROR = "bangumi_mirror";
+private static final String SOURCE_BANGUMI_MIRROR = "bangumi_mirror";
+private static final String SOURCE_YMGAL = "ymgal";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
 private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled";
     private static final String KEY_BACKGROUND_DIM_ALPHA = "background_dim_alpha";
@@ -310,7 +311,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         if (settings != null) {
             SharedPreferences.Editor e = appPrefs.edit();
             String source = settings.optString("metadata_source", "");
-            if (SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) e.putString(KEY_METADATA_SOURCE, source);
+            if (SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source)) e.putString(KEY_METADATA_SOURCE, source);
             // 兼容旧备份：忽略扫描目录（last_scan_root_uri/scan_root_uris），避免导入跨设备无效路径或泄露本机目录。
             if (settings.has("auto_scan_on_startup")) e.putBoolean(KEY_AUTO_SCAN_ON_STARTUP, settings.optBoolean("auto_scan_on_startup", false));
             if (settings.has("startup_scan_depth")) e.putInt(KEY_STARTUP_SCAN_DEPTH, Math.max(1, Math.min(4, settings.optInt("startup_scan_depth", 2))));

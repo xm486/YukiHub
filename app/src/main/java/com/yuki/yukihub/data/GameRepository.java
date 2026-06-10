@@ -286,6 +286,7 @@ public class GameRepository {
         public long endTime;
         public long duration;
         public String launchType;
+        public String playStatus;
     }
 
     public Map<String, Long> getPlayDurationsBetween(long startInclusive, long endExclusive) {
@@ -309,12 +310,11 @@ public class GameRepository {
         return result;
     }
 
-
     public List<PlayActivity> getRecentPlayActivities(int limit) {
         List<PlayActivity> list = new ArrayList<>();
         SQLiteDatabase db = helper.getReadableDatabase();
         Cursor c = db.rawQuery(
-                "SELECT ps.id,ps.session_uuid,ps.game_id,g.title,ps.start_time,ps.end_time,ps.duration,ps.launch_type " +
+                "SELECT ps.id,ps.session_uuid,ps.game_id,g.title,ps.start_time,ps.end_time,ps.duration,ps.launch_type,g.play_status " +
                         "FROM play_sessions ps JOIN games g ON g.id=ps.game_id " +
                         "WHERE ps.end_time IS NOT NULL AND IFNULL(ps.deleted,0)=0 " +
                         "ORDER BY ps.end_time DESC LIMIT ?",
@@ -330,6 +330,7 @@ public class GameRepository {
                 a.endTime = c.getLong(5);
                 a.duration = c.getLong(6);
                 a.launchType = c.getString(7);
+                a.playStatus = normalizePlayStatus(c.getString(8));
                 if (a.gameTitle == null || a.gameTitle.trim().isEmpty()) a.gameTitle = "未命名游戏";
                 list.add(a);
             }
@@ -338,6 +339,37 @@ public class GameRepository {
         }
         return list;
     }
+
+    public List<PlayActivity> getPlayActivitiesBetween(long startInclusive, long endExclusive, int limit) {
+        List<PlayActivity> list = new ArrayList<>();
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = db.rawQuery(
+                "SELECT ps.id,ps.session_uuid,ps.game_id,g.title,ps.start_time,ps.end_time,ps.duration,ps.launch_type,g.play_status " +
+                        "FROM play_sessions ps JOIN games g ON g.id=ps.game_id " +
+                        "WHERE ps.end_time IS NOT NULL AND ps.end_time>=? AND ps.end_time<? AND IFNULL(ps.deleted,0)=0 " +
+                        "ORDER BY ps.end_time DESC LIMIT ?",
+                new String[]{String.valueOf(startInclusive), String.valueOf(endExclusive), String.valueOf(Math.max(1, limit))});
+        try {
+            while (c.moveToNext()) {
+                PlayActivity a = new PlayActivity();
+                a.sessionId = c.getLong(0);
+                a.sessionUuid = c.getString(1);
+                a.gameId = c.getLong(2);
+                a.gameTitle = c.getString(3);
+                a.startTime = c.getLong(4);
+                a.endTime = c.getLong(5);
+                a.duration = c.getLong(6);
+                a.launchType = c.getString(7);
+                a.playStatus = normalizePlayStatus(c.getString(8));
+                if (a.gameTitle == null || a.gameTitle.trim().isEmpty()) a.gameTitle = "未命名游戏";
+                list.add(a);
+            }
+        } finally {
+            c.close();
+        }
+        return list;
+    }
+
 
     public JSONArray exportGamesJson() throws Exception {
         JSONArray arr = new JSONArray();

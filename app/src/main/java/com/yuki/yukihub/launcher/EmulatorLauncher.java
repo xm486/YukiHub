@@ -805,19 +805,25 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         String rawRootPath = stripFileScheme(uriToFilePath(gamePath));
         String path = resolvedPath == null ? null : stripFileScheme(resolvedPath);
         String rootPath = krkrRootForPath(rawRootPath, path);
-        boolean scopedSaveDir = context != null && context.getSharedPreferences("yukihub_prefs", Context.MODE_PRIVATE).getBoolean("kr_scoped_save_dir", false);
+        boolean globalScopedSaveDir = context != null && context.getSharedPreferences("yukihub_prefs", Context.MODE_PRIVATE).getBoolean("kr_scoped_save_dir", false);
+        boolean autoSdCardMirror = !originMode && !globalScopedSaveDir && isExternalSdCardKrPath(rootPath);
+        boolean scopedSaveDir = globalScopedSaveDir || autoSdCardMirror;
         String saveName = safeSaveName(rootPath);
         if (!originMode && scopedSaveDir) {
             KrkrMirror mirror = prepareKrkrScopedMirror(context, rootPath, path, saveName);
             if (mirror != null) {
-                Log.i("EmulatorLauncher", "internal KRKR scoped mirror root=" + rootPath + " -> " + mirror.rootPath + " path=" + path + " -> " + mirror.launchPath);
+                Log.i("EmulatorLauncher", "internal KRKR scoped mirror root=" + rootPath + " -> " + mirror.rootPath + " path=" + path + " -> " + mirror.launchPath + " globalScoped=" + globalScopedSaveDir + " autoSdMirror=" + autoSdCardMirror);
                 rootPath = mirror.rootPath;
                 path = mirror.launchPath;
+            } else if (autoSdCardMirror) {
+                scopedSaveDir = globalScopedSaveDir;
+                autoSdCardMirror = false;
+                Log.w("EmulatorLauncher", "internal KRKR auto SD mirror failed, fallback normal root=" + rootPath + " path=" + path);
             }
         }
         boolean use134 = !originMode && shouldUseKrkr134(rootPath, engineVersion);
         Intent i = new Intent(context, originMode ? org.tvp.kirikiri2.KR2Activity.class : (use134 ? com.akira.tyranoemu.remote.Kirikiroid134.class : com.akira.tyranoemu.remote.Kirikiroid139.class));
-        Log.i("EmulatorLauncher", "internal KRKR originMode=" + originMode + " engineVersion=" + normalizeKrkrEngineVersion(engineVersion) + " use134=" + use134 + " root=" + gamePath + " target=" + launchTarget + " resolved=" + resolvedPath + " rootPath=" + rootPath);
+        Log.i("EmulatorLauncher", "internal KRKR originMode=" + originMode + " engineVersion=" + normalizeKrkrEngineVersion(engineVersion) + " use134=" + use134 + " root=" + gamePath + " target=" + launchTarget + " resolved=" + resolvedPath + " rootPath=" + rootPath + " globalScoped=" + globalScopedSaveDir + " scoped=" + scopedSaveDir + " autoSdMirror=" + autoSdCardMirror);
         if (path != null && !path.isEmpty()) {
             // 普通模式也使用普通文件路径，让默认启动链更接近原生 KRKR / TY 的读取方式。
             i.putExtra("path", path);
@@ -843,6 +849,9 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         i.putExtra("orientation", 6);
         i.putExtra("launchMode", originMode ? "internal.krkr.origin" : "internal.krkr");
         i.putExtra("scopedSaveDir", scopedSaveDir);
+        i.putExtra("globalScopedSaveDir", globalScopedSaveDir);
+        i.putExtra("autoKrMirror", autoSdCardMirror);
+        i.putExtra("terminateKrProcessOnDestroy", scopedSaveDir || safFileFallback || autoSdCardMirror);
         i.putExtra("scopedSaveName", saveName);
         i.putExtra("safFileFallback", safFileFallback);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
@@ -1064,6 +1073,25 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
             }
         } catch (Throwable ignored) { }
         return rawRootPath;
+    }
+
+    private static boolean isExternalSdCardKrPath(String path) {
+        try {
+            if (path == null || path.trim().isEmpty()) return false;
+            String p = stripFileScheme(path.trim());
+            if (p == null || !p.startsWith("/storage/")) return false;
+            String lower = p.toLowerCase(Locale.ROOT);
+            if (lower.equals("/storage/emulated") || lower.startsWith("/storage/emulated/")) return false;
+            String rest = p.substring("/storage/".length());
+            int slash = rest.indexOf('/');
+            String volume = slash >= 0 ? rest.substring(0, slash) : rest;
+            if (volume == null || volume.trim().isEmpty()) return false;
+            String v = volume.toLowerCase(Locale.ROOT);
+            if ("self".equals(v) || "emulated".equals(v)) return false;
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static String findFirstChildBySuffix(String rootPath, String suffix) {

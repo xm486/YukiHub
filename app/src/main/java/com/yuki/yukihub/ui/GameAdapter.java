@@ -21,14 +21,21 @@ import java.util.List;
 
 public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
     public interface OnGameClickListener { void onGameClick(Game game); void onGameDoubleClick(Game game); void onGameLongClick(Game game); void onStatusClick(Game game); }
+    public interface OnUiFeedbackListener { void onUiFeedback(int type); }
+    public static final int FEEDBACK_CLICK = 0;
+    public static final int FEEDBACK_CONFIRM = 1;
+    public static final int FEEDBACK_SWITCH = 2;
     private final List<Game> games = new ArrayList<>();
     private OnGameClickListener listener;
+    private OnUiFeedbackListener feedbackListener;
     private long selectedGameId = -1;
     private long lastClickTime = 0L;
     private long lastClickGameId = -1L;
 
     public void setOnGameClickListener(OnGameClickListener listener) { this.listener = listener; }
-    public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChanged(); }
+public void setOnUiFeedbackListener(OnUiFeedbackListener listener) { this.feedbackListener = listener; }
+private void emitFeedback(int type) { if (feedbackListener != null) feedbackListener.onUiFeedback(type); }
+public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChanged(); }
     public void submit(List<Game> newGames) { games.clear(); games.addAll(newGames); notifyDataSetChanged(); }
 
     @NonNull
@@ -71,8 +78,11 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
             h.placeholder.setVisibility(View.VISIBLE);
             h.placeholder.setText(initials(g.title));
         }
+        try { h.itemView.setSoundEffectsEnabled(false); } catch (Throwable ignored) { }
+        try { h.statusBadge.setSoundEffectsEnabled(false); } catch (Throwable ignored) { }
         applyCardFeedback(h.itemView);
         h.statusBadge.setOnClickListener(v -> {
+            emitFeedback(FEEDBACK_SWITCH);
             try { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); } catch (Throwable ignored) { }
             selectedGameId = g.id;
             notifyDataSetChanged();
@@ -82,6 +92,7 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
             try { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); } catch (Throwable ignored) { }
             long now = System.currentTimeMillis();
             boolean isDouble = lastClickGameId == g.id && (now - lastClickTime) <= 350L;
+            emitFeedback(isDouble ? FEEDBACK_CONFIRM : FEEDBACK_CLICK);
             lastClickGameId = g.id;
             lastClickTime = now;
             selectedGameId = g.id;
@@ -92,6 +103,7 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
             }
         });
         h.itemView.setOnLongClickListener(v -> {
+            emitFeedback(FEEDBACK_CONFIRM);
             try { v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); } catch (Throwable ignored) { }
             if (listener != null) listener.onGameLongClick(g);
             return true;
