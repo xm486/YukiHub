@@ -252,9 +252,11 @@ private static final String KEY_UI_CLICK_SOUND = "ui_click_sound";
 private static final int UI_SOUND_CLICK = 0;
 private static final int UI_SOUND_CONFIRM = 1;
 private static final int UI_SOUND_SWITCH = 2;
-private static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
-private static final String KEY_DISCLAIMER_ACCEPTED_AT = "disclaimer_accepted_at";
-private static final int DISCLAIMER_VERSION = 1;
+    private static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
+    private static final String KEY_DISCLAIMER_ACCEPTED_AT = "disclaimer_accepted_at";
+    private static final int DISCLAIMER_VERSION = 1;
+    private static final String KEY_GAME_COLUMNS = "game_columns";
+    private static final int DEFAULT_GAME_COLUMNS = 5;
 private int pendingScanRootReplaceIndex = -2;
 private LinearLayout activeScanRootList;
 private TextView activeScanRootInfo;
@@ -880,7 +882,9 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
             @Override public void onGameLongClick(Game game) { showEditDialog(game); }
             @Override public void onStatusClick(Game game) { updateSideDetail(game); showPlayStatusDialog(game, null); }
         });
-        recycler.setLayoutManager(new GridLayoutManager(this, 5));
+        int columns = prefs == null ? DEFAULT_GAME_COLUMNS : prefs.getInt(KEY_GAME_COLUMNS, DEFAULT_GAME_COLUMNS);
+        columns = Math.max(2, Math.min(10, columns));
+        recycler.setLayoutManager(new GridLayoutManager(this, columns));
         recycler.setAdapter(adapter);
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
@@ -4339,8 +4343,8 @@ private String extractImageUrlFromHtml(String html, String baseUrl) {
 }
 
 private int dp(int value) {
-    return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-}
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
 
 private String safeCacheName(String input) {
     if (input == null) return "cache";
@@ -5027,6 +5031,57 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         fontResetLp.topMargin = dp(6);
         root.addView(fontReset, fontResetLp);
 
+        TextView uiScaleTitle = new TextView(this);
+        uiScaleTitle.setText("\n界面整体缩放");
+        uiScaleTitle.setTextColor(getColorCompat(R.color.yh_text));
+        uiScaleTitle.setTextSize(14);
+        uiScaleTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(uiScaleTitle);
+
+        float savedUiScale = prefs == null ? UiScaleUtil.DEFAULT_UI_SCALE : prefs.getFloat(UiScaleUtil.KEY_UI_SCALE, UiScaleUtil.DEFAULT_UI_SCALE);
+        TextView uiScaleInfo = new TextView(this);
+        uiScaleInfo.setText("当前：" + UiScaleUtil.uiScalePercent(savedUiScale) + "%（默认 100%）· 平板建议 120-150%");
+        uiScaleInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        uiScaleInfo.setTextSize(11);
+        uiScaleInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(uiScaleInfo);
+
+        LinearLayout uiScaleRow = new LinearLayout(this);
+        uiScaleRow.setOrientation(LinearLayout.HORIZONTAL);
+        uiScaleRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        SeekBar uiScaleSeek = new SeekBar(this);
+        uiScaleSeek.setMax((int) ((UiScaleUtil.MAX_UI_SCALE - UiScaleUtil.MIN_UI_SCALE) * 100f));
+        uiScaleSeek.setProgress(Math.round((savedUiScale - UiScaleUtil.MIN_UI_SCALE) * 100f));
+        LinearLayout.LayoutParams uiScaleSeekLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        uiScaleRow.addView(uiScaleSeek, uiScaleSeekLp);
+        TextView uiScaleValue = new TextView(this);
+        uiScaleValue.setText(UiScaleUtil.uiScalePercent(savedUiScale) + "%");
+        uiScaleValue.setTextColor(getColorCompat(R.color.yh_text));
+        uiScaleValue.setTextSize(15);
+        uiScaleValue.setTypeface(null, android.graphics.Typeface.BOLD);
+        uiScaleValue.setPadding(dp(10), 0, 0, 0);
+        uiScaleRow.addView(uiScaleValue);
+        root.addView(uiScaleRow);
+        uiScaleSeek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float scale = UiScaleUtil.clampUiScale(UiScaleUtil.MIN_UI_SCALE + progress / 100f);
+                uiScaleValue.setText(UiScaleUtil.uiScalePercent(scale) + "%");
+                uiScaleInfo.setText("当前：" + UiScaleUtil.uiScalePercent(scale) + "%（默认 100%）· 平板建议 120-150%");
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        Button uiScaleReset = krButton("恢复默认缩放");
+        uiScaleReset.setTextColor(getColorCompat(R.color.yh_text));
+        uiScaleReset.setOnClickListener(v -> {
+            uiScaleSeek.setProgress(Math.round((UiScaleUtil.DEFAULT_UI_SCALE - UiScaleUtil.MIN_UI_SCALE) * 100f));
+            uiScaleValue.setText("100%");
+            uiScaleInfo.setText("当前：100%（默认 100%）· 平板建议 120-150%");
+        });
+        LinearLayout.LayoutParams uiScaleResetLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+        uiScaleResetLp.topMargin = dp(6);
+        root.addView(uiScaleReset, uiScaleResetLp);
+
         CheckBox autoScanCheck = krCheckBox("进入应用时自动扫描上次目录", prefs == null || prefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, true));
         root.addView(autoScanCheck);
 
@@ -5060,6 +5115,48 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         personalizationTitle.setTextSize(14);
         personalizationTitle.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(personalizationTitle);
+
+        TextView columnsTitle = new TextView(this);
+        columnsTitle.setText("每行游戏数目");
+        columnsTitle.setTextColor(getColorCompat(R.color.yh_text_muted));
+        columnsTitle.setTextSize(11);
+        columnsTitle.setPadding(0, dp(4), 0, dp(6));
+        root.addView(columnsTitle);
+
+        int savedColumns = prefs == null ? DEFAULT_GAME_COLUMNS : prefs.getInt(KEY_GAME_COLUMNS, DEFAULT_GAME_COLUMNS);
+        savedColumns = Math.max(2, Math.min(10, savedColumns));
+        TextView columnsInfo = new TextView(this);
+        columnsInfo.setText("当前：" + savedColumns + " 个（默认 5 个）");
+        columnsInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        columnsInfo.setTextSize(11);
+        columnsInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(columnsInfo);
+
+        LinearLayout columnsRow = new LinearLayout(this);
+        columnsRow.setOrientation(LinearLayout.HORIZONTAL);
+        columnsRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        SeekBar columnsSeek = new SeekBar(this);
+        columnsSeek.setMax(8); // 2-10: 0-8
+        columnsSeek.setProgress(savedColumns - 2);
+        LinearLayout.LayoutParams columnsSeekLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        columnsRow.addView(columnsSeek, columnsSeekLp);
+        TextView columnsValue = new TextView(this);
+        columnsValue.setText(String.valueOf(savedColumns));
+        columnsValue.setTextColor(getColorCompat(R.color.yh_text));
+        columnsValue.setTextSize(15);
+        columnsValue.setTypeface(null, android.graphics.Typeface.BOLD);
+        columnsValue.setPadding(dp(10), 0, 0, 0);
+        columnsRow.addView(columnsValue);
+        root.addView(columnsRow);
+        columnsSeek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int cols = Math.max(2, Math.min(10, progress + 2));
+                columnsValue.setText(String.valueOf(cols));
+                columnsInfo.setText("当前：" + cols + " 个（默认 5 个）");
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
 
         TextView engineLabelTitle = new TextView(this);
         engineLabelTitle.setText("游戏引擎标签位置");
@@ -5344,6 +5441,8 @@ else sourceSpinner.setSelection(0);
 .putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
 .putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, artemisScopedSaveDir.isChecked())
 .putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
+                    .putFloat(UiScaleUtil.KEY_UI_SCALE, UiScaleUtil.clampUiScale(UiScaleUtil.MIN_UI_SCALE + uiScaleSeek.getProgress() / 100f))
+                    .putInt(KEY_GAME_COLUMNS, Math.max(2, Math.min(10, columnsSeek.getProgress() + 2)))
                     .apply();
             applyCustomBackground();
             Toast.makeText(this, "已保存资料源：" + (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();

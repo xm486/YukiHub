@@ -48,6 +48,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
     private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
     private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
     private static final String KEY_UI_FONT_SCALE = "ui_font_scale";
+    private static final String KEY_GAME_COLUMNS = "game_columns";
+    private static final String KEY_UI_SCALE = "ui_scale";
 
     // 游戏库/游戏卡片信息必须完整同步；只限制动态类数据（游玩记录）数量。
     private static final int MAX_PLAY_SESSIONS = 200;
@@ -271,6 +273,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         // 不同步自定义背景文件引用：本地图片/视频路径跨设备通常无效，且视频背景不应进入同步逻辑。
         settings.put("background_dim_enabled", appPrefs.getBoolean(KEY_BACKGROUND_DIM_ENABLED, true));
         settings.put("background_dim_alpha", appPrefs.getInt(KEY_BACKGROUND_DIM_ALPHA, 120));
+        settings.put("game_columns", appPrefs.getInt(KEY_GAME_COLUMNS, 5));
+        settings.put("ui_scale", appPrefs.getFloat(KEY_UI_SCALE, 1.0f));
         root.put("settings", settings);
 
         root.put("games", gameRepo.exportGamesJson());
@@ -332,6 +336,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
             // 不导入 custom_background/custom_background_type，避免旧备份里的本地图片/视频路径污染新设备。
             if (settings.has("background_dim_enabled")) e.putBoolean(KEY_BACKGROUND_DIM_ENABLED, settings.optBoolean("background_dim_enabled", true));
             if (settings.has("background_dim_alpha")) e.putInt(KEY_BACKGROUND_DIM_ALPHA, settings.optInt("background_dim_alpha", 120));
+            if (settings.has("game_columns")) e.putInt(KEY_GAME_COLUMNS, Math.max(2, Math.min(10, settings.optInt("game_columns", 5))));
+            if (settings.has("ui_scale")) e.putFloat(KEY_UI_SCALE, (float) Math.max(0.70d, Math.min(1.50d, settings.optDouble("ui_scale", 1.0d))));
             e.apply();
         }
         GameRepository gameRepo = new GameRepository(context);
