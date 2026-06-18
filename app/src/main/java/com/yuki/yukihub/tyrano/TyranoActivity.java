@@ -90,11 +90,11 @@ public class TyranoActivity extends Activity {
             try {
                 asarArchive = new AsarArchive(new File(asarPath));
             } catch (Throwable t) {
-                Log.e(TAG, "open asar failed", t);
-                Toast.makeText(this, "Tyrano 启动失败：无法读取 app.asar", Toast.LENGTH_LONG).show();
-                finish();
-                return;
-            }
+            Log.e(TAG, "open asar failed", t);
+            Toast.makeText(this, "Tyrano 启动失败：无法读取 app.asar", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         }
         Log.i(TAG, "entry mode=" + (gameUsesAsar ? "asar" : "dir") + " asar=" + asarPath);
 

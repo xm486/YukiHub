@@ -135,6 +135,7 @@ import com.yuki.yukihub.scanner.ScanResult;
 import com.yuki.yukihub.ui.GameAdapter;
 import com.yuki.yukihub.ui.ScanResultAdapter;
 import com.yuki.yukihub.util.AppExecutors;
+import com.yuki.yukihub.util.DevLogger;
 import com.yuki.yukihub.util.TimeFormatUtil;
 import com.yuki.yukihub.util.UiScaleUtil;
 
@@ -284,8 +285,9 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
         repository = new GameRepository(this);
 metadataRepository = new MetadataRepository(this);
 prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-try { setVolumeControlStream(AudioManager.STREAM_MUSIC); } catch (Throwable ignored) { }
-try { ensureUiSoundPool(); } catch (Throwable ignored) { }
+        try { DevLogger.init(this); } catch (Throwable ignored) { }
+        try { setVolumeControlStream(AudioManager.STREAM_MUSIC); } catch (Throwable ignored) { }
+        try { ensureUiSoundPool(); } catch (Throwable ignored) { }
 if (!ensureDisclaimerAccepted()) {
             return;
         }
@@ -3246,10 +3248,10 @@ private void exportLocalBackup(Uri uri) {
             out.flush();
         }
         Toast.makeText(this, "备份完成：" + (bytes.length / 1024) + "KB", Toast.LENGTH_LONG).show();
-    } catch (Throwable t) {
-        Toast.makeText(this, "备份失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
-        Log.e("YukiHub", "export backup failed", t);
-    }
+} catch (Throwable t) {
+            Toast.makeText(this, "备份失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e("YukiHub", "export backup failed", t);
+        }
 }
 
 private void importLocalBackup(Uri uri) {
@@ -3268,10 +3270,10 @@ private void importLocalBackup(Uri uri) {
         int sessionCount = root.optJSONArray("play_sessions") == null ? 0 : root.optJSONArray("play_sessions").length();
         int metaCount = root.optJSONArray("metadata_cache") == null ? 0 : root.optJSONArray("metadata_cache").length();
         Toast.makeText(this, "导入完成：游戏 " + gameCount + "，记录 " + sessionCount + "，元数据 " + metaCount, Toast.LENGTH_LONG).show();
-    } catch (Throwable t) {
-        Toast.makeText(this, "导入失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
-        Log.e("YukiHub", "import backup failed", t);
-    }
+} catch (Throwable t) {
+            Toast.makeText(this, "导入失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e("YukiHub", "import backup failed", t);
+        }
 }
 
 private String readTextFromUri(Uri uri) throws Exception {
@@ -3565,13 +3567,13 @@ private void bindFilter(int id, String value) {
             ((TextView) view).setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         }
     }
-    private void loadGames() {
+private void loadGames() {
 allGames.clear();
 allGames.addAll(repository.getAll());
 rebuildDeveloperFilters();
 applyFilter();
 runCoverMaintenanceOnceIfNeeded();
-}
+    }
 
 private void runCoverMaintenanceOnceIfNeeded() {
 if (coverMaintenanceDone) return;
@@ -5392,6 +5394,72 @@ else sourceSpinner.setSelection(0);
         nativeKrkrLp.setMargins(0, dp(10), 0, dp(4));
         root.addView(nativeKrkrButton, nativeKrkrLp);
 
+        // === 开发者选项 ===
+        TextView devTitle = new TextView(this);
+        devTitle.setText("\n开发者选项");
+        devTitle.setTextColor(getColorCompat(R.color.yh_text));
+        devTitle.setTextSize(14);
+        devTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(devTitle);
+
+        TextView devInfo = new TextView(this);
+        devInfo.setText("开启后自动捕获系统日志（logcat），包含引擎运行、WebView、异常等所有输出。\n日志路径：Android/data/com.yuki.yukihub/files/logs/");
+        devInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        devInfo.setTextSize(11);
+        devInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(devInfo);
+
+        CheckBox logEnabledCheck = krCheckBox("开启日志收集", DevLogger.isEnabled());
+        root.addView(logEnabledCheck);
+
+        LinearLayout logActions = new LinearLayout(this);
+        logActions.setOrientation(LinearLayout.HORIZONTAL);
+        logActions.setPadding(0, dp(8), 0, 0);
+
+        Button exportLogBtn = krButton("导出日志");
+        exportLogBtn.setTextColor(getColorCompat(R.color.yh_primary));
+        exportLogBtn.setOnClickListener(v -> {
+            File logFile = DevLogger.getLogFile();
+            if (logFile == null || !logFile.exists()) {
+                Toast.makeText(this, "暂无日志文件", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            try {
+                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                shareIntent.setType("text/plain");
+                shareIntent.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", logFile));
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "YukiHub Logcat");
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(shareIntent, "导出日志"));
+            } catch (Throwable t) {
+                Toast.makeText(this, "导出失败：" + t.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+        logActions.addView(exportLogBtn, new LinearLayout.LayoutParams(0, dp(40), 1));
+
+        Button clearLogBtn = krButton("清空日志");
+        clearLogBtn.setTextColor(getColorCompat(R.color.yh_text));
+        clearLogBtn.setOnClickListener(v -> {
+            if (DevLogger.clearLog()) {
+                Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "清空失败", Toast.LENGTH_SHORT).show();
+            }
+        });
+        LinearLayout.LayoutParams clearLogLp = new LinearLayout.LayoutParams(0, dp(40), 1);
+        clearLogLp.setMargins(dp(8), 0, 0, 0);
+        logActions.addView(clearLogBtn, clearLogLp);
+        root.addView(logActions);
+
+        TextView logPathInfo = new TextView(this);
+        String logPath = DevLogger.getLogPath();
+        String logSize = DevLogger.formatSize(DevLogger.getLogSize());
+        logPathInfo.setText("当前日志大小：" + logSize + "\n路径：" + (logPath != null ? logPath : "未初始化"));
+        logPathInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        logPathInfo.setTextSize(10);
+        logPathInfo.setPadding(0, dp(6), 0, dp(4));
+        root.addView(logPathInfo);
+
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
         scroll.setBackgroundResource(R.drawable.bg_dialog);
@@ -5443,6 +5511,7 @@ else sourceSpinner.setSelection(0);
 .putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
                     .putFloat(UiScaleUtil.KEY_UI_SCALE, UiScaleUtil.clampUiScale(UiScaleUtil.MIN_UI_SCALE + uiScaleSeek.getProgress() / 100f))
                     .putInt(KEY_GAME_COLUMNS, Math.max(2, Math.min(10, columnsSeek.getProgress() + 2)))
+                    .putBoolean("dev_log_enabled", logEnabledCheck.isChecked())
                     .apply();
             applyCustomBackground();
             Toast.makeText(this, "已保存资料源：" + (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
