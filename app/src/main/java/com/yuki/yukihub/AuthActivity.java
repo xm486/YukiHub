@@ -24,8 +24,6 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-
-import com.yuki.yukihub.util.AppExecutors;
 public class AuthActivity extends AppCompatActivity {
     @Override
     protected void attachBaseContext(android.content.Context newBase) {
@@ -196,7 +194,7 @@ return android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches();
 private void testApiConnection() {
     showStatus("正在测试API...", 0xFF8E9AB5);
     
-    AppExecutors.runOnIo(() -> {
+    new Thread(() -> {
         try {
             String testUrl = AUTH_BASE_URL + "/health";
             java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(testUrl).openConnection();
@@ -221,11 +219,11 @@ private void testApiConnection() {
         } catch (Throwable t) {
             runOnUiThread(() -> showStatus("连接失败: " + t.getMessage(), 0xFFFF3B30));
         }
-    });
+    }).start();
 }
 
     private void performAuth(String email, String password, String nickname) {
-        AppExecutors.runOnIo(() -> {
+        new Thread(() -> {
             try {
                 JSONObject resp;
                 
@@ -254,7 +252,7 @@ private void testApiConnection() {
                     showStatus("连接失败：" + (t.getMessage() != null ? t.getMessage() : "请检查网络"), 0xFFFF3B30);
                 });
             }
-        });
+        }).start();
     }
 
     private JSONObject getJson(String urlStr) throws Exception {

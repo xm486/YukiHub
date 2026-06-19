@@ -2891,7 +2891,16 @@ private int accountStatusTextColor() {
 }
 
 private void showAuthPlaceholderDialog() {
-    showAuthDialog();
+    if (isLoggedIn()) {
+        showAccountSettingsDialog();
+        return;
+    }
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("功能暂未开放")
+            .setMessage("登录/注册功能暂未支持，请期待后续版本更新")
+            .setPositiveButton("确定", null)
+            .show();
+    styleAlertDialogDark(dialog);
 }
 
 private void showAuthDialog() {
@@ -5198,7 +5207,7 @@ LinearLayout accountActions = new LinearLayout(this);
         Button webdavButton = krButton("同步中心");
         accountButton.setTextColor(getColorCompat(R.color.yh_primary));
         webdavButton.setTextColor(getColorCompat(R.color.yh_primary));
-        accountButton.setOnClickListener(v -> showAuthDialog());
+        accountButton.setOnClickListener(v -> showAuthPlaceholderDialog());
         webdavButton.setOnClickListener(v -> showWebDavSettingsDialog());
         accountActions.addView(accountButton, new LinearLayout.LayoutParams(0, dp(40), 1));
         LinearLayout.LayoutParams webdavLp = new LinearLayout.LayoutParams(0, dp(40), 1);
