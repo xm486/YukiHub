@@ -1,6 +1,9 @@
 package com.yuki.yukihub.net;
 
 import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -29,6 +32,7 @@ public final class HttpClient {
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false)
                 .followRedirects(true)
                 .followSslRedirects(true);
     }
@@ -79,6 +83,43 @@ public final class HttpClient {
             return body.string();
         } finally {
             closeQuietly(response);
+        }
+    }
+
+    /**
+     * 同步执行 Retrofit Call，返回状态码和响应体字符串。
+     * 不论 HTTP 状态码如何，都尝试读取 body，由调用方决定如何处理非 2xx 响应。
+     * 自动关闭 ResponseBody。
+     */
+    public static ResponseResult executeForStringWithCode(Call<okhttp3.ResponseBody> call) throws IOException {
+        retrofit2.Response<okhttp3.ResponseBody> response = call.clone().execute();
+        try {
+            int code = response.code();
+            String body = "";
+            okhttp3.ResponseBody responseBody = response.body();
+            okhttp3.ResponseBody errBody = response.errorBody();
+            if (responseBody != null) body = responseBody.string();
+            else if (errBody != null) body = errBody.string();
+            return new ResponseResult(code, body);
+        } finally {
+            closeQuietly(response);
+        }
+    }
+
+    /**
+     * HTTP 响应结果，包含状态码和响应体。
+     */
+    public static class ResponseResult {
+        public final int code;
+        public final String body;
+
+        public ResponseResult(int code, String body) {
+            this.code = code;
+            this.body = body;
+        }
+
+        public boolean isSuccessful() {
+            return code >= 200 && code < 300;
         }
     }
 
@@ -176,5 +217,28 @@ public final class HttpClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private static final String[] HTTP_DATE_FORMATS = {
+            "EEE, dd MMM yyyy HH:mm:ss z",
+            "EEEE, dd-MMM-yy HH:mm:ss z",
+            "EEE MMM dd HH:mm:ss yyyy"
+    };
+
+    /**
+     * 解析 HTTP 日期头（如 Last-Modified、Date）。
+     * 支持三种 RFC 7231 / RFC 850 / asctime 格式。
+     *
+     * @param dateStr 日期字符串
+     * @return 毫秒时间戳，解析失败返回 0
+     */
+    public static long parseHttpDate(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) return 0;
+        for (String fmt : HTTP_DATE_FORMATS) {
+            try {
+                return new SimpleDateFormat(fmt, Locale.US).parse(dateStr).getTime();
+            } catch (Exception ignored) { }
+        }
+        return 0;
     }
 }

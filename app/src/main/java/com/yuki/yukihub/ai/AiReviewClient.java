@@ -7,6 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -16,8 +17,17 @@ import retrofit2.Retrofit;
 public class AiReviewClient {
     private static final MediaType JSON_TYPE = MediaType.parse("application/json; charset=utf-8");
 
-    private volatile ApiService apiService;
-    private volatile String lastEndpoint;
+    private static class ServiceHolder {
+        final ApiService service;
+        final String endpoint;
+
+        ServiceHolder(ApiService service, String endpoint) {
+            this.service = service;
+            this.endpoint = endpoint;
+        }
+    }
+
+    private final AtomicReference<ServiceHolder> holderRef = new AtomicReference<>();
 
     public String testConnection(AiReviewSettings settings) throws Exception {
         if (settings == null) settings = new AiReviewSettings();
@@ -78,25 +88,28 @@ public class AiReviewClient {
     }
 
     private ApiService getService(String endpointUrl) {
-        // 从 endpoint URL 提取 base URL
         String baseUrl = extractBaseUrl(endpointUrl);
-        if (apiService == null || !baseUrl.equals(lastEndpoint)) {
-            synchronized (this) {
-                if (apiService == null || !baseUrl.equals(lastEndpoint)) {
-                    OkHttpClient client = HttpClient.defaultBuilder()
-                            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                            .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
-                                    .header("Accept", "application/json")
-                                    .header("Content-Type", "application/json; charset=utf-8")
-                                    .build()))
-                            .build();
-                    Retrofit retrofit = HttpClient.retrofit(baseUrl, client);
-                    apiService = retrofit.create(ApiService.class);
-                    lastEndpoint = baseUrl;
-                }
-            }
+        ServiceHolder holder = holderRef.get();
+        if (holder != null && baseUrl.equals(holder.endpoint)) {
+            return holder.service;
         }
-        return apiService;
+        synchronized (this) {
+            holder = holderRef.get();
+            if (holder != null && baseUrl.equals(holder.endpoint)) {
+                return holder.service;
+            }
+            OkHttpClient client = HttpClient.defaultBuilder()
+                    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
+                            .header("Accept", "application/json")
+                            .header("Content-Type", "application/json; charset=utf-8")
+                            .build()))
+                    .build();
+            Retrofit retrofit = HttpClient.retrofit(baseUrl, client);
+            ApiService service = retrofit.create(ApiService.class);
+            holderRef.set(new ServiceHolder(service, baseUrl));
+            return service;
+        }
     }
 
     private static String extractBaseUrl(String url) {

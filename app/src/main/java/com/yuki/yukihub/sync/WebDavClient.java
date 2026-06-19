@@ -4,12 +4,11 @@ import android.util.Log;
 
 import com.yuki.yukihub.net.HttpClient;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 import okhttp3.Credentials;
 import okhttp3.MediaType;
@@ -46,16 +45,10 @@ public class WebDavClient {
         client = HttpClient.defaultBuilder()
                 .addInterceptor(chain -> {
                     Request original = chain.request();
-                    Request.Builder builder = original.newBuilder()
-                            .header("Authorization", credential);
-                    // PUT 请求需要显式设置 Content-Type
-                    if ("PUT".equalsIgnoreCase(original.method()) && original.body() != null) {
-                        MediaType contentType = original.body().contentType();
-                        if (contentType == null) {
-                            builder.header("Content-Type", "application/json; charset=utf-8");
-                        }
-                    }
-                    return chain.proceed(builder.build());
+                    Request request = original.newBuilder()
+                            .header("Authorization", credential)
+                            .build();
+                    return chain.proceed(request);
                 })
                 .build();
     }
@@ -178,6 +171,7 @@ public class WebDavClient {
 
     /**
      * 读取文本文件并限制最大字节数，避免云端异常大文件撑爆内存。
+     * 流式读取，超过限制立即停止。
      */
     public String readTextLimited(String path, int maxBytes) throws IOException {
         Request request = new Request.Builder()
@@ -193,11 +187,19 @@ public class WebDavClient {
             }
             ResponseBody body = response.body();
             if (body == null) throw new IOException("Empty response body");
-            byte[] data = body.bytes();
-            if (data.length > maxBytes) {
-                throw new IOException("远程同步文件过大，已超过 " + (maxBytes / 1024) + "KB");
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            okio.Source source = body.source();
+            okio.Buffer buffer = new okio.Buffer();
+            long totalRead = 0;
+            while (source.read(buffer, 8192) != -1) {
+                totalRead += buffer.size();
+                if (totalRead > maxBytes) {
+                    throw new IOException("远程同步文件过大，已超过 " + (maxBytes / 1024) + "KB");
+                }
+                baos.write(buffer.readByteArray());
             }
-            return new String(data, StandardCharsets.UTF_8);
+            return new String(baos.toByteArray(), StandardCharsets.UTF_8);
         }
     }
 
@@ -281,21 +283,7 @@ public class WebDavClient {
                 .head()
                 .build();
         try (Response response = client.newCall(request).execute()) {
-            String lastModified = response.header("Last-Modified");
-            if (lastModified != null) {
-                try {
-                    return new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).parse(lastModified).getTime();
-                } catch (Exception ignored) {
-                    try {
-                        return new SimpleDateFormat("EEEE, dd-MMM-yy HH:mm:ss z", Locale.US).parse(lastModified).getTime();
-                    } catch (Exception ignored2) {
-                        try {
-                            return new SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", Locale.US).parse(lastModified).getTime();
-                        } catch (Exception ignored3) { }
-                    }
-                }
-            }
-            return 0;
+            return HttpClient.parseHttpDate(response.header("Last-Modified"));
         } catch (Exception e) {
             return 0;
         }
@@ -324,13 +312,7 @@ public class WebDavClient {
             long lastModified = 0;
             String lastModStr = extractTag(resp, "D:getlastmodified", "d:getlastmodified");
             if (lastModStr != null) {
-                try {
-                    lastModified = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).parse(lastModStr).getTime();
-                } catch (Exception ignored) {
-                    try {
-                        lastModified = new SimpleDateFormat("EEEE, dd-MMM-yy HH:mm:ss z", Locale.US).parse(lastModStr).getTime();
-                    } catch (Exception ignored2) { }
-                }
+                lastModified = HttpClient.parseHttpDate(lastModStr);
             }
 
             String name = href;

@@ -106,13 +106,22 @@ public class YmgalClient {
     private static JSONObject apiGetOnce(String path, String[][] params, boolean allowRefresh) throws Exception {
         String token = accessToken(false);
         String url = BASE_URL + path + "?" + query(params);
-        String text = HttpClient.executeForString(
+        HttpClient.ResponseResult result = HttpClient.executeForStringWithCode(
                 getService().getWithHeader(url, "Bearer " + token));
 
-        // 401/403 时刷新 token 重试
+        // HTTP 层 401/403 时刷新 token 重试
+        if ((result.code == 401 || result.code == 403) && allowRefresh) {
+            accessToken(true);
+            return apiGetOnce(path, params, false);
+        }
+        if (!result.isSuccessful()) {
+            throw new RuntimeException("月幕 Gal HTTP " + result.code + ": " + result.body);
+        }
+
+        String text = result.body;
         if (text.isEmpty()) return new JSONObject();
 
-        // 检查是否是 HTTP 错误（executeForString 在非 2xx 时抛异常，这里处理 API 层面的 401）
+        // 检查 API 层面的错误码
         JSONObject root = new JSONObject(text);
         int apiCode = root.optInt("code", -1);
         boolean success = root.optBoolean("success", apiCode == 0);
