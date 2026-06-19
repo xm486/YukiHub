@@ -1,17 +1,20 @@
 package com.yuki.yukihub.metadata;
 
+import com.yuki.yukihub.net.ApiService;
+import com.yuki.yukihub.net.HttpClient;
+import com.yuki.yukihub.util.AppExecutors;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.yuki.yukihub.util.AppExecutors;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.RequestBody;
+import retrofit2.Retrofit;
 
 public class VndbClient {
     private static final String ENDPOINT = "https://api.vndb.org/kana/vn";
@@ -21,6 +24,10 @@ public class VndbClient {
     private static final long MIN_REQUEST_INTERVAL_MS = 1100;
     private static volatile long lastRequestTime = 0;
 
+    private static final MediaType JSON_TYPE = MediaType.parse("application/json; charset=utf-8");
+
+    private static volatile ApiService apiService;
+
     public interface Callback {
         void onSuccess(VnMetadata data);
         void onError(Exception error);
@@ -29,6 +36,24 @@ public class VndbClient {
     public interface CandidatesCallback {
         void onSuccess(List<VnMetadata> data);
         void onError(Exception error);
+    }
+
+    private static ApiService getService() {
+        if (apiService == null) {
+            synchronized (VndbClient.class) {
+                if (apiService == null) {
+                    OkHttpClient client = HttpClient.defaultBuilder()
+                            .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
+                                    .header("Content-Type", "application/json")
+                                    .header("Accept", "application/json")
+                                    .build()))
+                            .build();
+                    Retrofit retrofit = HttpClient.retrofit("https://api.vndb.org/", client);
+                    apiService = retrofit.create(ApiService.class);
+                }
+            }
+        }
+        return apiService;
     }
 
     public static void searchAsync(String title, Callback callback) {
@@ -66,59 +91,20 @@ public class VndbClient {
         body.put("results", Math.max(1, Math.min(10, limit)));
 
         throttle();
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            HttpURLConnection conn = null;
-            InputStream is = null;
-            try {
-                conn = (HttpURLConnection) new URL(ENDPOINT).openConnection();
-                conn.setRequestMethod("POST");
-                conn.setConnectTimeout(9000);
-                conn.setReadTimeout(9000);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("User-Agent", "YukiHub/1.0 metadata lookup");
 
-                byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
-                conn.setFixedLengthStreamingMode(bytes.length);
-                try (OutputStream os = conn.getOutputStream()) { os.write(bytes); }
+        String url = ENDPOINT;
+        RequestBody requestBody = RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), JSON_TYPE);
 
-                int code = conn.getResponseCode();
-                is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-                String text = MetadataUtils.readAndClose(is);
-                is = null; // readAndClose 已关闭流，置空防止 finally 二次关闭
+        String text = HttpClient.executeWithRetry(
+                () -> getService().post(url, requestBody),
+                MAX_RETRIES, RETRY_DELAY_MS);
 
-                if (code < 200 || code >= 300) {
-                    if (code == 429 || code >= 500) {
-                        if (attempt < MAX_RETRIES) {
-                            MetadataUtils.sleepBeforeRetry(RETRY_DELAY_MS * (attempt + 1));
-                            continue;
-                        }
-                        throw new RuntimeException("VNDB HTTP " + code + ": " + text);
-                    }
-                    throw new RuntimeException("VNDB HTTP " + code + ": " + text);
-                }
-
-                JSONObject root = new JSONObject(text);
-                JSONArray results = root.optJSONArray("results");
-                if (results != null) {
-                    for (int i = 0; i < results.length(); i++) out.add(parse(results.getJSONObject(i)));
-                }
-                return out;
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                if (attempt < MAX_RETRIES) {
-                    MetadataUtils.sleepBeforeRetry(RETRY_DELAY_MS * (attempt + 1));
-                    continue;
-                }
-                throw e;
-            } finally {
-                MetadataUtils.closeQuietly(is);
-                MetadataUtils.closeQuietly(conn);
-            }
+        JSONObject root = new JSONObject(text);
+        JSONArray results = root.optJSONArray("results");
+        if (results != null) {
+            for (int i = 0; i < results.length(); i++) out.add(parse(results.getJSONObject(i)));
         }
-        throw new IllegalStateException("unreachable");
+        return out;
     }
 
     private static synchronized void throttle() throws InterruptedException {

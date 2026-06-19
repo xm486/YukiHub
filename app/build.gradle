@@ -89,5 +89,9 @@ dependencies {
     implementation("androidx.cardview:cardview:1.0.0")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // WebDAV 同步：Retrofit + OkHttp
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
 }
 

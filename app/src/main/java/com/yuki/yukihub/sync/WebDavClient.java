@@ -2,31 +2,62 @@ package com.yuki.yukihub.sync;
 
 import android.util.Log;
 
-import java.io.ByteArrayOutputStream;
+import com.yuki.yukihub.net.HttpClient;
+
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+
+import okhttp3.Credentials;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /**
  * WebDAV 客户端
  * 支持坚果云、OneDrive、NextCloud 等任意 WebDAV 服务器
+ * <p>
+ * 基于 OkHttp 直接构建请求，避免 Retrofit 对 ResponseBody 的消费问题。
  */
 public class WebDavClient {
     private static final String TAG = "WebDavClient";
-    
+
+    private static final MediaType MEDIA_TYPE_JSON = MediaType.parse("application/json; charset=utf-8");
+    private static final MediaType MEDIA_TYPE_XML = MediaType.parse("application/xml");
+
     private final String serverUrl;
     private final String username;
     private final String password;
-    
+    private final OkHttpClient client;
+
     public WebDavClient(String serverUrl, String username, String password) {
         this.serverUrl = normalizeServerUrl(serverUrl);
         this.username = username;
         this.password = password;
+
+        String credential = Credentials.basic(username, password);
+
+        client = HttpClient.defaultBuilder()
+                .addInterceptor(chain -> {
+                    Request original = chain.request();
+                    Request.Builder builder = original.newBuilder()
+                            .header("Authorization", credential);
+                    // PUT 请求需要显式设置 Content-Type
+                    if ("PUT".equalsIgnoreCase(original.method()) && original.body() != null) {
+                        MediaType contentType = original.body().contentType();
+                        if (contentType == null) {
+                            builder.header("Content-Type", "application/json; charset=utf-8");
+                        }
+                    }
+                    return chain.proceed(builder.build());
+                })
+                .build();
     }
 
     /**
@@ -43,7 +74,7 @@ public class WebDavClient {
         }
         return s.endsWith("/") ? s : s + "/";
     }
-    
+
     /**
      * 测试连接
      */
@@ -61,18 +92,16 @@ public class WebDavClient {
      * 测试连接，失败时抛出具体原因。
      */
     public void testConnectionOrThrow() throws IOException {
-        // 真正测试 WebDAV 写入能力：PUT 一个很小的临时文件，再删除。
         String testPath = "YukiHub/YukiHub_connection_test.txt";
         writeText(testPath, "ok");
         delete(testPath);
     }
-    
+
     /**
      * 创建目录（如果不存在）
      */
     public boolean mkdirs(String path) {
         try {
-            // 确保路径存在，逐级创建
             String[] parts = path.split("/");
             String current = "";
             for (String part : parts) {
@@ -89,56 +118,57 @@ public class WebDavClient {
             return false;
         }
     }
-    
+
     /**
      * MKCOL 创建目录
      */
     private boolean mkcol(String path) throws IOException {
-        HttpURLConnection conn = createConnection(path, "MKCOL");
-        int code = conn.getResponseCode();
-        conn.disconnect();
-        // 某些 WebDAV 服务器在目录已存在时会返回 405/409，
-        // 这对我们来说等价于“目录可用”。
-        return (code >= 200 && code < 300) || code == 405 || code == 409;
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .method("MKCOL", null)
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            int code = response.code();
+            return (code >= 200 && code < 300) || code == 405 || code == 409;
+        }
     }
-    
+
     /**
      * 检查文件/目录是否存在
      */
     public boolean exists(String path) {
-        try {
-            HttpURLConnection conn = createConnection(path, "HEAD");
-            int code = conn.getResponseCode();
-            conn.disconnect();
-            return code >= 200 && code < 300;
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .head()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            return response.code() >= 200 && response.code() < 300;
         } catch (Exception e) {
             return false;
         }
     }
-    
+
     /**
      * 读取文件内容
      */
     public byte[] readFile(String path) throws IOException {
-        HttpURLConnection conn = createConnection(path, "GET");
-        int code = conn.getResponseCode();
-        
-        if (code < 200 || code >= 300) {
-            conn.disconnect();
-            throw new IOException("HTTP " + code);
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .get()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String err = "";
+                ResponseBody errBody = response.body();
+                if (errBody != null) err = errBody.string();
+                throw new IOException("HTTP " + response.code() + (err.isEmpty() ? "" : ": " + err));
+            }
+            ResponseBody body = response.body();
+            if (body == null) throw new IOException("Empty response body");
+            return body.bytes();
         }
-        
-        InputStream is = conn.getInputStream();
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int len;
-        while ((len = is.read(buf)) != -1) {
-            bos.write(buf, 0, len);
-        }
-        conn.disconnect();
-        return bos.toByteArray();
     }
-    
+
     /**
      * 读取文件内容（字符串）
      */
@@ -150,76 +180,69 @@ public class WebDavClient {
      * 读取文本文件并限制最大字节数，避免云端异常大文件撑爆内存。
      */
     public String readTextLimited(String path, int maxBytes) throws IOException {
-        HttpURLConnection conn = createConnection(path, "GET");
-        int code = conn.getResponseCode();
-        if (code < 200 || code >= 300) {
-            String err = readStream(conn.getErrorStream());
-            conn.disconnect();
-            throw new IOException("HTTP " + code + (err.isEmpty() ? "" : ": " + err));
-        }
-        InputStream is = conn.getInputStream();
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int len;
-        int total = 0;
-        while ((len = is.read(buf)) != -1) {
-            total += len;
-            if (total > maxBytes) {
-                conn.disconnect();
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .get()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String err = "";
+                ResponseBody errBody = response.body();
+                if (errBody != null) err = errBody.string();
+                throw new IOException("HTTP " + response.code() + (err.isEmpty() ? "" : ": " + err));
+            }
+            ResponseBody body = response.body();
+            if (body == null) throw new IOException("Empty response body");
+            byte[] data = body.bytes();
+            if (data.length > maxBytes) {
                 throw new IOException("远程同步文件过大，已超过 " + (maxBytes / 1024) + "KB");
             }
-            bos.write(buf, 0, len);
+            return new String(data, StandardCharsets.UTF_8);
         }
-        conn.disconnect();
-        return bos.toString("UTF-8");
     }
-    
+
     /**
      * 写入文件
      */
     public void writeFile(String path, byte[] data) throws IOException {
-        HttpURLConnection conn = createConnection(path, "PUT");
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        conn.setRequestProperty("Accept", "*/*");
-        conn.setFixedLengthStreamingMode(data.length);
-        
-        OutputStream os = conn.getOutputStream();
-        os.write(data);
-        os.flush();
-        os.close();
-        
-        int code = conn.getResponseCode();
-        String err = code >= 200 && code < 300 ? "" : readStream(conn.getErrorStream());
-        conn.disconnect();
-        
-        if (code < 200 || code >= 300) {
-            throw new IOException("PUT " + path + " failed: HTTP " + code + (err.isEmpty() ? "" : ": " + err));
+        RequestBody body = RequestBody.create(data, MEDIA_TYPE_JSON);
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .put(body)
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String err = "";
+                ResponseBody errBody = response.body();
+                if (errBody != null) err = errBody.string();
+                throw new IOException("PUT " + path + " failed: HTTP " + response.code() + (err.isEmpty() ? "" : ": " + err));
+            }
         }
     }
-    
+
     /**
      * 写入文本文件
      */
     public void writeText(String path, String text) throws IOException {
         writeFile(path, text.getBytes(StandardCharsets.UTF_8));
     }
-    
+
     /**
      * 删除文件
      */
     public boolean delete(String path) {
-        try {
-            HttpURLConnection conn = createConnection(path, "DELETE");
-            int code = conn.getResponseCode();
-            conn.disconnect();
-            return code >= 200 && code < 300;
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .delete()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            return response.isSuccessful();
         } catch (Exception e) {
             Log.e(TAG, "Delete failed: " + path, e);
             return false;
         }
     }
-    
+
     /**
      * 列出目录内容
      */
@@ -228,143 +251,111 @@ public class WebDavClient {
                 "<D:propfind xmlns:D=\"DAV:\">\n" +
                 "  <D:allprop/>\n" +
                 "</D:propfind>";
-        
-        HttpURLConnection conn = createConnection(path, "PROPFIND");
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/xml");
-        conn.setRequestProperty("Depth", "1");
-        
-        OutputStream os = conn.getOutputStream();
-        os.write(xml.getBytes(StandardCharsets.UTF_8));
-        os.flush();
-        os.close();
-        
-        int code = conn.getResponseCode();
-        InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
-        String response = readStream(is);
-        conn.disconnect();
-        
-        if (code < 200 || code >= 300) {
-            throw new IOException("HTTP " + code + ": " + response);
+
+        RequestBody body = RequestBody.create(xml.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE_XML);
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .method("PROPFIND", body)
+                .header("Depth", "1")
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String err = "";
+                ResponseBody errBody = response.body();
+                if (errBody != null) err = errBody.string();
+                throw new IOException("HTTP " + response.code() + ": " + err);
+            }
+            ResponseBody resBody = response.body();
+            if (resBody == null) throw new IOException("Empty response body");
+            String responseText = resBody.string();
+            return parsePropfindResponse(responseText, path);
         }
-        
-        return parsePropfindResponse(response, path);
     }
-    
+
     /**
      * 获取文件最后修改时间
      */
     public long getLastModified(String path) {
-        try {
-            HttpURLConnection conn = createConnection(path, "HEAD");
-            long lastModified = conn.getLastModified();
-            conn.disconnect();
-            return lastModified;
+        Request request = new Request.Builder()
+                .url(resolveUrl(path))
+                .head()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            String lastModified = response.header("Last-Modified");
+            if (lastModified != null) {
+                try {
+                    return new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).parse(lastModified).getTime();
+                } catch (Exception ignored) {
+                    try {
+                        return new SimpleDateFormat("EEEE, dd-MMM-yy HH:mm:ss z", Locale.US).parse(lastModified).getTime();
+                    } catch (Exception ignored2) {
+                        try {
+                            return new SimpleDateFormat("EEE MMM dd HH:mm:ss yyyy", Locale.US).parse(lastModified).getTime();
+                        } catch (Exception ignored3) { }
+                    }
+                }
+            }
+            return 0;
         } catch (Exception e) {
             return 0;
         }
     }
-    
-    /**
-     * 创建 HTTP 连接
-     */
-    private HttpURLConnection createConnection(String path, String method) throws IOException {
-        // 构建完整 URL
+
+    // ---- 内部辅助方法 ----
+
+    private String resolveUrl(String path) {
         String fullPath = path.startsWith("/") ? path.substring(1) : path;
-        URL url = new URL(serverUrl + fullPath);
-        
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod(method);
-        conn.setInstanceFollowRedirects(true);
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(30000);
-        
-        // Basic 认证
-        String auth = username + ":" + password;
-        String encodedAuth = android.util.Base64.encodeToString(
-                auth.getBytes(StandardCharsets.UTF_8), 
-                android.util.Base64.NO_WRAP
-        );
-        conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
-        conn.setRequestProperty("User-Agent", "YukiHub/1.0");
-        
-        return conn;
+        return serverUrl + fullPath;
     }
-    
-    /**
-     * 读取输入流
-     */
-    private String readStream(InputStream is) throws IOException {
-        if (is == null) return "";
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int len;
-        while ((len = is.read(buf)) != -1) {
-            bos.write(buf, 0, len);
-        }
-        return bos.toString("UTF-8");
-    }
-    
+
     /**
      * 解析 PROPFIND 响应
      */
     private List<WebDavItem> parsePropfindResponse(String xml, String basePath) {
         List<WebDavItem> items = new ArrayList<>();
-        
-        // 简单的 XML 解析（避免依赖）
         String[] responses = xml.split("<D:response>|<d:response>");
-        
+
         for (int i = 1; i < responses.length; i++) {
             String resp = responses[i];
-            
-            // 提取 href
             String href = extractTag(resp, "D:href", "d:href");
             if (href == null) continue;
-            
-            // 检查是否是目录
             boolean isDir = resp.contains("<D:collection/>") || resp.contains("<d:collection/>");
-            
-            // 提取最后修改时间
+
             long lastModified = 0;
             String lastModStr = extractTag(resp, "D:getlastmodified", "d:getlastmodified");
             if (lastModStr != null) {
                 try {
-                    lastModified = java.text.SimpleDateFormat.getDateTimeInstance().parse(lastModStr).getTime();
-                } catch (Exception ignored) {}
+                    lastModified = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).parse(lastModStr).getTime();
+                } catch (Exception ignored) {
+                    try {
+                        lastModified = new SimpleDateFormat("EEEE, dd-MMM-yy HH:mm:ss z", Locale.US).parse(lastModStr).getTime();
+                    } catch (Exception ignored2) { }
+                }
             }
-            
-            // 计算相对路径
+
             String name = href;
             if (name.endsWith("/")) name = name.substring(0, name.length() - 1);
             int lastSlash = name.lastIndexOf('/');
             if (lastSlash >= 0) name = name.substring(lastSlash + 1);
-            
-            // 跳过当前目录
             if (name.isEmpty() || name.equals(".")) continue;
-            
+
             items.add(new WebDavItem(name, href, isDir, lastModified));
         }
-        
         return items;
     }
-    
-    /**
-     * 从 XML 中提取标签内容
-     */
+
     private String extractTag(String xml, String... tags) {
         for (String tag : tags) {
             int start = xml.indexOf("<" + tag + ">");
             if (start >= 0) {
                 start += tag.length() + 2;
                 int end = xml.indexOf("</" + tag + ">", start);
-                if (end > start) {
-                    return xml.substring(start, end).trim();
-                }
+                if (end > start) return xml.substring(start, end).trim();
             }
         }
         return null;
     }
-    
+
     /**
      * WebDAV 文件/目录项
      */
@@ -373,14 +364,14 @@ public class WebDavClient {
         public final String href;
         public final boolean isDirectory;
         public final long lastModified;
-        
+
         public WebDavItem(String name, String href, boolean isDirectory, long lastModified) {
             this.name = name;
             this.href = href;
             this.isDirectory = isDirectory;
             this.lastModified = lastModified;
         }
-        
+
         @Override
         public String toString() {
             return (isDirectory ? "📁 " : "📄 ") + name;

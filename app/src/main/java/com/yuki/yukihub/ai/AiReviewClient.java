@@ -1,17 +1,24 @@
 package com.yuki.yukihub.ai;
 
+import com.yuki.yukihub.net.ApiService;
+import com.yuki.yukihub.net.HttpClient;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.RequestBody;
+import retrofit2.Retrofit;
+
 public class AiReviewClient {
+    private static final MediaType JSON_TYPE = MediaType.parse("application/json; charset=utf-8");
+
+    private volatile ApiService apiService;
+    private volatile String lastEndpoint;
+
     public String testConnection(AiReviewSettings settings) throws Exception {
         if (settings == null) settings = new AiReviewSettings();
         settings.normalize();
@@ -51,24 +58,13 @@ public class AiReviewClient {
         if (maxTokens > 0) body.put("max_tokens", maxTokens);
         body.put("stream", false);
 
-        HttpURLConnection c = (HttpURLConnection) new URL(settings.endpointUrl()).openConnection();
-        c.setRequestMethod("POST");
-        c.setInstanceFollowRedirects(true);
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(60000);
-        c.setDoOutput(true);
-        c.setRequestProperty("Accept", "application/json");
-        c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        c.setRequestProperty("Authorization", "Bearer " + settings.apiKey.trim());
-        c.setRequestProperty("User-Agent", "YukiHub/1.0 (Android AI Review)");
-        byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
-        c.setFixedLengthStreamingMode(data.length);
-        try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
-            os.write(data);
-        }
-        int code = c.getResponseCode();
-        String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
-        if (code < 200 || code >= 300) throw new RuntimeException("AI API HTTP " + code + ": " + text);
+        String url = settings.endpointUrl();
+        String auth = "Bearer " + settings.apiKey.trim();
+        RequestBody requestBody = RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), JSON_TYPE);
+
+        ApiService service = getService(url);
+        String text = HttpClient.executeForString(service.postWithAuth(url, requestBody, auth));
+
         JSONObject root = text == null || text.trim().isEmpty() ? new JSONObject() : new JSONObject(text);
         JSONObject error = root.optJSONObject("error");
         if (error != null) throw new RuntimeException("AI API 错误：" + error.optString("message", error.toString()));
@@ -81,18 +77,37 @@ public class AiReviewClient {
         return content.trim();
     }
 
-    private static String readSmallText(InputStream is) throws Exception {
-        if (is == null) return "";
-        try (InputStream in = is; ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[4096];
-            int len;
-            int total = 0;
-            while ((len = in.read(buf)) != -1) {
-                total += len;
-                if (total > 1024 * 1024) throw new RuntimeException("响应过大");
-                bos.write(buf, 0, len);
+    private ApiService getService(String endpointUrl) {
+        // 从 endpoint URL 提取 base URL
+        String baseUrl = extractBaseUrl(endpointUrl);
+        if (apiService == null || !baseUrl.equals(lastEndpoint)) {
+            synchronized (this) {
+                if (apiService == null || !baseUrl.equals(lastEndpoint)) {
+                    OkHttpClient client = HttpClient.defaultBuilder()
+                            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                            .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
+                                    .header("Accept", "application/json")
+                                    .header("Content-Type", "application/json; charset=utf-8")
+                                    .build()))
+                            .build();
+                    Retrofit retrofit = HttpClient.retrofit(baseUrl, client);
+                    apiService = retrofit.create(ApiService.class);
+                    lastEndpoint = baseUrl;
+                }
             }
-            return bos.toString("UTF-8");
+        }
+        return apiService;
+    }
+
+    private static String extractBaseUrl(String url) {
+        if (url == null) return "https://api.openai.com/";
+        try {
+            java.net.URL u = new java.net.URL(url);
+            String base = u.getProtocol() + "://" + u.getHost();
+            if (u.getPort() != -1) base += ":" + u.getPort();
+            return base + "/";
+        } catch (Exception e) {
+            return "https://api.openai.com/";
         }
     }
 }

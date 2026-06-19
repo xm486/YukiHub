@@ -1,21 +1,30 @@
 package com.yuki.yukihub.metadata;
 
+import com.yuki.yukihub.net.ApiService;
+import com.yuki.yukihub.net.HttpClient;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.RequestBody;
+import retrofit2.Retrofit;
 
 public class BangumiClient {
     private static final String SEARCH_ENDPOINT_BGM = "https://api.bgm.tv/v0/search/subjects";
     private static final String SEARCH_ENDPOINT_MIRROR = "https://api.bangumi.one/v0/search/subjects";
     private static final int MAX_RETRIES = 2;
     private static final long RETRY_DELAY_MS = 1500;
+
+    private static final MediaType JSON_TYPE = MediaType.parse("application/json; charset=UTF-8");
+
+    private static volatile ApiService bgmService;
+    private static volatile ApiService mirrorService;
 
     public static List<VnMetadata> searchCandidates(String keyword, String token, int limit) throws Exception {
         return searchCandidates(keyword, token, limit, false);
@@ -35,65 +44,25 @@ public class BangumiClient {
 
         String endpoint = useMirror ? SEARCH_ENDPOINT_MIRROR : SEARCH_ENDPOINT_BGM;
         String url = endpoint + "?limit=" + Math.max(1, Math.min(10, limit)) + "&offset=0";
+        String auth = "Bearer " + token.trim();
 
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            HttpURLConnection conn = null;
-            InputStream is = null;
-            try {
-                conn = (HttpURLConnection) new URL(url).openConnection();
-                conn.setRequestMethod("POST");
-                conn.setConnectTimeout(10000);
-                conn.setReadTimeout(15000);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Authorization", "Bearer " + token.trim());
-                conn.setRequestProperty("User-Agent", "YukiHub/1.0 (https://github.com/YukiHub; Android Galgame manager)");
+        RequestBody requestBody = RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), JSON_TYPE);
 
-                byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
-                conn.setFixedLengthStreamingMode(bytes.length);
-                try (OutputStream os = conn.getOutputStream()) { os.write(bytes); }
+        ApiService service = useMirror ? getMirrorService() : getBgmService();
+        String text = HttpClient.executeWithRetry(
+                () -> service.postWithAuth(url, requestBody, auth),
+                MAX_RETRIES, RETRY_DELAY_MS);
 
-                int code = conn.getResponseCode();
-                is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-                String text = MetadataUtils.readAndClose(is);
-                is = null; // readAndClose 已关闭流，置空防止 finally 二次关闭
-
-                if (code < 200 || code >= 300) {
-                    if (code == 429 || code >= 500) {
-                        if (attempt < MAX_RETRIES) {
-                            MetadataUtils.sleepBeforeRetry(RETRY_DELAY_MS * (attempt + 1));
-                            continue;
-                        }
-                        throw new RuntimeException("Bangumi HTTP " + code + ": " + text);
-                    }
-                    throw new RuntimeException("Bangumi HTTP " + code + ": " + text);
-                }
-
-                JSONObject root = new JSONObject(text);
-                JSONArray data = root.optJSONArray("data");
-                if (data != null) {
-                    for (int i = 0; i < data.length(); i++) {
-                        JSONObject item = data.optJSONObject(i);
-                        if (item == null) continue;
-                        out.add(parseSubject(item));
-                    }
-                }
-                return out;
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                if (attempt < MAX_RETRIES) {
-                    MetadataUtils.sleepBeforeRetry(RETRY_DELAY_MS * (attempt + 1));
-                    continue;
-                }
-                throw e;
-            } finally {
-                MetadataUtils.closeQuietly(is);
-                MetadataUtils.closeQuietly(conn);
+        JSONObject root = new JSONObject(text);
+        JSONArray data = root.optJSONArray("data");
+        if (data != null) {
+            for (int i = 0; i < data.length(); i++) {
+                JSONObject item = data.optJSONObject(i);
+                if (item == null) continue;
+                out.add(parseSubject(item));
             }
         }
-        throw new IllegalStateException("unreachable");
+        return out;
     }
 
     public static VnMetadata searchFirst(String keyword, String token) throws Exception {
@@ -103,6 +72,40 @@ public class BangumiClient {
     public static VnMetadata searchFirst(String keyword, String token, boolean useMirror) throws Exception {
         List<VnMetadata> list = searchCandidates(keyword, token, 1, useMirror);
         return list.isEmpty() ? null : list.get(0);
+    }
+
+    private static ApiService getBgmService() {
+        if (bgmService == null) {
+            synchronized (BangumiClient.class) {
+                if (bgmService == null) {
+                    OkHttpClient client = HttpClient.defaultBuilder()
+                            .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
+                                    .header("Accept", "application/json")
+                                    .build()))
+                            .build();
+                    Retrofit retrofit = HttpClient.retrofit("https://api.bgm.tv/", client);
+                    bgmService = retrofit.create(ApiService.class);
+                }
+            }
+        }
+        return bgmService;
+    }
+
+    private static ApiService getMirrorService() {
+        if (mirrorService == null) {
+            synchronized (BangumiClient.class) {
+                if (mirrorService == null) {
+                    OkHttpClient client = HttpClient.defaultBuilder()
+                            .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
+                                    .header("Accept", "application/json")
+                                    .build()))
+                            .build();
+                    Retrofit retrofit = HttpClient.retrofit("https://api.bangumi.one/", client);
+                    mirrorService = retrofit.create(ApiService.class);
+                }
+            }
+        }
+        return mirrorService;
     }
 
     private static VnMetadata parseSubject(JSONObject o) {

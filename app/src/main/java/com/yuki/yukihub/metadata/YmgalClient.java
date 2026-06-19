@@ -1,15 +1,18 @@
 package com.yuki.yukihub.metadata;
 
+import com.yuki.yukihub.net.ApiService;
+import com.yuki.yukihub.net.HttpClient;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
+import okhttp3.OkHttpClient;
+import retrofit2.Retrofit;
 
 public class YmgalClient {
     private static final String BASE_URL = "https://www.ymgal.games";
@@ -23,6 +26,8 @@ public class YmgalClient {
     private static volatile long cachedTokenExpiresAt = 0L;
     private static volatile long lastRequestTime = 0L;
 
+    private static volatile ApiService apiService;
+
     public static List<VnMetadata> searchCandidates(String keyword, int limit) throws Exception {
         List<VnMetadata> out = new ArrayList<>();
         String q = MetadataUtils.cleanTitle(keyword);
@@ -33,8 +38,7 @@ public class YmgalClient {
                 {"pageNum", "1"},
                 {"pageSize", String.valueOf(Math.max(1, Math.min(20, limit)))}
         }, true);
-        JSONObject page = data == null ? null : data;
-        JSONArray result = page == null ? null : page.optJSONArray("result");
+        JSONArray result = data == null ? null : data.optJSONArray("result");
         if (result == null) return out;
         for (int i = 0; i < result.length(); i++) {
             JSONObject item = result.optJSONObject(i);
@@ -72,31 +76,14 @@ public class YmgalClient {
                 {"client_secret", CLIENT_SECRET},
                 {"scope", "public"}
         });
-        HttpURLConnection conn = null;
-        InputStream is = null;
-        try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(15000);
-            conn.setRequestProperty("Accept", "application/json;charset=utf-8");
-            conn.setRequestProperty("User-Agent", "YukiHub/1.0 (Android Galgame manager)");
-            int code = conn.getResponseCode();
-            is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-            String text = MetadataUtils.readAndClose(is);
-            is = null;
-            if (code < 200 || code >= 300) throw new RuntimeException("月幕 Gal Token HTTP " + code + ": " + text);
-            JSONObject root = new JSONObject(text);
-            String token = root.optString("access_token", "");
-            int expires = root.optInt("expires_in", 3600);
-            if (token.isEmpty()) throw new RuntimeException("月幕 Gal Token 响应为空");
-            cachedAccessToken = token;
-            cachedTokenExpiresAt = now + Math.max(300, expires - 60) * 1000L;
-            return cachedAccessToken;
-        } finally {
-            MetadataUtils.closeQuietly(is);
-            MetadataUtils.closeQuietly(conn);
-        }
+        String text = HttpClient.executeForString(getService().get(url));
+        JSONObject root = new JSONObject(text);
+        String token = root.optString("access_token", "");
+        int expires = root.optInt("expires_in", 3600);
+        if (token.isEmpty()) throw new RuntimeException("月幕 Gal Token 响应为空");
+        cachedAccessToken = token;
+        cachedTokenExpiresAt = now + Math.max(300, expires - 60) * 1000L;
+        return cachedAccessToken;
     }
 
     private static JSONObject apiGet(String path, String[][] params, boolean allowRefresh) throws Exception {
@@ -119,42 +106,44 @@ public class YmgalClient {
     private static JSONObject apiGetOnce(String path, String[][] params, boolean allowRefresh) throws Exception {
         String token = accessToken(false);
         String url = BASE_URL + path + "?" + query(params);
-        HttpURLConnection conn = null;
-        InputStream is = null;
-        try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(16000);
-            conn.setRequestProperty("Accept", "application/json;charset=utf-8");
-            conn.setRequestProperty("Authorization", "Bearer " + token);
-            conn.setRequestProperty("version", "1");
-            conn.setRequestProperty("User-Agent", "YukiHub/1.0 (Android Galgame manager)");
-            int code = conn.getResponseCode();
-            is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-            String text = MetadataUtils.readAndClose(is);
-            is = null;
-            if ((code == 401 || code == 403) && allowRefresh) {
-                accessToken(true);
-                return apiGetOnce(path, params, false);
-            }
-            if (code < 200 || code >= 300) throw new RuntimeException("月幕 Gal HTTP " + code + ": " + text);
-            JSONObject root = new JSONObject(text);
-            int apiCode = root.optInt("code", -1);
-            boolean success = root.optBoolean("success", apiCode == 0);
-            if ((!success || apiCode != 0) && (apiCode == 401 || apiCode == 403) && allowRefresh) {
-                accessToken(true);
-                return apiGetOnce(path, params, false);
-            }
-            if (!success || apiCode != 0) {
-                throw new RuntimeException("月幕 Gal API " + apiCode + ": " + root.optString("msg", "调用失败"));
-            }
-            JSONObject data = root.optJSONObject("data");
-            return data == null ? new JSONObject() : data;
-        } finally {
-            MetadataUtils.closeQuietly(is);
-            MetadataUtils.closeQuietly(conn);
+        String text = HttpClient.executeForString(
+                getService().getWithHeader(url, "Bearer " + token));
+
+        // 401/403 时刷新 token 重试
+        if (text.isEmpty()) return new JSONObject();
+
+        // 检查是否是 HTTP 错误（executeForString 在非 2xx 时抛异常，这里处理 API 层面的 401）
+        JSONObject root = new JSONObject(text);
+        int apiCode = root.optInt("code", -1);
+        boolean success = root.optBoolean("success", apiCode == 0);
+
+        if ((!success || apiCode != 0) && (apiCode == 401 || apiCode == 403) && allowRefresh) {
+            accessToken(true);
+            return apiGetOnce(path, params, false);
         }
+        if (!success || apiCode != 0) {
+            throw new RuntimeException("月幕 Gal API " + apiCode + ": " + root.optString("msg", "调用失败"));
+        }
+        JSONObject data = root.optJSONObject("data");
+        return data == null ? new JSONObject() : data;
+    }
+
+    private static ApiService getService() {
+        if (apiService == null) {
+            synchronized (YmgalClient.class) {
+                if (apiService == null) {
+                    OkHttpClient client = HttpClient.defaultBuilder()
+                            .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
+                                    .header("Accept", "application/json;charset=utf-8")
+                                    .header("version", "1")
+                                    .build()))
+                            .build();
+                    Retrofit retrofit = HttpClient.retrofit("https://www.ymgal.games/", client);
+                    apiService = retrofit.create(ApiService.class);
+                }
+            }
+        }
+        return apiService;
     }
 
     private static synchronized void throttle() throws InterruptedException {
