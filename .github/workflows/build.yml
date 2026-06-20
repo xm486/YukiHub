@@ -73,11 +73,11 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
           cat > keystore.properties << EOF
-          releaseStoreFile=release.keystore
-          releaseStorePassword=${{ secrets.KEY_PASSWORD }}
-          releaseKeyAlias=yukihub
-          releaseKeyPassword=${{ secrets.KEY_ALIAS_PASSWORD }}
-          EOF
+releaseStoreFile=release.keystore
+releaseStorePassword=${{ secrets.KEY_PASSWORD }}
+releaseKeyAlias=yukihub
+releaseKeyPassword=${{ secrets.KEY_ALIAS_PASSWORD }}
+EOF
 
       - name: Build release APK
         run: chmod +x gradlew && ./gradlew assembleRelease
