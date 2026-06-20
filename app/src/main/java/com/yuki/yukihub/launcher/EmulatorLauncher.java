@@ -1165,18 +1165,18 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
      * 使用PPSSPP的PpssppActivity来启动PSP游戏
      */
     public static Intent buildInternalPspIntent(Context context, String gameUri, String launchTarget) {
-        // 从URI解析游戏文件路径
-        String filePath = uriToFilePath(gameUri);
-        if (filePath == null || filePath.trim().isEmpty()) {
-            filePath = gameUri;
+        // 直接使用gameUri，它可能是file://或content://格式
+        Uri gameUriParsed = Uri.parse(gameUri);
+        
+        // 如果是文件路径（以/开头），转换为file:// URI
+        if (gameUri.startsWith("/")) {
+            gameUriParsed = Uri.parse("file://" + gameUri);
         }
         
-        // 构建file:// URI
-        Uri fileUri = Uri.parse("file://" + filePath);
-        
-        // 创建Intent，使用VIEW action和file URI
+        // 创建Intent，使用VIEW action和mimeType
+        // PPSSPP支持file和content scheme，mimeType为*/*
         Intent intent = new Intent(Intent.ACTION_VIEW);
-        intent.setDataAndType(fileUri, "application/octet-stream");
+        intent.setDataAndType(gameUriParsed, "*/*");
         
         // 设置PPSSPP的包名和Activity
         intent.setClassName("org.ppsspp.ppsspp", "org.ppsspp.ppsspp.PpssppActivity");
@@ -1186,7 +1186,7 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
                        Intent.FLAG_GRANT_READ_URI_PERMISSION | 
                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         
-        Log.i("EmulatorLauncher", "Built PSP intent for " + filePath);
+        Log.i("EmulatorLauncher", "Built PSP intent uri=" + gameUriParsed);
         return intent;
     }
     
