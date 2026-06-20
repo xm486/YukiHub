@@ -202,9 +202,10 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private ImageView ivScanLoading;
     private SharedPreferences prefs;
     private static final String PREFS_NAME = "yukihub_prefs";
-    private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
-private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
-private static final int MAX_SCAN_ROOTS = 3;
+private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
+    private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
+    private static final String KEY_SCAN_ROOT_ENABLED = "scan_root_enabled"; // 保存每个目录的开关状态
+    private static final int MAX_SCAN_ROOTS = 3;
     private static final String KEY_STARTUP_SCAN_DEPTH = "startup_scan_depth";
     private static final String KEY_AUTO_SCAN_ON_STARTUP = "auto_scan_on_startup";
     private static final String KEY_CHECK_UPDATE_ON_STARTUP = "check_update_on_startup";
@@ -3485,9 +3486,69 @@ if (joined.length() > 0) joined.append('\n');
 joined.append(r);
 }
 SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.toString());
-if (!cleaned.isEmpty()) e.putString(KEY_LAST_SCAN_ROOT_URI, cleaned.get(0)); else e.remove(KEY_LAST_SCAN_ROOT_URI);
-e.apply();
-}
+        if (!cleaned.isEmpty()) e.putString(KEY_LAST_SCAN_ROOT_URI, cleaned.get(0)); else e.remove(KEY_LAST_SCAN_ROOT_URI);
+        e.apply();
+    }
+
+    /**
+     * 获取扫描目录的开关状态
+     * @return 返回一个布尔值列表，表示每个目录是否启用
+     */
+    private List<Boolean> getScanRootEnabledStates() {
+        List<Boolean> states = new ArrayList<>();
+        if (prefs == null) return states;
+        String joined = prefs.getString(KEY_SCAN_ROOT_ENABLED, "");
+        if (joined != null && !joined.trim().isEmpty()) {
+            for (String part : joined.split(",")) {
+                String s = part == null ? "" : part.trim();
+                states.add("1".equals(s));
+            }
+        }
+        // 补齐到MAX_SCAN_ROOTS个，默认全部启用
+        while (states.size() < MAX_SCAN_ROOTS) {
+            states.add(true);
+        }
+        return states;
+    }
+
+    /**
+     * 保存扫描目录的开关状态
+     */
+    private void saveScanRootEnabledStates(List<Boolean> states) {
+        if (prefs == null || states == null) return;
+        StringBuilder joined = new StringBuilder();
+        for (int i = 0; i < Math.min(states.size(), MAX_SCAN_ROOTS); i++) {
+            if (joined.length() > 0) joined.append(',');
+            joined.append(states.get(i) ? "1" : "0");
+        }
+        prefs.edit().putString(KEY_SCAN_ROOT_ENABLED, joined.toString()).apply();
+    }
+
+    /**
+     * 设置指定目录的开关状态
+     */
+    private void setScanRootEnabled(int index, boolean enabled) {
+        List<Boolean> states = getScanRootEnabledStates();
+        if (index >= 0 && index < states.size()) {
+            states.set(index, enabled);
+            saveScanRootEnabledStates(states);
+        }
+    }
+
+    /**
+     * 获取启用的扫描目录列表
+     */
+    private List<String> getActiveScanRootUris() {
+        List<String> roots = getScanRootUris();
+        List<Boolean> states = getScanRootEnabledStates();
+        List<String> active = new ArrayList<>();
+        for (int i = 0; i < roots.size(); i++) {
+            if (i < states.size() && states.get(i)) {
+                active.add(roots.get(i));
+            }
+        }
+        return active;
+    }
 
 private boolean addOrReplaceScanRoot(String uri, int replaceIndex) {
 if (uri == null || uri.trim().isEmpty()) return false;
@@ -3539,48 +3600,66 @@ scanDirLauncher.launch(null);
 }
 
 private LinearLayout scanRootCard(String uri, int index, Runnable refresh) {
-LinearLayout card = new LinearLayout(this);
-card.setOrientation(LinearLayout.HORIZONTAL);
-card.setGravity(android.view.Gravity.CENTER_VERTICAL);
-card.setBackgroundResource(R.drawable.bg_input);
-card.setPadding(dp(10), dp(8), dp(8), dp(8));
-TextView text = new TextView(this);
-text.setText((index + 1) + ". " + compactUriLabel(uri));
-text.setTextColor(getColorCompat(R.color.yh_text));
-text.setTextSize(11);
-text.setSingleLine(false);
-card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-TextView change = new TextView(this);
-change.setText("更换");
-change.setTextColor(getColorCompat(R.color.yh_primary));
-change.setTextSize(12);
-change.setTypeface(null, android.graphics.Typeface.BOLD);
-change.setPadding(dp(10), 0, dp(8), 0);
-change.setOnClickListener(v -> launchScanRootPicker(index));
-card.addView(change);
-TextView remove = new TextView(this);
-remove.setText("移除");
-remove.setTextColor(getColorCompat(R.color.yh_warning));
-remove.setTextSize(12);
-remove.setTypeface(null, android.graphics.Typeface.BOLD);
-remove.setPadding(dp(8), 0, 0, 0);
-remove.setOnClickListener(v -> {
-removeScanRootAt(index);
-if (refresh != null) refresh.run();
-});
-card.addView(remove);
-return card;
-}
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_input);
+        card.setPadding(dp(10), dp(8), dp(8), dp(8));
+        
+        // 添加开关控件
+        android.widget.Switch enableSwitch = new android.widget.Switch(this);
+        List<Boolean> states = getScanRootEnabledStates();
+        boolean isEnabled = index < states.size() ? states.get(index) : true;
+        enableSwitch.setChecked(isEnabled);
+        enableSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            setScanRootEnabled(index, checked);
+            // 更新提示信息
+            if (refresh != null) refresh.run();
+        });
+        card.addView(enableSwitch, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        
+        TextView text = new TextView(this);
+        text.setText((index + 1) + ". " + compactUriLabel(uri));
+        text.setTextColor(getColorCompat(R.color.yh_text));
+        text.setTextSize(11);
+        text.setSingleLine(false);
+        card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView change = new TextView(this);
+        change.setText("更换");
+        change.setTextColor(getColorCompat(R.color.yh_primary));
+        change.setTextSize(12);
+        change.setTypeface(null, android.graphics.Typeface.BOLD);
+        change.setPadding(dp(10), 0, dp(8), 0);
+        change.setOnClickListener(v -> launchScanRootPicker(index));
+        card.addView(change);
+        TextView remove = new TextView(this);
+        remove.setText("移除");
+        remove.setTextColor(getColorCompat(R.color.yh_warning));
+        remove.setTextSize(12);
+        remove.setTypeface(null, android.graphics.Typeface.BOLD);
+        remove.setPadding(dp(8), 0, 0, 0);
+        remove.setOnClickListener(v -> {
+            removeScanRootAt(index);
+            if (refresh != null) refresh.run();
+        });
+        card.addView(remove);
+        return card;
+    }
 
 private void refreshActiveScanRootListUi() {
 if (activeScanRootList != null) refreshScanRootListUi(activeScanRootList, activeScanRootInfo);
 }
 
 private void refreshScanRootListUi(LinearLayout container, TextView info) {
-if (container == null) return;
-container.removeAllViews();
-List<String> roots = getScanRootUris();
-if (info != null) info.setText("已绑定 " + roots.size() + "/" + MAX_SCAN_ROOTS + " 个目录，扫描时会合并扫描。" + (roots.isEmpty() ? "\n请先添加扫描目录。" : ""));
+        if (container == null) return;
+        container.removeAllViews();
+        List<String> roots = getScanRootUris();
+        List<Boolean> states = getScanRootEnabledStates();
+        long enabledCount = 0;
+        for (int i = 0; i < roots.size(); i++) {
+            if (i < states.size() && states.get(i)) enabledCount++;
+        }
+        if (info != null) info.setText("已绑定 " + roots.size() + "/" + MAX_SCAN_ROOTS + " 个目录，已启用 " + enabledCount + " 个。" + (roots.isEmpty() ? "\n请先添加扫描目录。" : ""));
 if (roots.isEmpty()) {
 TextView empty = new TextView(this);
 empty.setText("暂无扫描目录");
@@ -5572,7 +5651,7 @@ if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目
     }
 
     private void scanLastRootOrChoose() {
-        List<String> roots = getScanRootUris();
+        List<String> roots = getActiveScanRootUris();
         if (roots.isEmpty()) {
             launchScanRootPicker(-1);
             return;
@@ -5581,7 +5660,7 @@ if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目
     }
 
     private void autoScanLastRootIfAvailable() {
-        List<String> roots = getScanRootUris();
+        List<String> roots = getActiveScanRootUris();
         if (roots.isEmpty()) return;
         runLibraryScan(roots, false);
     }
