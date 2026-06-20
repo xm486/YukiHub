@@ -59,7 +59,14 @@ public class GameScanner {
             try {
                 if (child.isFile()) {
                     String name = safeName(child);
-                    if (name.toLowerCase(Locale.ROOT).endsWith(".desktop")) {
+                    String lowerName = name.toLowerCase(Locale.ROOT);
+                    // 检查是否是PSP游戏文件
+                    if (lowerName.endsWith(".iso") || lowerName.endsWith(".cso") || lowerName.endsWith(".chd") || 
+                        lowerName.endsWith(".elf") || lowerName.endsWith(".pbp")) {
+                        addPspFileResult(results, seenUris, child, name);
+                        continue;
+                    }
+                    if (lowerName.endsWith(".desktop")) {
                         addDesktopResult(results, seenUris, stripDesktopSuffix(name), child.getUri().toString(), name, "");
                     }
                     continue;
@@ -138,6 +145,29 @@ public class GameScanner {
                 90,
                 launchTarget,
                 coverUri
+        ));
+        return true;
+    }
+
+    private static boolean addPspFileResult(List<ScanResult> results, Set<String> seenUris, DocumentFile pspFile, String fileName) {
+        if (results == null || pspFile == null) return false;
+        String uri = pspFile.getUri().toString();
+        if (!markSeen(seenUris, uri)) return false;
+        
+        // 从文件名中提取游戏标题（去掉扩展名）
+        String title = fileName;
+        int dotIndex = title.lastIndexOf('.');
+        if (dotIndex > 0) {
+            title = title.substring(0, dotIndex);
+        }
+        
+        results.add(new ScanResult(
+                title == null || title.trim().isEmpty() ? "未命名PSP游戏" : title,
+                uri,
+                com.yuki.yukihub.model.EngineType.PSP,
+                95,
+                fileName, // launchTarget设置为文件名
+                ""
         ));
         return true;
     }

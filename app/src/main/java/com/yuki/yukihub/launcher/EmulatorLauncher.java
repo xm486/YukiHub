@@ -73,6 +73,13 @@ if (packageName == null || packageName.trim().isEmpty()) return false;
             } catch (Exception ignored) { }
             return false;
         }
+        if ("internal.psp".equalsIgnoreCase(pkg) || "org.ppsspp.ppsspp".equalsIgnoreCase(pkg) || isPPSSPPPackage(pkg)) {
+            try {
+                context.startActivity(buildInternalPspIntent(context, rootUri, launchTarget));
+                return true;
+            } catch (Exception ignored) { }
+            return false;
+        }
         if (isGameHubPackage(pkg)) {
             String mode = gamehubLaunchMode == null ? "game" : gamehubLaunchMode.trim().toLowerCase(Locale.ROOT);
             if ("program".equals(mode) || "normal".equals(mode)) {
@@ -1146,5 +1153,58 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
             }
         } catch (Throwable ignored) { }
         return uriText;
+    }
+
+    /**
+     * 构建启动PSP游戏的Intent
+     * 使用PPSSPP的PpssppActivity来启动PSP游戏
+     */
+    public static Intent buildInternalPspIntent(Context context, String gameUri, String launchTarget) {
+        // 从URI解析游戏文件路径
+        String filePath = uriToFilePath(gameUri);
+        if (filePath == null || filePath.trim().isEmpty()) {
+            filePath = gameUri;
+        }
+        
+        // 构建file:// URI
+        Uri fileUri = Uri.parse("file://" + filePath);
+        
+        // 创建Intent，使用VIEW action和file URI
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(fileUri, "application/octet-stream");
+        
+        // 设置PPSSPP的包名和Activity
+        intent.setClassName("org.ppsspp.ppsspp", "org.ppsspp.ppsspp.PpssppActivity");
+        
+        // 添加必要的flags
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
+                       Intent.FLAG_GRANT_READ_URI_PERMISSION | 
+                       Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        
+        Log.i("EmulatorLauncher", "Built PSP intent for " + filePath);
+        return intent;
+    }
+    
+    /**
+     * 检查是否是PPSSPP包
+     */
+    private static boolean isPPSSPPPackage(String pkg) {
+        if (pkg == null) return false;
+        String p = pkg.trim().toLowerCase(Locale.ROOT);
+        return p.contains("ppsspp") || p.equals("org.ppsspp.ppsspp");
+    }
+    
+    /**
+     * 启动PSP游戏
+     */
+    public static boolean launchPspGame(Context context, String gameUri, String launchTarget) {
+        try {
+            Intent intent = buildInternalPspIntent(context, gameUri, launchTarget);
+            context.startActivity(intent);
+            return true;
+        } catch (Exception e) {
+            Log.e("EmulatorLauncher", "Failed to launch PSP game", e);
+            return false;
+        }
     }
 }

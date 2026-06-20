@@ -87,25 +87,34 @@ public abstract class r extends KR2Activity {
 
 
     private void tryLaunchGame(String path, boolean maps) {
-        // 直接在GL线程启动，避免重试机制导致WebP解码器竞态条件
-        runOnGLThread(() -> {
-            try {
-                boolean ok = NativeBridge.launch(soName(), path, maps);
-                Log.i(TAG, "launch result=" + ok + " path=" + path);
-                if (ok && mask != null) {
-                    mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
-                } else if (!ok) {
-                    runOnUiThread(() -> {
-                        if (mask != null) mask.setText("启动失败");
-                    });
+        // 与Tyranor一致：在后台线程中重试launch，直到成功或达到上限
+        new Thread(() -> {
+            final boolean[] launched = new boolean[]{false};
+            int retry = 15;
+            while (!launched[0] && retry-- > 0) {
+                final int currentRetry = 15 - retry;  // 用final变量记录当前重试次数
+                runOnGLThread(() -> {
+                    try {
+                        boolean ok = NativeBridge.launch(soName(), path, maps);
+                        launched[0] = ok;
+                        Log.i(TAG, "launch result=" + ok + " path=" + path + " attempt=" + currentRetry);
+                        if (ok && mask != null) {
+                            mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
+                        }
+                    } catch (Throwable t) {
+                        Log.e(TAG, "launch failed", t);
+                    }
+                });
+                if (!launched[0]) {
+                    try { Thread.sleep(1000L); } catch (InterruptedException ignored) { break; }
                 }
-            } catch (Throwable t) {
-                Log.e(TAG, "launch failed", t);
+            }
+            if (!launched[0]) {
                 runOnUiThread(() -> {
                     if (mask != null) mask.setText("启动失败");
                 });
             }
-        });
+        }).start();
     }
 
     private static String normalizeKrPath(String path) {
@@ -174,40 +183,14 @@ public abstract class r extends KR2Activity {
 
     @Override
     public void onDestroy() {
-        boolean terminateProcess = shouldTerminateProcessAfterDestroy();
         try {
             mask = null;
             if (app == this) app = null;
         } catch (Throwable ignored) { }
         super.onDestroy();
-        if (!isChangingConfigurations() && terminateProcess) {
-            Log.i(TAG, "terminate KR wrapper process after destroy to avoid stale native state");
-            android.os.Process.killProcess(android.os.Process.myPid());
-        }
-    }
-
-    private boolean shouldTerminateProcessAfterDestroy() {
-        try {
-            Intent intent = getIntent();
-            if (intent == null) return false;
-            if (intent.getBooleanExtra("terminateKrProcessOnDestroy", false)) return true;
-            if (intent.getBooleanExtra("autoKrMirror", false)) return true;
-            if (intent.getBooleanExtra("scopedSaveDir", false)) return true;
-            if (intent.getBooleanExtra("safFileFallback", false)) return true;
-            boolean safRoot = false;
-            String rootUri = intent.getStringExtra("rootUri");
-            if (rootUri != null) safRoot = rootUri.trim().toLowerCase(java.util.Locale.ROOT).startsWith("content://");
-            boolean specialLaunch = safRoot
-                    || intent.getBooleanExtra("compatMode", false)
-                    || "1.3.4".equals(intent.getStringExtra("krEngineVersion"));
-            if (!specialLaunch) return false;
-            String brand = String.valueOf(android.os.Build.BRAND).toLowerCase(java.util.Locale.ROOT);
-            String manufacturer = String.valueOf(android.os.Build.MANUFACTURER).toLowerCase(java.util.Locale.ROOT);
-            return brand.contains("huawei") || brand.contains("honor")
-                    || manufacturer.contains("huawei") || manufacturer.contains("honor");
-        } catch (Throwable ignored) {
-            return false;
-        }
+        // 与Tyranor一致：总是清理进程，避免native资源残留导致WebP解码器竞态条件
+        Log.i(TAG, "terminate KR process after destroy to avoid stale native state");
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     public abstract String soName();

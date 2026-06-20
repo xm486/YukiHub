@@ -8,6 +8,7 @@ public enum EngineType {
     ARTEMIS("Artemis"),
     WINLATOR("Winlator"),
     GAMEHUB("GameHub"),
+    PSP("PSP"),
     UNKNOWN("Unknown");
 
     private final String displayName;

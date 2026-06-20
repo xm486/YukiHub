@@ -2042,12 +2042,13 @@ scanMissingCoversIfNeeded();
             if ("COMPLETED".equals(filter) && !"completed".equals(normalizePlayStatus(g.playStatus))) continue;
             if ("UNPLAYED".equals(filter) && !"unplayed".equals(normalizePlayStatus(g.playStatus))) continue;
             if ("KIRIKIRI".equals(filter) && g.engine != EngineType.KIRIKIRI) continue;
-            if ("ONS".equals(filter) && g.engine != EngineType.ONS) continue;
-            if ("TYRANO".equals(filter) && g.engine != EngineType.TYRANO) continue;
-            if ("ARTEMIS".equals(filter) && g.engine != EngineType.ARTEMIS) continue;
-            if ("WINLATOR".equals(filter) && g.engine != EngineType.WINLATOR) continue;
-            if ("GAMEHUB".equals(filter) && g.engine != EngineType.GAMEHUB) continue;
-            if ("UNKNOWN".equals(filter) && g.engine != EngineType.UNKNOWN) continue;
+        if ("ONS".equals(filter) && g.engine != EngineType.ONS) continue;
+        if ("TYRANO".equals(filter) && g.engine != EngineType.TYRANO) continue;
+        if ("ARTEMIS".equals(filter) && g.engine != EngineType.ARTEMIS) continue;
+        if ("WINLATOR".equals(filter) && g.engine != EngineType.WINLATOR) continue;
+        if ("GAMEHUB".equals(filter) && g.engine != EngineType.GAMEHUB) continue;
+        if ("PSP".equals(filter) && g.engine != EngineType.PSP) continue;
+        if ("UNKNOWN".equals(filter) && g.engine != EngineType.UNKNOWN) continue;
             if (developerFilter != null && !developerFilter.isEmpty()) {
                 String dev = developerOf(g);
                 if (dev == null || !dev.toLowerCase(Locale.ROOT).contains(developerFilter.toLowerCase(Locale.ROOT))) continue;
@@ -4701,7 +4702,7 @@ private String displayPath(String value) {
             public void onTextChanged(CharSequence s, int st, int b, int c) { updateWinlatorAdvanced.run(); }
             public void afterTextChanged(Editable e) {}
         });
-        ArrayAdapter<String> spAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "UNKNOWN"});
+        ArrayAdapter<String> spAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "PSP", "UNKNOWN"});
         spAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
         sp.setAdapter(spAdapter);
         ArrayAdapter<String> winlatorModeAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"启动到游戏", "启动到程序"});
@@ -4783,6 +4784,7 @@ private String displayPath(String value) {
             if (g.engine == EngineType.ONS && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = "internal.ons";
             if (g.engine == EngineType.WINLATOR && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = guessInstalledWinlatorPackage();
             if (g.engine == EngineType.GAMEHUB && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = guessInstalledGameHubPackage();
+            if (g.engine == EngineType.PSP && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = "org.ppsspp.ppsspp";
             if (g.engine != EngineType.GAMEHUB) g.gamehubLocalGameId = "";
             g.winlatorLaunchMode = (g.engine == EngineType.WINLATOR || isWinlatorPackageName(g.emulatorPackage)) ? winlatorModeValue(winlatorModeSp.getSelectedItemPosition()) : "game";
             g.gamehubLaunchMode = g.engine == EngineType.GAMEHUB ? gamehubModeValue(gamehubModeSp.getSelectedItemPosition()) : "game";
@@ -5020,7 +5022,7 @@ private void showEditPlayTimeDialog(Game game) {
         return hours + "h" + remain + "m";
     }
 
-    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.GAMEHUB) return 6; if (e == EngineType.UNKNOWN) return 7; return 0; }
+    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.GAMEHUB) return 6; if (e == EngineType.PSP) return 7; if (e == EngineType.UNKNOWN) return 8; return 0; }
 
     private boolean isWinlatorPackageName(String pkg) {
         if (pkg == null) return false;
@@ -5585,6 +5587,7 @@ if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目
     private String defaultLaunchTargetForEngine(EngineType engine) {
         if (engine == EngineType.TYRANO || engine == EngineType.ARTEMIS || engine == EngineType.KIRIKIRI) return "[游戏目录]";
         if (engine == EngineType.GAMEHUB) return "[GameHub]";
+        if (engine == EngineType.PSP) return "[PSP游戏文件]";
         return "[游戏目录]";
     }
 
@@ -5691,6 +5694,7 @@ try {
             if (r.engine == EngineType.ONS) g.emulatorPackage = "internal.ons";
             if (r.engine == EngineType.TYRANO) g.emulatorPackage = "internal.tyrano";
             if (r.engine == EngineType.ARTEMIS) g.emulatorPackage = resolveArtemisPackageFromMarkers(g.rootUri);
+            if (r.engine == EngineType.PSP) g.emulatorPackage = "org.ppsspp.ppsspp";
             if (isDesktopLaunchTarget(g.launchTarget)) g.emulatorPackage = guessInstalledWinlatorPackage();
             long newId = repository.insertIfNotExists(g);
             if (newId > 0) {
@@ -5728,6 +5732,7 @@ try {
         if (emulatorPackage.isEmpty() && game.engine == EngineType.TYRANO) emulatorPackage = "internal.tyrano";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.WINLATOR) emulatorPackage = guessInstalledWinlatorPackage();
         if (emulatorPackage.isEmpty() && game.engine == EngineType.GAMEHUB) emulatorPackage = guessInstalledGameHubPackage();
+        if (emulatorPackage.isEmpty() && game.engine == EngineType.PSP) emulatorPackage = "org.ppsspp.ppsspp";
         if (game.engine == EngineType.ARTEMIS) {
             emulatorPackage = normalizeArtemisPackage(emulatorPackage);
         }
@@ -6140,6 +6145,9 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
         }
         if (pkg.startsWith("internal.artemis")) {
             return startActivitySafely(EmulatorLauncher.buildInternalArtemisIntent(this, pkg, game.rootUri, launchTarget));
+        }
+        if (pkg.startsWith("internal.psp") || pkg.equals("org.ppsspp.ppsspp")) {
+            return startActivitySafely(EmulatorLauncher.buildInternalPspIntent(this, game.rootUri, launchTarget));
         }
         return EmulatorLauncher.launchGame(this, emulatorPackage, game.rootUri, launchTarget, game.winlatorLaunchMode, game.gamehubLaunchMode, game.gamehubLocalGameId);
     }

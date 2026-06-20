@@ -61,6 +61,8 @@ public class EngineDetector {
             score(r, EngineType.ONS, s.hasOnsScript ? 90 : 70, "[游戏目录]");
         } else if (s.firstDesktop != null) {
             score(r, EngineType.WINLATOR, 90, s.firstDesktop);
+        } else if (s.firstPspFile != null) {
+            score(r, EngineType.PSP, 95, s.firstPspFile);
         }
         return r;
     }
@@ -101,6 +103,7 @@ public class EngineDetector {
         boolean hasAppAsar = false;
         boolean hasPackageJson = false;
         boolean hasElectronPak = false;
+        String firstPspFile = null;
     }
 
     private static void collectFeatures(DocumentFile dir, String prefix, int level, int maxLevel, FeatureState s) {
@@ -169,6 +172,11 @@ public class EngineDetector {
             if (lower.endsWith(".xp3")) {
                 if (lower.equals("data.xp3")) s.firstXp3 = rel.contains("/") ? rel : "data.xp3";
                 else if (s.firstXp3 == null) s.firstXp3 = rel.contains("/") ? rel : original;
+            }
+            // PSP游戏文件检测
+            if (lower.endsWith(".iso") || lower.endsWith(".cso") || lower.endsWith(".chd") || 
+                lower.endsWith(".elf") || lower.endsWith(".pbp")) {
+                if (s.firstPspFile == null) s.firstPspFile = original;
             }
         }
     }
