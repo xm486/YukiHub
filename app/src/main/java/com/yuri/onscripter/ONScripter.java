@@ -19,7 +19,9 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
+import android.view.ViewGroup;
 
 import org.libsdl.app.SDLActivity;
 
