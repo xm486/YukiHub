@@ -87,32 +87,25 @@ public abstract class r extends KR2Activity {
 
 
     private void tryLaunchGame(String path, boolean maps) {
-        new Thread(() -> {
-            final boolean[] launched = new boolean[]{false};
-            int retry = 15;
-            while (!launched[0] && retry-- > 0) {
-                runOnGLThread(() -> {
-                    try {
-                        boolean ok = NativeBridge.launch(soName(), path, maps);
-                        launched[0] = ok;
-                        Log.i(TAG, "launch result=" + ok + " path=" + path);
-                        if (ok && mask != null) {
-                            mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
-                        }
-                    } catch (Throwable t) {
-                        Log.e(TAG, "launch failed", t);
-                    }
-                });
-                if (!launched[0]) {
-                    try { Thread.sleep(1000L); } catch (InterruptedException ignored) { break; }
+        // 直接在GL线程启动，避免重试机制导致WebP解码器竞态条件
+        runOnGLThread(() -> {
+            try {
+                boolean ok = NativeBridge.launch(soName(), path, maps);
+                Log.i(TAG, "launch result=" + ok + " path=" + path);
+                if (ok && mask != null) {
+                    mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
+                } else if (!ok) {
+                    runOnUiThread(() -> {
+                        if (mask != null) mask.setText("启动失败");
+                    });
                 }
-            }
-            if (!launched[0]) {
+            } catch (Throwable t) {
+                Log.e(TAG, "launch failed", t);
                 runOnUiThread(() -> {
                     if (mask != null) mask.setText("启动失败");
                 });
             }
-        }).start();
+        });
     }
 
     private static String normalizeKrPath(String path) {
