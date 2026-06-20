@@ -1268,6 +1268,15 @@ private int accountStatusTextColor() {
     return 0xFFE3E8F2;
 }
 
+private void showFriendsChatPlaceholder() {
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("功能暂未开放")
+            .setMessage("好友聊天功能暂未支持，请期待后续版本更新")
+            .setPositiveButton("确定", null)
+            .show();
+    styleAlertDialogDark(dialog);
+}
+
 private void showAuthPlaceholderDialog() {
     if (isLoggedIn()) {
         showAccountSettingsDialog();
