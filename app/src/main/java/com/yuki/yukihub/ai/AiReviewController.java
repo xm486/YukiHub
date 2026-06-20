@@ -464,9 +464,10 @@ private void testAiReviewConnection(AiReviewSettings settings, Button button) {
                                 .setTitle("AI 连接成功")
                                 .setMessage("实际请求地址：\n" + endpoint + "\n\n模型：" + settings.model + "\n返回：" + emptyText(reply, "OK"))
                                 .setPositiveButton("好", null)
-                        .show();
-                styleAlertDialogDark(d);
-            });
+                                .show();
+                        styleAlertDialogDark(d);
+                    });
+                }
         } catch (Throwable t) {
             Log.w("YukiHub", "AI test connection failed", t);
             if (isActivityAlive()) {
