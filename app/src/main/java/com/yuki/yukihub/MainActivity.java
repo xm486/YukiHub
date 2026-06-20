@@ -125,6 +125,7 @@ import com.yuki.yukihub.data.GameRepository.PlayActivity;
 import com.yuki.yukihub.data.MetadataRepository;
 import com.yuki.yukihub.launcher.EmulatorLauncher;
 import com.yuki.yukihub.metadata.BangumiClient;
+import com.yuki.yukihub.metadata.MetadataController;
 import com.yuki.yukihub.metadata.VndbClient;
 import com.yuki.yukihub.metadata.VnMetadata;
 import com.yuki.yukihub.metadata.YmgalClient;
@@ -161,6 +162,7 @@ public class MainActivity extends AppCompatActivity {
     private GameRepository repository;
     private MetadataRepository metadataRepository;
     private AiReviewController aiReviewController;
+    private MetadataController metadataController;
     private GameAdapter adapter;
     private final List<Game> allGames = new ArrayList<>();
     private String filter = "ALL";
@@ -211,20 +213,12 @@ private static final int MAX_SCAN_ROOTS = 3;
     private static final String UPDATE_API_URL = "https://api.github.com/repos/xm486/YukiHub/releases/latest";
     private static final String UPDATE_REPO_URL = "https://github.com/xm486/YukiHub";
     private static final String KEY_ENGINE_LABEL_POSITION = "engine_label_position";
-    private static final String KEY_SIDE_TRANSLATED_PREFIX = "side_translated_";
     private static final int DEFAULT_STARTUP_SCAN_DEPTH = 2;
     private static final int MAX_STARTUP_SCAN_DEPTH = 4;
-private static final String KEY_METADATA_SOURCE = "metadata_source";
-private static final String KEY_VISIBLE_METADATA_SOURCE_PREFIX = "visible_metadata_source_";
-private static final String KEY_BANGUMI_TOKEN = "bangumi_token";
 private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
 private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
 private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
 private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
-private static final String SOURCE_VNDB = "vndb";
-    private static final String SOURCE_BANGUMI = "bangumi";
-private static final String SOURCE_BANGUMI_MIRROR = "bangumi_mirror";
-private static final String SOURCE_YMGAL = "ymgal";
 private static final String KEY_SORT_MODE = "sort_mode";
 private static final String SORT_MODE_RECENT = "recent";
 private static final String SORT_MODE_NAME = "name";
@@ -313,6 +307,71 @@ prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             @Override public String normalizePlayStatus(String status) { return MainActivity.this.normalizePlayStatus(status); }
             @Override public String safeCoverUri(Game g) { return MainActivity.this.safeCoverUri(g); }
             @Override public String initials(String title) { return MainActivity.this.initials(title); }
+        });
+        metadataController = new MetadataController(new MetadataController.Delegate() {
+            @Override public SharedPreferences prefs() { return prefs; }
+            @Override public MetadataRepository metadataRepository() { return MainActivity.this.metadataRepository; }
+            @Override public GameRepository gameRepository() { return repository; }
+            @Override public List<Game> allGames() { return allGames; }
+            @Override public void runOnUiThread(Runnable r) { MainActivity.this.runOnUiThread(r); }
+            @Override public android.app.Activity activity() { return MainActivity.this; }
+            @Override public Game selectedGame() { return selectedGame; }
+            @Override public void setSelectedGame(Game game) { selectedGame = game; }
+            @Override public VnMetadata currentSideMetadata() { return MainActivity.this.currentSideMetadata; }
+            @Override public void setCurrentSideMetadata(VnMetadata meta) { MainActivity.this.currentSideMetadata = meta; }
+            @Override public boolean sideShowingTranslatedDescription() { return sideShowingTranslatedDescription; }
+            @Override public void setSideShowingTranslatedDescription(boolean value) { sideShowingTranslatedDescription = value; }
+            @Override public String sideFullDescription() { return sideFullDescription; }
+            @Override public void setSideFullDescription(String text) { sideFullDescription = text; }
+            @Override public TextView sideDetailTitle() { return sideDetailTitle; }
+            @Override public TextView sideDetailOriginalTitle() { return sideDetailOriginalTitle; }
+            @Override public TextView sideDetailHint() { return sideDetailHint; }
+            @Override public TextView sideDetailPath() { return sideDetailPath; }
+            @Override public TextView sideDetailDeveloper() { return sideDetailDeveloper; }
+            @Override public TextView sideDetailDate() { return sideDetailDate; }
+            @Override public TextView sideDetailRating() { return sideDetailRating; }
+            @Override public TextView sideDetailLength() { return sideDetailLength; }
+            @Override public TextView sideDetailTags() { return sideDetailTags; }
+            @Override public TextView sideDescToggle() { return sideDescToggle; }
+            @Override public TextView sideTranslateToggle() { return sideTranslateToggle; }
+            @Override public TextView sideMetadataSourceBadge() { return sideMetadataSourceBadge; }
+            @Override public ImageView sideDetailCover() { return sideDetailCover; }
+            @Override public View sideDetailPlaceholder() { return sideDetailPlaceholder; }
+            @Override public ImageView sideScreenshot1() { return sideScreenshot1; }
+            @Override public ImageView sideScreenshot2() { return sideScreenshot2; }
+            @Override public LinearLayout sideTagContainer() { return sideTagContainer; }
+            @Override public TextView sideBtnLaunch() { return sideBtnLaunch; }
+            @Override public TextView sideBtnOptions() { return sideBtnOptions; }
+            @Override public GameAdapter adapter() { return adapter; }
+            @Override public int dp(int value) { return MainActivity.this.dp(value); }
+            @Override public int getColorCompat(int id) { return MainActivity.this.getColorCompat(id); }
+            @Override public void styleAlertDialogDark(AlertDialog dialog) { MainActivity.this.styleAlertDialogDark(dialog); }
+            @Override public void playUiSound(int type) { MainActivity.this.playUiSound(type); }
+            @Override public void applyImmersiveToWindow(Window window) { MainActivity.this.applyImmersiveToWindow(window); }
+            @Override public void loadRemoteImage(String url, ImageView target, String prefix) { MainActivity.this.loadRemoteImage(url, target, prefix); }
+            @Override public void setSideDescription(String text) { MainActivity.this.setSideDescription(text); }
+            @Override public void renderSideDescription() { MainActivity.this.renderSideDescription(); }
+            @Override public void renderTagChips(String tagsText) { MainActivity.this.renderTagChips(tagsText); }
+            @Override public void updateTranslateButtonState() { MainActivity.this.updateTranslateButtonState(); }
+            @Override public String emptyText(String s, String fallback) { return MainActivity.this.emptyText(s, fallback); }
+            @Override public String safeCoverUri(Game g) { return MainActivity.this.safeCoverUri(g); }
+            @Override public String initials(String title) { return MainActivity.this.initials(title); }
+            @Override public String displayPath(String value) { return MainActivity.this.displayPath(value); }
+            @Override public File persistentRemoteCoverDir() { return MainActivity.this.persistentRemoteCoverDir(); }
+            @Override public File cacheDir() { return getCacheDir(); }
+            @Override public boolean isMissingFileUri(String uriText) { return MainActivity.this.isMissingFileUri(uriText); }
+            @Override public void loadGames() { MainActivity.this.loadGames(); }
+            @Override public void updateSideDetail(Game game) { MainActivity.this.updateSideDetail(game); }
+            @Override public void showEditDialog(Game game) { MainActivity.this.showEditDialog(game); }
+            @Override public void showPlayStatusDialog(Game game, Dialog parentDialog) { MainActivity.this.showPlayStatusDialog(game, parentDialog); }
+            @Override public void showEditPlayTimeDialog(Game game) { MainActivity.this.showEditPlayTimeDialog(game); }
+            @Override public void showKrSettingsDialog(Game game) { MainActivity.this.showKrSettingsDialog(game); }
+            @Override public void showOnsSettingsDialog(Game game) { MainActivity.this.showOnsSettingsDialog(game); }
+            @Override public void showDetailDialog(Game game) { MainActivity.this.showDetailDialog(game); }
+            @Override public void confirmDeleteGame(Game game) { MainActivity.this.confirmDeleteGame(game); }
+            @Override public void showToast(String text, int duration) { Toast.makeText(MainActivity.this, text, duration).show(); }
+            @Override public void updateProfilePanel() { MainActivity.this.updateProfilePanel(); }
+            @Override public String translateTextToChinese(String text) throws Exception { return MainActivity.this.translateTextToChinese(text); }
         });
         try { DevLogger.init(this); } catch (Throwable ignored) { }
         try { setVolumeControlStream(AudioManager.STREAM_MUSIC); } catch (Throwable ignored) { }
@@ -538,13 +597,8 @@ private void repairMissingMetadataCoversIfNeeded() {
         int changed = 0;
         for (Game g : targets) {
             try {
-                VnMetadata meta = usingYmgal() ? metadataRepository.getYmgal(g.id) : (usingBangumi() ? metadataRepository.getBangumi(g.id) : metadataRepository.getVndb(g.id));
-if (meta == null) {
-VnMetadata v = metadataRepository.getVndb(g.id);
-VnMetadata b = metadataRepository.getBangumi(g.id);
-VnMetadata y = metadataRepository.getYmgal(g.id);
-meta = v != null ? v : (b != null ? b : y);
-}
+                VnMetadata meta = currentSourceMetadata(g.id);
+if (meta == null) meta = anyCachedMetadata(g.id);
                 if (meta == null || meta.coverUrl == null || meta.coverUrl.trim().isEmpty()) continue;
                 String cover = cacheRemoteImageSync(meta.coverUrl, "repair_cover_" + emptyText(meta.id, String.valueOf(g.id)));
                 if (cover == null || cover.isEmpty()) continue;
@@ -1926,10 +1980,8 @@ private void updateDeveloperFilterSelection() {
 }
 
 private String developerOf(Game game) {
-    if (game == null || metadataRepository == null) return "";
-    VnMetadata meta = metadataRepository.getVndb(game.id);
-if (meta == null) meta = metadataRepository.getBangumi(game.id);
-if (meta == null) meta = metadataRepository.getYmgal(game.id);
+    if (game == null) return "";
+    VnMetadata meta = anyCachedMetadata(game.id);
 return meta == null ? "" : emptyText(meta.developer, "");
 }
 
@@ -2118,429 +2170,151 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
 }
 
 private String metadataSource() {
-    return prefs == null ? SOURCE_VNDB : prefs.getString(KEY_METADATA_SOURCE, SOURCE_VNDB);
+    return metadataController.metadataSource();
 }
 
 private String metadataSourceLabel() {
-    return metadataSourceLabel(metadataSource());
+    return metadataController.metadataSourceLabel();
 }
 
 private String metadataSourceLabel(String source) {
-    if (SOURCE_BANGUMI.equals(source)) return "Bangumi";
-    if (SOURCE_BANGUMI_MIRROR.equals(source)) return "Bangumi镜像";
-    if (SOURCE_YMGAL.equals(source)) return "月幕Gal";
-    return "VNDB";
+    return metadataController.metadataSourceLabel(source);
 }
 
 private String normalizeMetadataSource(String source) {
-    if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source)) return source;
-    return SOURCE_VNDB;
+    return metadataController.normalizeMetadataSource(source);
 }
 
 private boolean isValidMetadataSource(String source) {
-    return SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source);
+    return metadataController.isValidMetadataSource(source);
 }
 
 private String visibleMetadataSource(long gameId) {
-    if (prefs == null || gameId <= 0) return "";
-    String source = prefs.getString(KEY_VISIBLE_METADATA_SOURCE_PREFIX + gameId, "");
-    return isValidMetadataSource(source) ? source : "";
+    return metadataController.visibleMetadataSource(gameId);
 }
 
 private void setVisibleMetadataSource(long gameId, String source) {
-    if (prefs == null || gameId <= 0) return;
-    prefs.edit().putString(KEY_VISIBLE_METADATA_SOURCE_PREFIX + gameId, normalizeMetadataSource(source)).apply();
+    metadataController.setVisibleMetadataSource(gameId, source);
 }
 
 private VnMetadata metadataForSource(long gameId, String source) {
-    if (metadataRepository == null || gameId <= 0) return null;
-    String s = normalizeMetadataSource(source);
-    if (SOURCE_YMGAL.equals(s)) return metadataRepository.getYmgal(gameId);
-    if (SOURCE_BANGUMI.equals(s) || SOURCE_BANGUMI_MIRROR.equals(s)) return metadataRepository.getBangumi(gameId);
-    return metadataRepository.getVndb(gameId);
+    return metadataController.metadataForSource(gameId, source);
 }
 
 private String metadataSourceForVisibleMetadata(long gameId, VnMetadata meta) {
-    if (metadataRepository == null || gameId <= 0 || meta == null) return "";
-    try {
-        String visible = visibleMetadataSource(gameId);
-        if (!visible.isEmpty()) {
-            VnMetadata visibleMeta = metadataForSource(gameId, visible);
-            if (visibleMeta != null && sameMetadataIdentity(visibleMeta, meta)) return visible;
-        }
-        VnMetadata v = metadataRepository.getVndb(gameId);
-        if (v != null && sameMetadataIdentity(v, meta)) return SOURCE_VNDB;
-        VnMetadata b = metadataRepository.getBangumi(gameId);
-        if (b != null && sameMetadataIdentity(b, meta)) return SOURCE_BANGUMI;
-        VnMetadata y = metadataRepository.getYmgal(gameId);
-        if (y != null && sameMetadataIdentity(y, meta)) return SOURCE_YMGAL;
-    } catch (Throwable ignored) { }
-    return "";
+    return metadataController.metadataSourceForVisibleMetadata(gameId, meta);
 }
 
 private String metadataSourceLabelForVisibleMetadata(long gameId, VnMetadata meta) {
-    String source = metadataSourceForVisibleMetadata(gameId, meta);
-    return source.isEmpty() ? "" : metadataSourceLabel(source);
+    return metadataController.metadataSourceLabelForVisibleMetadata(gameId, meta);
 }
 
 private void updateSideMetadataSourceBadge(String label) {
-    if (sideMetadataSourceBadge == null) return;
-    if (label == null || label.trim().isEmpty()) {
-        sideMetadataSourceBadge.setVisibility(View.GONE);
-        sideMetadataSourceBadge.setText("");
-        return;
-    }
-    String text = label.trim();
-    sideMetadataSourceBadge.setText(text);
-    int color = getColorCompat(R.color.yh_primary);
-    if (text.contains("Bangumi")) color = getColorCompat(R.color.yh_secondary);
-    else if (text.contains("月幕")) color = getColorCompat(R.color.yh_warning);
-    sideMetadataSourceBadge.setTextColor(color);
-    sideMetadataSourceBadge.setVisibility(View.VISIBLE);
+    metadataController.updateSideMetadataSourceBadge(label);
 }
 
 private boolean usingBangumi() {
-String source = metadataSource();
-return SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source);
+    return metadataController.usingBangumi();
 }
 
 private boolean usingBangumiMirror() {
-return SOURCE_BANGUMI_MIRROR.equals(metadataSource());
+    return metadataController.usingBangumiMirror();
 }
 
 private boolean usingYmgal() {
-return SOURCE_YMGAL.equals(metadataSource());
+    return metadataController.usingYmgal();
 }
 
 private String bangumiToken() {
-    return prefs == null ? "" : prefs.getString(KEY_BANGUMI_TOKEN, "");
+    return metadataController.bangumiToken();
 }
 
 private void fetchSelectedMetadata(Game game) {
-    if (game == null) return;
-
-    // 1. 资料源设置只决定“下一次搜索用哪个源”，不应该切换已经展示/绑定的资料卡。
-    //    因此优先读取这个游戏最后实际展示的来源缓存。
-    String visibleSource = visibleMetadataSource(game.id);
-    if (!visibleSource.isEmpty()) {
-        VnMetadata visibleCached = metadataForSource(game.id, visibleSource);
-        if (visibleCached != null) {
-            applyVndbMetadata(visibleCached, game);
-            return;
-        }
-    }
-
-    // 2. 没有展示源记录（老数据/首次进入）时，稳定选择任意已有缓存；不要把当前设置源放第一，
-    //    避免切换搜索引擎时右侧资料卡跟着跳变。
-    VnMetadata cached = anyCachedMetadata(game.id);
-    if (cached != null) {
-        applyVndbMetadata(cached, game);
-        return;
-    }
-
-    // 3. 只有这个游戏完全没有任何资料缓存时，才按当前资料源自动匹配。
-    fetchCurrentSourceMetadata(game, false);
+    metadataController.fetchSelectedMetadata(game);
 }
 
 private void fetchSelectedMetadata(Game game, boolean forceRefresh) {
-    if (forceRefresh) {
-        fetchCurrentSourceMetadata(game, true);
-    } else {
-        fetchSelectedMetadata(game);
-    }
+    metadataController.fetchSelectedMetadata(game, forceRefresh);
 }
 
 private void fetchCurrentSourceMetadata(Game game, boolean forceRefresh) {
-    if (usingYmgal()) fetchYmgalMetadata(game, forceRefresh);
-    else if (usingBangumi()) fetchBangumiMetadata(game, forceRefresh);
-    else fetchVndbMetadata(game, forceRefresh);
+    metadataController.fetchCurrentSourceMetadata(game, forceRefresh);
 }
 
 private VnMetadata currentSourceCachedMetadata(long gameId) {
-    return metadataForSource(gameId, metadataSource());
+    return metadataController.currentSourceCachedMetadata(gameId);
 }
 
 private VnMetadata anyCachedMetadata(long gameId) {
-    if (metadataRepository == null || gameId <= 0) return null;
-    VnMetadata meta = metadataRepository.getVndb(gameId);
-    if (meta != null) return meta;
-    meta = metadataRepository.getBangumi(gameId);
-    if (meta != null) return meta;
-    meta = metadataRepository.getYmgal(gameId);
-    if (meta != null) return meta;
-    return null;
+    return metadataController.anyCachedMetadata(gameId);
 }
 
 private VnMetadata otherSourceCachedMetadata(long gameId) {
-    if (metadataRepository == null || gameId <= 0) return null;
-    String current = metadataSource();
-    VnMetadata meta;
-    if (!SOURCE_VNDB.equals(current)) {
-        meta = metadataRepository.getVndb(gameId);
-        if (meta != null) return meta;
-    }
-    if (!SOURCE_BANGUMI.equals(current) && !SOURCE_BANGUMI_MIRROR.equals(current)) {
-        meta = metadataRepository.getBangumi(gameId);
-        if (meta != null) return meta;
-    }
-    if (!SOURCE_YMGAL.equals(current)) {
-        meta = metadataRepository.getYmgal(gameId);
-        if (meta != null) return meta;
-    }
-    return null;
+    return metadataController.otherSourceCachedMetadata(gameId);
 }
 
 private void saveCurrentSourceMetadata(long gameId, VnMetadata meta) {
-    if (metadataRepository == null || gameId <= 0 || meta == null) return;
-    String source = metadataSource();
-    if (SOURCE_YMGAL.equals(source)) metadataRepository.saveYmgal(gameId, meta);
-    else if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) metadataRepository.saveBangumi(gameId, meta);
-    else metadataRepository.saveVndb(gameId, meta);
-    setVisibleMetadataSource(gameId, source);
+    metadataController.saveCurrentSourceMetadata(gameId, meta);
 }
 
 private void saveVisibleMetadata(long gameId, VnMetadata meta) {
-    if (metadataRepository == null || gameId <= 0 || meta == null) return;
-    try {
-        String visibleSource = visibleMetadataSource(gameId);
-        VnMetadata visible = visibleSource.isEmpty() ? null : metadataForSource(gameId, visibleSource);
-        if (visible != null && sameMetadataIdentity(visible, meta)) {
-            saveMetadataForSource(gameId, visibleSource, meta);
-            return;
-        }
-        String source = metadataSourceForVisibleMetadata(gameId, meta);
-        if (!source.isEmpty()) {
-            saveMetadataForSource(gameId, source, meta);
-            return;
-        }
-    } catch (Throwable ignored) { }
-    saveCurrentSourceMetadata(gameId, meta);
+    metadataController.saveVisibleMetadata(gameId, meta);
 }
 
 private void saveMetadataForSource(long gameId, String source, VnMetadata meta) {
-    if (metadataRepository == null || gameId <= 0 || meta == null) return;
-    String s = normalizeMetadataSource(source);
-    if (SOURCE_YMGAL.equals(s)) metadataRepository.saveYmgal(gameId, meta);
-    else if (SOURCE_BANGUMI.equals(s) || SOURCE_BANGUMI_MIRROR.equals(s)) metadataRepository.saveBangumi(gameId, meta);
-    else metadataRepository.saveVndb(gameId, meta);
+    metadataController.saveMetadataForSource(gameId, source, meta);
 }
 
 private boolean sameMetadataIdentity(VnMetadata a, VnMetadata b) {
-    if (a == null || b == null) return false;
-    String ai = a.id == null ? "" : a.id.trim();
-    String bi = b.id == null ? "" : b.id.trim();
-    if (!ai.isEmpty() && ai.equals(bi)) return true;
-    String at = emptyText(a.chineseTitle, emptyText(a.originalTitle, a.romanTitle));
-    String bt = emptyText(b.chineseTitle, emptyText(b.originalTitle, b.romanTitle));
-    return !at.isEmpty() && at.equals(bt);
+    return metadataController.sameMetadataIdentity(a, b);
 }
 
 private void clearCurrentSourceMetadata(long gameId) {
-    if (metadataRepository == null || gameId <= 0) return;
-    if (usingYmgal()) metadataRepository.clearYmgal(gameId);
-    else if (usingBangumi()) metadataRepository.clearBangumi(gameId);
-    else metadataRepository.clearVndb(gameId);
+    metadataController.clearCurrentSourceMetadata(gameId);
 }
 
 private VnMetadata currentSourceMetadata(long gameId) {
-    if (metadataRepository == null || gameId <= 0) return null;
-    if (usingYmgal()) return metadataRepository.getYmgal(gameId);
-    if (usingBangumi()) return metadataRepository.getBangumi(gameId);
-    return metadataRepository.getVndb(gameId);
+    return metadataController.currentSourceMetadata(gameId);
 }
 
 private void showCurrentSourceCustomSearchDialog(Game game) {
-    if (usingYmgal()) showCustomYmgalSearchDialog(game);
-    else if (usingBangumi()) showCustomBangumiSearchDialog(game);
-    else showCustomVndbSearchDialog(game);
+    metadataController.showCurrentSourceCustomSearchDialog(game);
 }
 
 private void searchCurrentSourceWithKeyword(Game game, String keyword) {
-    if (usingYmgal()) searchYmgalWithKeyword(game, keyword);
-    else if (usingBangumi()) searchBangumiWithKeyword(game, keyword);
-    else searchVndbWithKeyword(game, keyword);
+    metadataController.searchCurrentSourceWithKeyword(game, keyword);
 }
 
 private void fetchVndbMetadata(Game game, boolean forceRefresh) {
-        if (game == null || game.title == null || game.title.trim().isEmpty()) return;
-        final long id = game.id;
-        final String keyword = buildMetadataSearchKeyword(game.title);
-        VnMetadata cached = metadataRepository == null || forceRefresh ? null : metadataRepository.getVndb(id);
-        if (cached != null) {
-            setVisibleMetadataSource(id, SOURCE_VNDB);
-            applyVndbMetadata(cached, game);
-            return;
-        }
-        setSideDescription("正在从 VNDB 获取资料…");
-        VndbClient.searchCandidatesAsync(keyword, 5, new VndbClient.CandidatesCallback() {
-        @Override public void onSuccess(List<VnMetadata> data) {
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                if (data == null || data.isEmpty()) {
-                    applyVndbMetadata(null, game);
-                } else if (data.size() == 1 || isConfidentMatch(game.title, data.get(0))) {
-                    saveCurrentSourceMetadata(id, data.get(0));
-                    applyVndbMetadata(data.get(0), game);
-                } else {
-                    showVndbCandidateDialog(game, data);
-                }
-            });
-        }
-        @Override public void onError(Exception error) {
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                setSideDescription(emptyText(game.description, "VNDB 暂未匹配到资料。"));
-            });
-        }
-    });
+    metadataController.fetchVndbMetadata(game, forceRefresh);
 }
 
 private void fetchBangumiMetadata(Game game, boolean forceRefresh) {
-        if (game == null || game.title == null || game.title.trim().isEmpty()) return;
-        final long id = game.id;
-        final String keyword = buildMetadataSearchKeyword(game.title);
-        VnMetadata cached = metadataRepository == null || forceRefresh ? null : metadataRepository.getBangumi(id);
-        if (cached != null) {
-            setVisibleMetadataSource(id, metadataSource());
-            applyVndbMetadata(cached, game);
-            return;
-        }
-        String token = bangumiToken();
-        if (token == null || token.trim().isEmpty()) {
-        sideDetailOriginalTitle.setText("Bangumi 未配置 Token");
-        setSideDescription("请在右上角 设置 -> 元数据源 中填写 Bangumi Access Token。\n\n提示：Bangumi 官方建议账号注册超过三个月后再申请和使用 Token。");
-        return;
-    }
-    setSideDescription("正在从 Bangumi 获取资料…");
-    AppExecutors.runOnIo(() -> {
-        try {
-            VnMetadata meta = BangumiClient.searchFirst(keyword, token, usingBangumiMirror());
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                if (meta == null) {
-                    applyVndbMetadata(null, game);
-                } else {
-                    saveCurrentSourceMetadata(id, meta);
-                    applyVndbMetadata(meta, game);
-                }
-            });
-        } catch (Throwable t) {
-            Log.w("YukiHub", "Bangumi metadata failed", t);
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                setSideDescription("Bangumi 获取失败。请检查 Token 是否正确，账号是否满足使用条件，或稍后重试。\n\n" + t.getMessage());
-            });
-        }
-    });
+    metadataController.fetchBangumiMetadata(game, forceRefresh);
 }
 
 private void fetchYmgalMetadata(Game game, boolean forceRefresh) {
-    if (game == null || game.title == null || game.title.trim().isEmpty()) return;
-    final long id = game.id;
-    final String keyword = buildMetadataSearchKeyword(game.title);
-    VnMetadata cached = metadataRepository == null || forceRefresh ? null : metadataRepository.getYmgal(id);
-    if (cached != null) {
-        setVisibleMetadataSource(id, SOURCE_YMGAL);
-        applyVndbMetadata(cached, game);
-        return;
-    }
-    setSideDescription("正在从月幕 Gal 获取资料…");
-    AppExecutors.runOnIo(() -> {
-        try {
-            List<VnMetadata> data = YmgalClient.searchCandidates(keyword, 5);
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                if (data == null || data.isEmpty()) {
-                    applyVndbMetadata(null, game);
-                } else if (data.size() == 1 || isConfidentMatch(game.title, data.get(0))) {
-                    fetchAndApplyYmgalDetail(game, data.get(0));
-                } else {
-                    showVndbCandidateDialog(game, data);
-                }
-            });
-        } catch (Throwable t) {
-            Log.w("YukiHub", "Ymgal metadata failed", t);
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                setSideDescription("月幕 Gal 获取失败。请检查网络或稍后重试。\n\n" + t.getMessage());
-            });
-        }
-    });
+    metadataController.fetchYmgalMetadata(game, forceRefresh);
 }
 
 private void fetchAndApplyYmgalDetail(Game game, VnMetadata candidate) {
-    if (game == null || candidate == null) return;
-    final long id = game.id;
-    setSideDescription("正在从月幕 Gal 获取详情…");
-    AppExecutors.runOnIo(() -> {
-        try {
-            VnMetadata full = YmgalClient.getGame(candidate.id, candidate);
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                if (metadataRepository != null) saveCurrentSourceMetadata(id, full == null ? candidate : full);
-                applyVndbMetadata(full == null ? candidate : full, game);
-            });
-        } catch (Throwable t) {
-            Log.w("YukiHub", "Ymgal detail failed", t);
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != id) return;
-                if (metadataRepository != null) saveCurrentSourceMetadata(id, candidate);
-                applyVndbMetadata(candidate, game);
-                Toast.makeText(MainActivity.this, "月幕详情获取失败，已使用搜索结果", Toast.LENGTH_SHORT).show();
-            });
-        }
-    });
+    metadataController.fetchAndApplyYmgalDetail(game, candidate);
 }
 
 private boolean downloadImageAllowVndbWarningPage(String imageUrl, File cacheFile, int depth) {
-    if (imageUrl == null || imageUrl.trim().isEmpty() || cacheFile == null || depth > 2) return false;
-    try {
-        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(imageUrl).openConnection();
-        c.setInstanceFollowRedirects(true);
-        c.setConnectTimeout(9000);
-        c.setReadTimeout(12000);
-        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36 YukiHub/1.0");
-        // 不优先请求 AVIF，避免部分 Android BitmapFactory 解码失败。
-        c.setRequestProperty("Accept", "image/webp,image/apng,image/*,*/*;q=0.8");
-        c.setRequestProperty("Referer", "https://vndb.org/");
-        c.setRequestProperty("Cookie", "vndb_img=1; vndb_samesite=1");
-        String type = c.getContentType();
-        if (type != null && type.toLowerCase(Locale.ROOT).startsWith("image/")) {
-            try (InputStream is = c.getInputStream(); FileOutputStream fos = new FileOutputStream(cacheFile)) {
-                byte[] buf = new byte[8192];
-                int len;
-                while ((len = is.read(buf)) != -1) fos.write(buf, 0, len);
-            }
-            return cacheFile.exists() && cacheFile.length() > 0;
-        }
-        String html = readSmallText(c.getInputStream());
-        String next = extractImageUrlFromHtml(html, imageUrl);
-        return next != null && !next.equals(imageUrl) && downloadImageAllowVndbWarningPage(next, cacheFile, depth + 1);
-    } catch (Throwable ignored) {
-        return false;
-    }
+    return metadataController.downloadImageAllowVndbWarningPage(imageUrl, cacheFile, depth);
 }
 
 private String readSmallText(InputStream is) throws Exception {
-    if (is == null) return "";
-    java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-    byte[] buf = new byte[4096];
-    int total = 0, len;
-    while ((len = is.read(buf)) != -1 && total < 256 * 1024) {
-        bos.write(buf, 0, len);
-        total += len;
-    }
-    return bos.toString("UTF-8");
+    return metadataController.readSmallText(is);
 }
 
 private boolean isTranslatedStateFor(long gameId) {
-    if (prefs == null || gameId <= 0) return false;
-    return prefs.getBoolean(KEY_SIDE_TRANSLATED_PREFIX + gameId, false);
+    return metadataController.isTranslatedStateFor(gameId);
 }
 
 private void setTranslatedStateFor(long gameId, boolean translated) {
-    if (prefs == null || gameId <= 0) return;
-    prefs.edit().putBoolean(KEY_SIDE_TRANSLATED_PREFIX + gameId, translated).apply();
+    metadataController.setTranslatedStateFor(gameId, translated);
 }
 
 private void updateTranslateButtonState() {
@@ -2724,20 +2498,7 @@ private String translateWithGoogleEndpoint(String endpoint, String q) throws Exc
 }
 
 private String extractImageUrlFromHtml(String html, String baseUrl) {
-    if (html == null || html.isEmpty()) return null;
-    java.util.regex.Pattern p = java.util.regex.Pattern.compile("https?://[^\\\"'<> ]+\\.(?:jpg|jpeg|png|webp)(?:\\?[^\\\"'<> ]*)?", java.util.regex.Pattern.CASE_INSENSITIVE);
-    java.util.regex.Matcher m = p.matcher(html);
-    if (m.find()) return m.group();
-    p = java.util.regex.Pattern.compile("(?:src|href)=['\\\"]([^'\\\"]+\\.(?:jpg|jpeg|png|webp)(?:\\?[^'\\\"]*)?)['\\\"]", java.util.regex.Pattern.CASE_INSENSITIVE);
-    m = p.matcher(html);
-    if (m.find()) {
-        String url = m.group(1);
-        if (url.startsWith("//")) return "https:" + url;
-        if (url.startsWith("/")) return "https://vndb.org" + url;
-        if (url.startsWith("http")) return url;
-        try { return new java.net.URL(new java.net.URL(baseUrl), url).toString(); } catch (Throwable ignored) { }
-    }
-    return null;
+    return metadataController.extractImageUrlFromHtml(html, baseUrl);
 }
 
 private int dp(int value) {
@@ -2745,8 +2506,7 @@ private int dp(int value) {
     }
 
 private String safeCacheName(String input) {
-    if (input == null) return "cache";
-    return input.replaceAll("[^a-zA-Z0-9._-]", "_");
+    return metadataController.safeCacheName(input);
 }
 
 private void setSideDescription(String text) {
@@ -2810,114 +2570,19 @@ private void renderTagChips(String tagsText) {
 }
 
 private String buildMetadataSearchKeyword(String title) {
-        if (title == null) return "";
-        String cleaned = title.replaceAll("[【\\[][^】\\]]*[】\\]]", " ");
-        cleaned = cleaned.replaceAll("\\s+", " ").trim();
-        return cleaned.isEmpty() ? title.trim() : cleaned;
-    }
+    return metadataController.buildMetadataSearchKeyword(title);
+}
 
     private boolean isConfidentMatch(String localTitle, VnMetadata meta) {
-        if (meta == null || localTitle == null) return false;
-        String a = buildMetadataSearchKeyword(localTitle).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\u4e00-\\u9fa5ぁ-んァ-ン一-龯]", "");
-        String b = (emptyText(meta.chineseTitle, "") + emptyText(meta.originalTitle, "") + emptyText(meta.romanTitle, "")).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\u4e00-\\u9fa5ぁ-んァ-ン一-龯]", "");
-        return !a.isEmpty() && !b.isEmpty() && (b.contains(a) || a.contains(b));
+        return metadataController.isConfidentMatch(localTitle, meta);
     }
 
 private void showVndbCandidateDialog(Game game, List<VnMetadata> list) {
-    if (game == null || list == null || list.isEmpty()) return;
-    androidx.recyclerview.widget.RecyclerView rv = new androidx.recyclerview.widget.RecyclerView(this);
-    rv.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
-    rv.setPadding(dp(6), dp(6), dp(6), dp(6));
-    rv.setClipToPadding(false);
-    final AlertDialog[] dialogRef = new AlertDialog[1];
-    final List<VnMetadata> items = new ArrayList<>(list);
-    items.add(null);
-    rv.setAdapter(new androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
-        @Override public int getItemViewType(int position) { return position; }
-        @Override public int getItemCount() { return items.size(); }
-        @Override public androidx.recyclerview.widget.RecyclerView.ViewHolder onCreateViewHolder(android.view.ViewGroup parent, int viewType) {
-            android.view.View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_vndb_candidate, parent, false);
-            return new androidx.recyclerview.widget.RecyclerView.ViewHolder(v) {};
-        }
-        @Override public void onBindViewHolder(androidx.recyclerview.widget.RecyclerView.ViewHolder holder, int position) {
-            android.view.View itemView = holder.itemView;
-            VnMetadata m = items.get(position);
-            if (m == null) {
-                String sourceLabel = metadataSourceLabel();
-                ((TextView) itemView.findViewById(R.id.tvCandidateTitle)).setText("不匹配 / 暂不使用" + sourceLabel);
-                ((TextView) itemView.findViewById(R.id.tvCandidateOriginal)).setText("保留当前本地资料");
-                ((TextView) itemView.findViewById(R.id.tvCandidateInfo)).setText("关闭弹窗，不绑定" + sourceLabel);
-                ((ImageView) itemView.findViewById(R.id.ivCandidateCover)).setImageDrawable(null);
-            } else {
-                ((TextView) itemView.findViewById(R.id.tvCandidateTitle)).setText(emptyText(m.chineseTitle, emptyText(m.romanTitle, "未命名")));
-                ((TextView) itemView.findViewById(R.id.tvCandidateOriginal)).setText(emptyText(m.originalTitle, m.id));
-                ((TextView) itemView.findViewById(R.id.tvCandidateInfo)).setText(emptyText(m.developer, metadataSourceLabel() + " 候选"));
-                ImageView cover = itemView.findViewById(R.id.ivCandidateCover);
-                cover.setImageDrawable(null);
-                if (m.coverUrl != null && !m.coverUrl.isEmpty()) loadRemoteImage(m.coverUrl, cover, "cand_" + m.id);
-            }
-            itemView.setOnClickListener(v -> {
-                playUiSound(UI_SOUND_CONFIRM);
-                if (selectedGame == null || selectedGame.id != game.id) return;
-                if (position >= 0 && position < list.size()) {
-                    VnMetadata chosen = list.get(position);
-                    if (dialogRef[0] != null) dialogRef[0].dismiss();
-                    if (usingYmgal()) {
-                        fetchAndApplyYmgalDetail(game, chosen);
-                    } else {
-                        saveCurrentSourceMetadata(game.id, chosen);
-                        applyVndbMetadata(chosen, game);
-                    }
-                    return;
-                } else {
-                    sideDetailOriginalTitle.setText("未绑定" + metadataSourceLabel());
-                    setSideDescription(emptyText(game.description, "已跳过" + metadataSourceLabel() + "匹配。"));
-                }
-                if (dialogRef[0] != null) dialogRef[0].dismiss();
-            });
-        }
-    });
-    AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle("选择" + metadataSourceLabel() + "匹配结果")
-            .setView(rv)
-            .setNegativeButton("取消", null)
-            .show();
-    dialogRef[0] = dialog;
-    if (dialog.getWindow() != null) {
-        dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.70f), (int) (getResources().getDisplayMetrics().heightPixels * 0.72f));
-    }
+    metadataController.showVndbCandidateDialog(game, list);
 }
 
 private void applyVndbMetadata(VnMetadata meta, Game game) {
-currentSideMetadata = meta;
-long gameId = game == null ? -1 : game.id;
-sideShowingTranslatedDescription = gameId > 0 && isTranslatedStateFor(gameId) && meta != null && meta.translatedDescription != null && !meta.translatedDescription.trim().isEmpty();
-if (meta == null) {
-updateSideMetadataSourceBadge("");
-updateTranslateButtonState();
-setSideDescription(emptyText(game.description, metadataSourceLabel() + " 暂未匹配到资料。"));
-return;
-}
-String visibleSourceLabel = metadataSourceLabelForVisibleMetadata(gameId, meta);
-updateSideMetadataSourceBadge(visibleSourceLabel);
-sideDetailTitle.setText(emptyText(meta.chineseTitle, emptyText(game.title, "未命名游戏")));
-    sideDetailOriginalTitle.setText(emptyText(meta.originalTitle, meta.romanTitle));
-    updateTranslateButtonState();
-    setSideDescription(sideShowingTranslatedDescription ? meta.translatedDescription : emptyText(meta.description, "暂无" + emptyText(visibleSourceLabel, metadataSourceLabel()) + "简介。"));
-    sideDetailDate.setText("发布日期：" + emptyText(meta.released, "-"));
-    sideDetailDeveloper.setText("开发商：" + emptyText(meta.developer, "-"));
-    if (sideDetailPath != null) sideDetailPath.setText("路径：" + displayPath(game.rootUri));
-    sideDetailRating.setText(emptyText(meta.ratingText, "评分：-/10"));
-if (sideDetailLength != null) sideDetailLength.setText(emptyText(meta.lengthText, "游玩时长：-"));
-renderTagChips(emptyText(meta.tagsText, "-"));
-    if (meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
-sideDetailCover.setVisibility(View.VISIBLE);
-sideDetailPlaceholder.setVisibility(View.GONE);
-sideDetailCover.setTag(game);
-loadRemoteImage(meta.coverUrl, sideDetailCover, "cover_" + emptyText(meta.id, String.valueOf(game.id)));
-}
-    if (meta.screenshotUrls.size() > 0) loadRemoteImage(meta.screenshotUrls.get(0), sideScreenshot1, "shot1_" + emptyText(meta.id, String.valueOf(game.id)));
-    if (meta.screenshotUrls.size() > 1) loadRemoteImage(meta.screenshotUrls.get(1), sideScreenshot2, "shot2_" + emptyText(meta.id, String.valueOf(game.id)));
+    metadataController.applyVndbMetadata(meta, game);
 }
 
 private void updateSideDetail(Game game) {
@@ -2985,191 +2650,35 @@ if (sideDetailPath != null) sideDetailPath.setText("路径：" + displayPath(gam
     }
 
     private void showCustomVndbSearchDialog(Game game) {
-    if (game == null) return;
-    EditText input = new EditText(this);
-    input.setSingleLine(true);
-    input.setText(emptyText(game.title, ""));
-    input.setSelectAllOnFocus(true);
-    input.setHint("输入 VNDB 搜索关键词或原名");
-    input.setTextColor(getResources().getColor(R.color.yh_text));
-    input.setHintTextColor(getResources().getColor(R.color.yh_text_muted));
-    input.setBackgroundResource(R.drawable.bg_input);
-    input.setPadding(dp(12), 0, dp(12), 0);
-    new AlertDialog.Builder(this)
-            .setTitle("自定义搜索 VNDB")
-            .setView(input)
-            .setPositiveButton("搜索", (d, w) -> {
-                String keyword = input.getText() == null ? "" : input.getText().toString().trim();
-                if (keyword.isEmpty()) { Toast.makeText(this, "请输入搜索关键词", Toast.LENGTH_SHORT).show(); return; }
-                searchVndbWithKeyword(game, keyword);
-            })
-            .setNegativeButton("取消", null)
-            .show();
-}
+        metadataController.showCustomVndbSearchDialog(game);
+    }
 
 private void showCustomBangumiSearchDialog(Game game) {
-    if (game == null) return;
-    if (bangumiToken() == null || bangumiToken().trim().isEmpty()) {
-        Toast.makeText(this, "请先在设置里填写 Bangumi Token", Toast.LENGTH_SHORT).show();
-        return;
-    }
-    EditText input = new EditText(this);
-    input.setSingleLine(true);
-    input.setText(emptyText(game.title, ""));
-    input.setSelectAllOnFocus(true);
-    input.setHint("输入 Bangumi 搜索关键词");
-    input.setTextColor(getResources().getColor(R.color.yh_text));
-    input.setHintTextColor(getResources().getColor(R.color.yh_text_muted));
-    input.setBackgroundResource(R.drawable.bg_input);
-    input.setPadding(dp(12), 0, dp(12), 0);
-    new AlertDialog.Builder(this)
-            .setTitle("自定义搜索 Bangumi")
-            .setView(input)
-            .setPositiveButton("搜索", (d, w) -> {
-                String keyword = input.getText() == null ? "" : input.getText().toString().trim();
-                if (keyword.isEmpty()) { Toast.makeText(this, "请输入搜索关键词", Toast.LENGTH_SHORT).show(); return; }
-                searchBangumiWithKeyword(game, keyword);
-            })
-            .setNegativeButton("取消", null)
-            .show();
+    metadataController.showCustomBangumiSearchDialog(game);
 }
 
 private void showCustomYmgalSearchDialog(Game game) {
-    if (game == null) return;
-    EditText input = new EditText(this);
-    input.setSingleLine(true);
-    input.setText(emptyText(game.title, ""));
-    input.setSelectAllOnFocus(true);
-    input.setHint("输入月幕 Gal 搜索关键词");
-    input.setTextColor(getResources().getColor(R.color.yh_text));
-    input.setHintTextColor(getResources().getColor(R.color.yh_text_muted));
-    input.setBackgroundResource(R.drawable.bg_input);
-    input.setPadding(dp(12), 0, dp(12), 0);
-    new AlertDialog.Builder(this)
-            .setTitle("自定义搜索月幕 Gal")
-            .setView(input)
-            .setPositiveButton("搜索", (d, w) -> {
-                String keyword = input.getText() == null ? "" : input.getText().toString().trim();
-                if (keyword.isEmpty()) { Toast.makeText(this, "请输入搜索关键词", Toast.LENGTH_SHORT).show(); return; }
-                searchYmgalWithKeyword(game, keyword);
-            })
-            .setNegativeButton("取消", null)
-            .show();
+    metadataController.showCustomYmgalSearchDialog(game);
 }
 
 private void searchBangumiWithKeyword(Game game, String keyword) {
-    if (game == null || keyword == null || keyword.trim().isEmpty()) return;
-    String token = bangumiToken();
-    setSideDescription("正在按自定义关键词搜索 Bangumi…");
-    AppExecutors.runOnIo(() -> {
-        try {
-            List<VnMetadata> data = BangumiClient.searchCandidates(keyword, token, 8, usingBangumiMirror());
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != game.id) return;
-                if (data == null || data.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "没有匹配到 Bangumi 结果", Toast.LENGTH_SHORT).show();
-                    setSideDescription(emptyText(game.description, "Bangumi 暂未匹配到资料。"));
-                } else {
-                    showVndbCandidateDialog(game, data);
-                }
-            });
-        } catch (Throwable t) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Bangumi 搜索失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
-        }
-    });
+    metadataController.searchBangumiWithKeyword(game, keyword);
 }
 
 private void searchYmgalWithKeyword(Game game, String keyword) {
-    if (game == null || keyword == null || keyword.trim().isEmpty()) return;
-    setSideDescription("正在按自定义关键词搜索月幕 Gal…");
-    AppExecutors.runOnIo(() -> {
-        try {
-            List<VnMetadata> data = YmgalClient.searchCandidates(keyword, 8);
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != game.id) return;
-                if (data == null || data.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "没有匹配到月幕 Gal 结果", Toast.LENGTH_SHORT).show();
-                    setSideDescription(emptyText(game.description, "月幕 Gal 暂未匹配到资料。"));
-                } else {
-                    showVndbCandidateDialog(game, data);
-                }
-            });
-        } catch (Throwable t) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "月幕 Gal 搜索失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
-        }
-    });
+    metadataController.searchYmgalWithKeyword(game, keyword);
 }
 
 private void searchVndbWithKeyword(Game game, String keyword) {
-    if (game == null || keyword == null || keyword.trim().isEmpty()) return;
-    setSideDescription("正在按自定义关键词搜索 VNDB…");
-    VndbClient.searchCandidatesAsync(keyword, 8, new VndbClient.CandidatesCallback() {
-        @Override public void onSuccess(List<VnMetadata> data) {
-            runOnUiThread(() -> {
-                if (selectedGame == null || selectedGame.id != game.id) return;
-                if (data == null || data.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "没有匹配到 VNDB 结果", Toast.LENGTH_SHORT).show();
-                    setSideDescription(emptyText(game.description, "VNDB 暂未匹配到资料。"));
-                } else {
-                    showVndbCandidateDialog(game, data);
-                }
-            });
-        }
-        @Override public void onError(Exception error) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "VNDB 搜索失败", Toast.LENGTH_SHORT).show());
-        }
-    });
+    metadataController.searchVndbWithKeyword(game, keyword);
 }
 
 private void syncCurrentMetadataToGameCard(Game game) {
-    if (game == null) return;
-    String label = metadataSourceLabel();
-    VnMetadata meta = currentSourceMetadata(game.id);
-    if (meta == null) {
-        Toast.makeText(this, "请先匹配" + label + "资料", Toast.LENGTH_SHORT).show();
-        return;
-    }
-    Toast.makeText(this, "正在同步" + label + "到游戏卡片…", Toast.LENGTH_SHORT).show();
-    AppExecutors.runOnIo(() -> {
-        String localCover = null;
-        if (meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
-            localCover = cacheRemoteImageSync(meta.coverUrl, "card_cover_" + emptyText(meta.id, String.valueOf(game.id)));
-        }
-        final String cover = localCover;
-        runOnUiThread(() -> {
-            String newTitle = emptyText(meta.chineseTitle, emptyText(meta.originalTitle, meta.romanTitle));
-            if (!newTitle.isEmpty()) game.title = newTitle;
-            if (meta.originalTitle != null && !meta.originalTitle.isEmpty()) game.originalTitle = meta.originalTitle;
-            if (meta.description != null && !meta.description.isEmpty()) game.description = meta.description;
-            if (meta.tagsText != null && !meta.tagsText.isEmpty()) game.tags = meta.tagsText;
-            if (cover != null && !cover.isEmpty()) {
-                game.coverUri = cover;
-                game.coverPersistUri = cover;
-                game.coverSourceType = 1;
-            }
-            repository.update(game);
-            loadGames();
-            updateSideDetail(game);
-            Toast.makeText(this, "已同步" + label + "标题和封面到游戏卡片", Toast.LENGTH_SHORT).show();
-        });
-    });
+    metadataController.syncCurrentMetadataToGameCard(game);
 }
 
 private String cacheRemoteImageSync(String url, String prefix) {
-if (url == null || url.trim().isEmpty()) return null;
-try {
-File cacheDir = persistentRemoteCoverDir();
-if (!cacheDir.exists()) cacheDir.mkdirs();
-File cacheFile = new File(cacheDir, safeCacheName(prefix + "_" + url.trim()));
-if (!cacheFile.exists() || cacheFile.length() == 0 || BitmapFactory.decodeFile(cacheFile.getAbsolutePath()) == null) {
-if (cacheFile.exists()) cacheFile.delete();
-boolean ok = downloadImageAllowVndbWarningPage(url.trim(), cacheFile, 0);
-if (!ok || BitmapFactory.decodeFile(cacheFile.getAbsolutePath()) == null) return null;
-}
-return Uri.fromFile(cacheFile).toString();
-} catch (Throwable t) {
-return null;
-}
+    return metadataController.cacheRemoteImageSync(url, prefix);
 }
 
 private void styleAlertDialogDark(AlertDialog dialog) {
@@ -3671,9 +3180,9 @@ LinearLayout accountActions = new LinearLayout(this);
         sourceAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
-        if (SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(1);
-else if (SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(2);
-else if (SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
+        if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(1);
+else if (MetadataController.SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(2);
+else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
 else sourceSpinner.setSelection(0);
         root.addView(sourceSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
@@ -3877,7 +3386,7 @@ else sourceSpinner.setSelection(0);
             boolean bangumi = sourceSelection == 1;
             boolean bangumiMirror = sourceSelection == 2;
             boolean ymgal = sourceSelection == 3;
-            String selectedMetadataSource = ymgal ? SOURCE_YMGAL : (bangumiMirror ? SOURCE_BANGUMI_MIRROR : (bangumi ? SOURCE_BANGUMI : SOURCE_VNDB));
+            String selectedMetadataSource = ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB));
             String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
             if ((bangumi || bangumiMirror) && token.isEmpty()) {
                 Toast.makeText(this, "选择 Bangumi 时需要填写 Token", Toast.LENGTH_SHORT).show();
@@ -3890,8 +3399,8 @@ else sourceSpinner.setSelection(0);
             if (sortSelection == 1) sortMode = SORT_MODE_NEWEST;
             else if (sortSelection == 2) sortMode = SORT_MODE_NAME;
             prefs.edit()
-                    .putString(KEY_METADATA_SOURCE, selectedMetadataSource)
-                    .putString(KEY_BANGUMI_TOKEN, token)
+                    .putString(MetadataController.KEY_METADATA_SOURCE, selectedMetadataSource)
+                    .putString(MetadataController.KEY_BANGUMI_TOKEN, token)
                     .putInt(KEY_STARTUP_SCAN_DEPTH, depth)
                     .putBoolean(KEY_AUTO_SCAN_ON_STARTUP, autoScanCheck.isChecked())
                     .putBoolean(KEY_CHECK_UPDATE_ON_STARTUP, updateOnStartupCheck.isChecked())
@@ -6088,7 +5597,7 @@ if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目
                 List<VnMetadata> candidates = VndbClient.searchCandidates(g.title, 1);
                 if (candidates == null || candidates.isEmpty()) continue;
                 VnMetadata meta = candidates.get(0);
-                if (metadataRepository != null) metadataRepository.saveVndb(g.id, meta);
+                saveMetadataForSource(g.id, MetadataController.SOURCE_VNDB, meta);
                 boolean updated = false;
                 if (!hasCover(g) && meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
                     String cover = cacheRemoteImageSync(meta.coverUrl, "scan_cover_" + emptyText(meta.id, String.valueOf(g.id)));
