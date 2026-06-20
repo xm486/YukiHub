@@ -27,7 +27,7 @@ public class AiReviewClient {
         }
     }
 
-    private final AtomicReference<ServiceHolder> holderRef = new AtomicReference<>();
+    private static final AtomicReference<ServiceHolder> holderRef = new AtomicReference<>();
 
     public String testConnection(AiReviewSettings settings) throws Exception {
         if (settings == null) settings = new AiReviewSettings();
@@ -93,7 +93,7 @@ public class AiReviewClient {
         if (holder != null && baseUrl.equals(holder.endpoint)) {
             return holder.service;
         }
-        synchronized (this) {
+        synchronized (AiReviewClient.class) {
             holder = holderRef.get();
             if (holder != null && baseUrl.equals(holder.endpoint)) {
                 return holder.service;
@@ -102,7 +102,6 @@ public class AiReviewClient {
                     .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                     .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
                             .header("Accept", "application/json")
-                            .header("Content-Type", "application/json; charset=utf-8")
                             .build()))
                     .build();
             Retrofit retrofit = HttpClient.retrofit(baseUrl, client);

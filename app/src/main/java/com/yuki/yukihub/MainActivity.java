@@ -1281,6 +1281,15 @@ private void showAuthPlaceholderDialog() {
     styleAlertDialogDark(dialog);
 }
 
+private void showFriendsChatPlaceholder() {
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("好友 / 聊天")
+            .setMessage("好友与聊天功能即将上线，敬请期待。")
+            .setPositiveButton("知道了", null)
+            .show();
+    styleAlertDialogDark(dialog);
+}
+
 private void showAuthDialog() {
     if (isLoggedIn()) {
         showAccountSettingsDialog();
