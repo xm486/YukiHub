@@ -9,9 +9,9 @@ import java.io.InputStream;
 
 public final class OnsLibLoader {
     private static final String TAG = "OnsLibLoader";
-    private static final String VERSION_DIR = "Yuri_0.7.6beta1";
+    private static final String VERSION_DIR = "Yuri_0.7.6";
     private static final String[] ASSET_LIBS = new String[]{
-            "SDL2", "lua", "jpeg", "bz2", "modplug", "SDL2_image", "SDL2_mixer", "SDL2_ttf", "onsyuri"
+            "SDL2", "lua", "jpeg", "bz2", "SDL2_image", "SDL2_mixer", "SDL2_ttf", "onsyuri"
     };
     private static boolean loaded;
 
