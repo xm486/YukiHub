@@ -1,7 +1,7 @@
 # YukiHub
 
 <p align="center">
-  <img src="app/src/main/res/mipmap-hdpi/ic_launcher.png" alt="YukiHub" width="120" />
+  <img src="app/src/main/res/mipmap-xxhdpi/ic_launcher.png" alt="YukiHub" width="120" />
 </p>
 
 <p align="center">
