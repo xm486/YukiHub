@@ -627,6 +627,7 @@ public class MetadataController {
                     }
                 });
             } catch (Throwable t) {
+                if (!isActivityAlive()) return;
                 delegate.runOnUiThread(() -> delegate.showToast("Bangumi 搜索失败：" + t.getMessage(), Toast.LENGTH_SHORT));
             }
         });
@@ -650,6 +651,7 @@ public class MetadataController {
                     }
                 });
             } catch (Throwable t) {
+                if (!isActivityAlive()) return;
                 delegate.runOnUiThread(() -> delegate.showToast("月幕 Gal 搜索失败：" + t.getMessage(), Toast.LENGTH_SHORT));
             }
         });
@@ -673,6 +675,7 @@ public class MetadataController {
                 });
             }
             @Override public void onError(Exception error) {
+                if (!isActivityAlive()) return;
                 delegate.runOnUiThread(() -> delegate.showToast("VNDB 搜索失败", Toast.LENGTH_SHORT));
             }
         });
