@@ -4754,6 +4754,12 @@ private String displayPath(String value) {
                     pkg.setText(guessInstalledWinlatorPackage());
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && isGameHub) {
                     pkg.setText(guessInstalledGameHubPackage());
+                } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "PSP".equals(engine)) {
+                    pkg.setText("org.ppsspp.ppsspp");
+                    // 检查PPSSPP是否安装，如果未安装给出提示
+                    if (!EmulatorLauncher.isPPSSPPInstalled(MainActivity.this)) {
+                        Toast.makeText(MainActivity.this, "提示：PSP游戏需要安装PPSSPP模拟器", Toast.LENGTH_LONG).show();
+                    }
                 }
                 updateWinlatorAdvanced.run();
                 if (isArtemis) updateArtemisVersionButtons(pkg.getText().toString(), btnArtemisAuto, btnArtemisStd, btnArtemisCompat, btnArtemisCompatV2);
@@ -6147,6 +6153,23 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
             return startActivitySafely(EmulatorLauncher.buildInternalArtemisIntent(this, pkg, game.rootUri, launchTarget));
         }
         if (pkg.startsWith("internal.psp") || pkg.equals("org.ppsspp.ppsspp")) {
+            // 检查PPSSPP是否安装
+            if (!EmulatorLauncher.isPPSSPPInstalled(this)) {
+                // 显示提示对话框
+                new AlertDialog.Builder(this)
+                    .setTitle("需要PPSSPP模拟器")
+                    .setMessage("启动PSP游戏需要安装PPSSPP模拟器。\n\n是否现在去下载？")
+                    .setPositiveButton("去下载", (d, w) -> {
+                        try {
+                            startActivity(EmulatorLauncher.getPPSSPPDownloadIntent());
+                        } catch (Exception e) {
+                            Toast.makeText(this, "无法打开应用商店", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+                return false;
+            }
             return startActivitySafely(EmulatorLauncher.buildInternalPspIntent(this, game.rootUri, launchTarget));
         }
         return EmulatorLauncher.launchGame(this, emulatorPackage, game.rootUri, launchTarget, game.winlatorLaunchMode, game.gamehubLaunchMode, game.gamehubLocalGameId);

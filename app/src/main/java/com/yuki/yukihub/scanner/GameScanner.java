@@ -60,7 +60,7 @@ public class GameScanner {
                 if (child.isFile()) {
                     String name = safeName(child);
                     String lowerName = name.toLowerCase(Locale.ROOT);
-                    // 检查是否是PSP游戏文件
+                    // 情况1：单个PSP文件在根目录
                     if (lowerName.endsWith(".iso") || lowerName.endsWith(".cso") || lowerName.endsWith(".chd") || 
                         lowerName.endsWith(".elf") || lowerName.endsWith(".pbp")) {
                         addPspFileResult(results, seenUris, child, name);
@@ -73,6 +73,8 @@ public class GameScanner {
                 }
                 if (!child.isDirectory()) continue;
 
+                // 情况2/3：优先检查子文件夹里的 PSP文件。
+                if (tryAddPspDirectory(child, results, seenUris)) continue;
                 // 情况2/3：优先检查子文件夹里的 desktop。
                 if (tryAddDesktopDirectory(child, results, seenUris)) continue;
 
@@ -168,6 +170,69 @@ public class GameScanner {
                 95,
                 fileName, // launchTarget设置为文件名
                 ""
+        ));
+        return true;
+    }
+
+    /**
+     * 尝试添加文件夹里的PSP游戏文件
+     * 情况2：文件夹里只有1个PSP文件，游戏名取文件夹名，但入口仍然是PSP文件本身
+     * 情况3：文件夹里有多个PSP文件，按多个单独条目识别
+     */
+    private static boolean tryAddPspDirectory(DocumentFile dir, List<ScanResult> results, Set<String> seenUris) {
+        if (dir == null || results == null) return false;
+        try {
+            DocumentFile[] files = dir.listFiles();
+            if (files == null || files.length == 0) return false;
+
+            List<DocumentFile> pspFiles = new ArrayList<>();
+            for (DocumentFile f : files) {
+                if (f == null || !f.isFile()) continue;
+                String name = safeName(f).toLowerCase(Locale.ROOT);
+                if (name.endsWith(".iso") || name.endsWith(".cso") || name.endsWith(".chd") || 
+                    name.endsWith(".elf") || name.endsWith(".pbp")) {
+                    pspFiles.add(f);
+                }
+            }
+            if (pspFiles.isEmpty()) return false;
+
+            String coverUri = "";
+            DocumentFile folderCover = findBestImageInDir(dir);
+            if (folderCover != null) coverUri = folderCover.getUri().toString();
+
+            if (pspFiles.size() == 1) {
+                // 情况2：文件夹内只有一个 PSP文件，标题取文件夹名，但入口仍然是 PSP文件本身。
+                DocumentFile pspFile = pspFiles.get(0);
+                return addPspFileResultWithCover(results, seenUris, safeName(dir), pspFile.getUri().toString(), safeName(pspFile), coverUri);
+            }
+
+            // 情况3：文件夹里有多个 PSP文件，按多个单独条目识别。
+            boolean added = false;
+            for (DocumentFile pspFile : pspFiles) {
+                String name = safeName(pspFile);
+                String title = name;
+                int dotIndex = title.lastIndexOf('.');
+                if (dotIndex > 0) {
+                    title = title.substring(0, dotIndex);
+                }
+                added |= addPspFileResultWithCover(results, seenUris, title, pspFile.getUri().toString(), name, coverUri);
+            }
+            return added;
+        } catch (Throwable t) {
+            Log.w(TAG, "tryAddPspDirectory failed uri=" + safeUri(dir), t);
+            return false;
+        }
+    }
+
+    private static boolean addPspFileResultWithCover(List<ScanResult> results, Set<String> seenUris, String title, String resultUri, String launchTarget, String coverUri) {
+        if (results == null || resultUri == null || !markSeen(seenUris, resultUri)) return false;
+        results.add(new ScanResult(
+                title == null || title.trim().isEmpty() ? "未命名PSP游戏" : title,
+                resultUri,
+                com.yuki.yukihub.model.EngineType.PSP,
+                95,
+                launchTarget,
+                coverUri
         ));
         return true;
     }

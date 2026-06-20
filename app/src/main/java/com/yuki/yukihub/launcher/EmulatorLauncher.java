@@ -74,6 +74,11 @@ if (packageName == null || packageName.trim().isEmpty()) return false;
             return false;
         }
         if ("internal.psp".equalsIgnoreCase(pkg) || "org.ppsspp.ppsspp".equalsIgnoreCase(pkg) || isPPSSPPPackage(pkg)) {
+            // 检查PPSSPP是否安装
+            if (!isPPSSPPInstalled(context)) {
+                Log.w("EmulatorLauncher", "PPSSPP is not installed, cannot launch PSP game");
+                return false;
+            }
             try {
                 context.startActivity(buildInternalPspIntent(context, rootUri, launchTarget));
                 return true;
@@ -1198,6 +1203,12 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
      * 启动PSP游戏
      */
     public static boolean launchPspGame(Context context, String gameUri, String launchTarget) {
+        // 先检查PPSSPP是否安装
+        if (!isPPSSPPInstalled(context)) {
+            Log.w("EmulatorLauncher", "PPSSPP is not installed");
+            return false;
+        }
+        
         try {
             Intent intent = buildInternalPspIntent(context, gameUri, launchTarget);
             context.startActivity(intent);
@@ -1205,6 +1216,32 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         } catch (Exception e) {
             Log.e("EmulatorLauncher", "Failed to launch PSP game", e);
             return false;
+        }
+    }
+    
+    /**
+     * 检查PPSSPP是否已安装
+     */
+    public static boolean isPPSSPPInstalled(Context context) {
+        try {
+            PackageManager pm = context.getPackageManager();
+            pm.getPackageInfo("org.ppsspp.ppsspp", PackageManager.GET_ACTIVITIES);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+    
+    /**
+     * 获取PPSSPP的下载Intent（跳转到应用商店）
+     */
+    public static Intent getPPSSPPDownloadIntent() {
+        try {
+            // 尝试打开Google Play商店
+            return new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=org.ppsspp.ppsspp"));
+        } catch (Exception e) {
+            // 如果无法打开商店，打开浏览器
+            return new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=org.ppsspp.ppsspp"));
         }
     }
 }
