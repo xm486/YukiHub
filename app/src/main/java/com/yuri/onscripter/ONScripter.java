@@ -83,6 +83,7 @@ public class ONScripter extends SDLActivity {
         OnsLibLoader.load(this);
         ensureDefaultFont();
         super.onCreate(savedInstanceState);
+        fixSurfaceCentering();  // 修复平板设备上画面不居中的问题
         try { nativeInitJavaCallbacks(); } catch (Throwable t) { Log.w(TAG, "nativeInitJavaCallbacks failed", t); }
         setupVirtualControls();
         fullscreen();
@@ -368,6 +369,36 @@ public class ONScripter extends SDLActivity {
 
     @Override public void onDestroy() {
         super.onDestroy();
+    }
+
+    /**
+     * 修复平板设备上画面不居中的问题
+     * SDLActivity默认不设置SurfaceView居中，导致在平板(4:3/16:10)上运行16:9游戏时画面底部对齐
+     */
+    private void fixSurfaceCentering() {
+        try {
+            if (mLayout != null && mSurface != null) {
+                // 获取当前的LayoutParams
+                ViewGroup.LayoutParams lp = mSurface.getLayoutParams();
+                if (lp instanceof RelativeLayout.LayoutParams) {
+                    RelativeLayout.LayoutParams rlp = (RelativeLayout.LayoutParams) lp;
+                    // 添加居中规则
+                    rlp.addRule(RelativeLayout.CENTER_IN_PARENT, RelativeLayout.TRUE);
+                    mSurface.setLayoutParams(rlp);
+                    Log.i(TAG, "Fixed surface centering for tablet display");
+                } else {
+                    // 如果不是RelativeLayout.LayoutParams，重新创建
+                    RelativeLayout.LayoutParams newLp = new RelativeLayout.LayoutParams(
+                            RelativeLayout.LayoutParams.MATCH_PARENT,
+                            RelativeLayout.LayoutParams.MATCH_PARENT);
+                    newLp.addRule(RelativeLayout.CENTER_IN_PARENT, RelativeLayout.TRUE);
+                    mSurface.setLayoutParams(newLp);
+                    Log.i(TAG, "Recreated layout params with centering for tablet display");
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "fixSurfaceCentering failed", t);
+        }
     }
 
     private void fullscreen() {
