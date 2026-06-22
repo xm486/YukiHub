@@ -2603,7 +2603,7 @@ private void updateSideDetail(Game game) {
 sideDetailTitle.setText("请选择游戏");
 updateSideMetadataSourceBadge("");
 sideDetailOriginalTitle.setText("");
-            setSideDescription("点击中间的游戏卡片后，这里会显示封面、启动入口和选项。后续可接 VNDB/APJ 简介与元数据。");
+            setSideDescription("点击中间的游戏卡片后，这里会显示封面、启动入口和选项。后续可接 VNDB/API 简介与元数据。");
             sideDetailDate.setText("发布日期：-");
 sideDetailDeveloper.setText("开发商：-");
 if (sideDetailPath != null) sideDetailPath.setText("路径：-");
