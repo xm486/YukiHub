@@ -89,7 +89,7 @@
             android:textColor="#F0A64A"
             android:textSize="12sp" />
 
-        <CheckBox
+        <androidx.appcompat.widget.AppCompatCheckBox
             android:id="@+id/cbDisclaimerAgree"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

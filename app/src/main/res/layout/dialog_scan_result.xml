@@ -8,7 +8,7 @@
     <TextView android:id="@+id/tvScanTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="扫描结果" android:textColor="@color/yh_text" android:textSize="22sp" android:textStyle="bold" />
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/recyclerScanResults" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="10dp" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="10dp">
-        <Button android:id="@+id/btnCancelScan" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="取消" android:textAllCaps="false" />
-        <Button android:id="@+id/btnImportScan" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:layout_marginStart="8dp" android:text="导入全部" android:textAllCaps="false" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnCancelScan" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:text="取消" android:textAllCaps="false" />
+        <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnImportScan" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:layout_marginStart="8dp" android:text="导入全部" android:textAllCaps="false" />
     </LinearLayout>
 </LinearLayout>

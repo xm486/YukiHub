@@ -60,7 +60,7 @@
             android:shadowDy="1"
             android:shadowRadius="3" />
 
-        <EditText
+        <androidx.appcompat.widget.AppCompatEditText
             android:id="@+id/etSearch"
             android:layout_width="0dp"
             android:layout_height="28dp"

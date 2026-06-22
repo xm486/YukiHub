@@ -54,6 +54,11 @@ public class WebDavSettingsDialog extends DialogFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         
+        // Apply dynamic theme tinting
+        if (getActivity() instanceof MainActivity) {
+            ((MainActivity) getActivity()).tintDialogRoot(view);
+        }
+        
         syncManager = new SyncManager(requireContext());
         
         initViews(view);

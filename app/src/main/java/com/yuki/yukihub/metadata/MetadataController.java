@@ -703,6 +703,17 @@ public class MetadataController {
             @Override public void onBindViewHolder(androidx.recyclerview.widget.RecyclerView.ViewHolder holder, int position) {
                 android.view.View itemView = holder.itemView;
                 VnMetadata m = items.get(position);
+                // Dynamic theme text colors
+                com.yuki.yukihub.ui.DynamicTheme dt = com.yuki.yukihub.ui.DynamicTheme.getInstance();
+                boolean themed = dt.isEnabled() && dt.getColors() != null;
+                TextView tvTitle = itemView.findViewById(R.id.tvCandidateTitle);
+                TextView tvOriginal = itemView.findViewById(R.id.tvCandidateOriginal);
+                TextView tvInfo = itemView.findViewById(R.id.tvCandidateInfo);
+                if (themed) {
+                    tvTitle.setTextColor(0xFFF0F4FA);
+                    tvOriginal.setTextColor(0xFFB0B8C8);
+                    tvInfo.setTextColor(0xFFE8EDF5);
+                }
                 if (m == null) {
                     String sourceLabel = metadataSourceLabel();
                     ((TextView) itemView.findViewById(R.id.tvCandidateTitle)).setText("不匹配 / 暂不使用" + sourceLabel);

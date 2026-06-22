@@ -125,7 +125,7 @@
                 android:textColor="#7A8BA8"
                 android:textSize="12sp" />
 
-            <EditText
+            <androidx.appcompat.widget.AppCompatEditText
                 android:id="@+id/etNickname"
                 android:layout_width="match_parent"
                 android:layout_height="42dp"
@@ -151,7 +151,7 @@
             android:textColor="#7A8BA8"
             android:textSize="12sp" />
 
-        <EditText
+        <androidx.appcompat.widget.AppCompatEditText
             android:id="@+id/etEmail"
             android:layout_width="match_parent"
             android:layout_height="42dp"
@@ -176,7 +176,7 @@
             android:textColor="#7A8BA8"
             android:textSize="12sp" />
 
-        <EditText
+        <androidx.appcompat.widget.AppCompatEditText
             android:id="@+id/etPassword"
             android:layout_width="match_parent"
             android:layout_height="42dp"
@@ -208,7 +208,7 @@
                 android:textColor="#7A8BA8"
                 android:textSize="12sp" />
 
-            <EditText
+            <androidx.appcompat.widget.AppCompatEditText
                 android:id="@+id/etConfirmPassword"
                 android:layout_width="match_parent"
                 android:layout_height="42dp"
@@ -225,7 +225,7 @@
         </LinearLayout>
 
         <!-- Submit button -->
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnSubmit"
             android:layout_width="match_parent"
             android:layout_height="42dp"

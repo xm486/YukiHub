@@ -13,7 +13,12 @@ import android.widget.TextView;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
+import android.graphics.drawable.GradientDrawable;
+
 import androidx.appcompat.app.AppCompatActivity;
+
+import com.yuki.yukihub.ui.DynamicTheme;
+import com.yuki.yukihub.ui.ThemeColorExtractor;
 
 import org.json.JSONObject;
 
@@ -76,6 +81,7 @@ protected void onCreate(Bundle savedInstanceState) {
 
     initViews();
     setupListeners();
+    applyDynamicThemeToAuth();
     switchToLogin();
 }
 
@@ -115,9 +121,11 @@ protected void onCreate(Bundle savedInstanceState) {
 
     private void switchToLogin() {
     registerMode = false;
-    tabLogin.setTextColor(0xFFEAF7FF);
+    DynamicTheme dt = DynamicTheme.getInstance();
+    boolean themed = dt.isEnabled() && dt.getColors() != null;
+    tabLogin.setTextColor(themed ? 0xFFF0F4FA : 0xFFEAF7FF);
     tabLogin.setBackgroundResource(R.drawable.bg_auth_tab_active);
-    tabRegister.setTextColor(0xFF4A5568);
+    tabRegister.setTextColor(themed ? 0xFFB0B8C8 : 0xFF4A5568);
     tabRegister.setBackgroundResource(R.drawable.bg_auth_tab_inactive);
 
     tvFormTitle.setText("欢迎回来");
@@ -132,9 +140,11 @@ protected void onCreate(Bundle savedInstanceState) {
 
 private void switchToRegister() {
     registerMode = true;
-    tabRegister.setTextColor(0xFFEAF7FF);
+    DynamicTheme dt = DynamicTheme.getInstance();
+    boolean themed = dt.isEnabled() && dt.getColors() != null;
+    tabRegister.setTextColor(themed ? 0xFFF0F4FA : 0xFFEAF7FF);
     tabRegister.setBackgroundResource(R.drawable.bg_auth_tab_active);
-    tabLogin.setTextColor(0xFF4A5568);
+    tabLogin.setTextColor(themed ? 0xFFB0B8C8 : 0xFF4A5568);
     tabLogin.setBackgroundResource(R.drawable.bg_auth_tab_inactive);
 
     tvFormTitle.setText("创建账户");
@@ -340,6 +350,66 @@ private void testApiConnection() {
         tvAuthStatus.setVisibility(View.VISIBLE);
         tvAuthStatus.setText(msg);
         tvAuthStatus.setTextColor(color);
+    }
+
+    private void applyDynamicThemeToAuth() {
+        DynamicTheme dt = DynamicTheme.getInstance();
+        if (!dt.isEnabled() || dt.getColors() == null) return;
+        ThemeColorExtractor.ThemeColors colors = dt.getColors();
+        // Tint all text views to white/gray-white
+        int textColor = 0xFFF0F4FA;
+        int mutedColor = 0xFFB0B8C8;
+        int hintColor = 0xFF8090A8;
+        tvFormTitle.setTextColor(textColor);
+        tvFormHint.setTextColor(mutedColor);
+        tvAuthStatus.setTextColor(mutedColor);
+        tabLogin.setTextColor(textColor);
+        tabRegister.setTextColor(mutedColor);
+        etNickname.setTextColor(textColor);
+        etNickname.setHintTextColor(hintColor);
+        etEmail.setTextColor(textColor);
+        etEmail.setHintTextColor(hintColor);
+        etPassword.setTextColor(textColor);
+        etPassword.setHintTextColor(hintColor);
+        etConfirmPassword.setTextColor(textColor);
+        etConfirmPassword.setHintTextColor(hintColor);
+        btnSubmit.setTextColor(0xFFFFFFFF);
+        tvContinueLocal.setTextColor(mutedColor);
+        // Tint backgrounds
+        btnSubmit.setBackground(tintAuthButton(colors));
+        etNickname.setBackground(tintAuthInput(colors));
+        etEmail.setBackground(tintAuthInput(colors));
+        etPassword.setBackground(tintAuthInput(colors));
+        etConfirmPassword.setBackground(tintAuthInput(colors));
+        // Dialog background
+        View root = findViewById(android.R.id.content);
+        if (root != null) {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor((0xF0 << 24) | (colors.card & 0x00FFFFFF));
+            bg.setStroke(dp(1), (0x5E << 24) | (colors.primary & 0x00FFFFFF));
+            bg.setCornerRadius(dp(10));
+            root.setBackground(bg);
+        }
+    }
+
+    private GradientDrawable tintAuthButton(ThemeColorExtractor.ThemeColors c) {
+        GradientDrawable d = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{(0xFF << 24) | (c.primary & 0x00FFFFFF), (0xCC << 24) | (c.secondary & 0x00FFFFFF)});
+        d.setCornerRadius(dp(8));
+        return d;
+    }
+
+    private GradientDrawable tintAuthInput(ThemeColorExtractor.ThemeColors c) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor((0x22 << 24) | (c.primary & 0x00FFFFFF));
+        d.setStroke(dp(1), (0x55 << 24) | (c.primary & 0x00FFFFFF));
+        d.setCornerRadius(dp(8));
+        return d;
+    }
+
+    private int dp(float v) {
+        return (int) (v * getResources().getDisplayMetrics().density);
     }
 
     private void enterImmersiveMode() {
