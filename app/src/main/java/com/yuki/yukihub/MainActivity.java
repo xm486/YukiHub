@@ -1022,13 +1022,14 @@ private void tintMainTextColors(ViewGroup root, ThemeColorExtractor.ThemeColors 
                 }
             } else {
                 // Reset to original colors
-                if (child instanceof Button || child instanceof CheckBox) {
-                    tv.setTextColor(getColorCompat(R.color.yh_text));
+                int currentColor = tv.getCurrentTextColor();
+                boolean isDarkText = (currentColor & 0x00FFFFFF) < 0x555555;
+                if (child instanceof Button || child instanceof CheckBox || isDarkText) {
+                    tv.setTextColor(0xFF000000);
                 } else if (child instanceof EditText) {
                     tv.setTextColor(getColorCompat(R.color.yh_text));
                     tv.setHintTextColor(getColorCompat(R.color.yh_text_muted));
                 } else {
-                    // Try to restore — use yh_text for most, yh_text_muted for muted
                     tv.setTextColor(getColorCompat(R.color.yh_text));
                 }
             }
