@@ -27,6 +27,14 @@ public class DynamicSnowBackgroundView extends View {
     private int cachedW;
     private int cachedH;
 
+    // Dynamic theme colors
+    private int baseColor1 = Color.rgb(11, 16, 40);
+    private int baseColor2 = Color.rgb(22, 29, 70);
+    private int baseColor3 = Color.rgb(54, 31, 92);
+    private int auroraColor1 = 0x465AC8FA;
+    private int auroraColor2 = 0x52AF52DE;
+    private int auroraColor3 = 0x243C6CFF;
+
     public DynamicSnowBackgroundView(Context context) {
         super(context);
         init();
@@ -59,7 +67,7 @@ public class DynamicSnowBackgroundView extends View {
         cachedH = Math.max(1, h);
         baseGradient = new LinearGradient(
                 0, 0, cachedW, cachedH,
-                new int[]{Color.rgb(11, 16, 40), Color.rgb(22, 29, 70), Color.rgb(54, 31, 92)},
+                new int[]{baseColor1, baseColor2, baseColor3},
                 new float[]{0f, 0.50f, 1f},
                 Shader.TileMode.CLAMP
         );
@@ -78,22 +86,22 @@ public class DynamicSnowBackgroundView extends View {
                 cachedW * (0.18f + 0.055f * sin(t * 0.13f)),
                 cachedH * (0.18f + 0.045f * cos(t * 0.17f)),
                 cachedW * 0.50f,
-                0x465AC8FA,
-                0x005AC8FA);
+                auroraColor1,
+                (0x00 << 24) | (auroraColor1 & 0x00FFFFFF));
 
         drawAuroraBlob(canvas,
                 cachedW * (0.80f + 0.060f * sin(t * 0.10f + 2.1f)),
                 cachedH * (0.76f + 0.050f * cos(t * 0.14f)),
                 cachedW * 0.56f,
-                0x52AF52DE,
-                0x00AF52DE);
+                auroraColor2,
+                (0x00 << 24) | (auroraColor2 & 0x00FFFFFF));
 
         drawAuroraBlob(canvas,
                 cachedW * (0.50f + 0.040f * sin(t * 0.08f + 4.0f)),
                 cachedH * (0.44f + 0.030f * cos(t * 0.11f)),
                 cachedW * 0.62f,
-                0x243C6CFF,
-                0x003C6CFF);
+                auroraColor3,
+                (0x00 << 24) | (auroraColor3 & 0x00FFFFFF));
 
         drawParticles(canvas, t);
 
@@ -141,6 +149,28 @@ public class DynamicSnowBackgroundView extends View {
 
     private float cos(float v) {
         return (float) Math.cos(v);
+    }
+
+    /** Set dynamic theme colors for base gradient and aurora blobs. */
+    public void setThemeColors(int bg, int bg2, int auroraColor1, int auroraColor2, int auroraColor3) {
+        this.baseColor1 = bg;
+        this.baseColor2 = bg2;
+        float[] hsv = new float[3];
+        Color.colorToHSV(bg2, hsv);
+        hsv[0] = (hsv[0] + 30f) % 360f;
+        hsv[2] = Math.min(1f, hsv[2] * 1.3f);
+        this.baseColor3 = Color.HSVToColor(hsv);
+        this.auroraColor1 = auroraColor1;
+        this.auroraColor2 = auroraColor2;
+        this.auroraColor3 = auroraColor3;
+        if (cachedW > 0 && cachedH > 0) {
+            baseGradient = new LinearGradient(
+                    0, 0, cachedW, cachedH,
+                    new int[]{baseColor1, baseColor2, baseColor3},
+                    new float[]{0f, 0.50f, 1f},
+                    Shader.TileMode.CLAMP
+            );
+        }
     }
 
     private static class SnowParticle {

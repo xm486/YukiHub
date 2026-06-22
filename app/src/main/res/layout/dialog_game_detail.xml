@@ -41,11 +41,11 @@
         <Space android:layout_width="match_parent" android:layout_height="16dp" />
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <Button android:id="@+id/btnLaunch" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:text="启动" android:textAllCaps="false" />
-            <Button android:id="@+id/btnStatus" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="标记" android:textAllCaps="false" />
-            <Button android:id="@+id/btnKrSettings" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="引擎设置" android:textAllCaps="false" />
-            <Button android:id="@+id/btnEdit" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="编辑" android:textAllCaps="false" />
-            <Button android:id="@+id/btnDelete" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="删除" android:textAllCaps="false" />
+            <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnLaunch" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:text="启动" android:textAllCaps="false" />
+            <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnStatus" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="标记" android:textAllCaps="false" />
+            <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnKrSettings" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="引擎设置" android:textAllCaps="false" />
+            <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnEdit" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="编辑" android:textAllCaps="false" />
+            <androidx.appcompat.widget.AppCompatButton android:id="@+id/btnDelete" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="删除" android:textAllCaps="false" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

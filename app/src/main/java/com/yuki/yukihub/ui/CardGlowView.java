@@ -17,6 +17,8 @@ public class CardGlowView extends View {
     private final Matrix matrix = new Matrix();
     private long startTime;
     private SweepGradient gradient;
+    private int color1 = 0x5AC8FA;
+    private int color2 = 0xAF52DE;
 
     public CardGlowView(Context context) {
         super(context);
@@ -45,19 +47,34 @@ public class CardGlowView extends View {
 
     @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        rebuildGradient(w, h);
+    }
+
+    private void rebuildGradient(int w, int h) {
         if (w <= 0 || h <= 0) return;
+        int c1 = color1;
+        int c2 = color2;
         gradient = new SweepGradient(
                 w / 2f,
                 h / 2f,
                 new int[]{
-                        0x005AC8FA,
-                        0x445AC8FA,
+                        (0x00 << 24) | (c1 & 0x00FFFFFF),
+                        (0x44 << 24) | (c1 & 0x00FFFFFF),
                         0xDDCFE8FF,
-                        0x66AF52DE,
-                        0x005AC8FA
+                        (0x66 << 24) | (c2 & 0x00FFFFFF),
+                        (0x00 << 24) | (c1 & 0x00FFFFFF)
                 },
                 new float[]{0f, 0.22f, 0.36f, 0.55f, 1f}
         );
+    }
+
+    /** Set dynamic glow colors from theme extraction. */
+    public void setThemeColors(int glowColor1, int glowColor2) {
+        this.color1 = glowColor1 & 0x00FFFFFF;
+        this.color2 = glowColor2 & 0x00FFFFFF;
+        if (getWidth() > 0 && getHeight() > 0) {
+            rebuildGradient(getWidth(), getHeight());
+        }
     }
 
     @Override protected void onDraw(Canvas canvas) {

@@ -17,6 +17,8 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+
+import androidx.annotation.Nullable;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
@@ -31,6 +33,7 @@ import android.graphics.SurfaceTexture;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -55,6 +58,8 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -135,6 +140,10 @@ import com.yuki.yukihub.ons.OnsSettings;
 import com.yuki.yukihub.scanner.GameScanner;
 import com.yuki.yukihub.scanner.ScanResult;
 import com.yuki.yukihub.ui.GameAdapter;
+import com.yuki.yukihub.ui.CardGlowView;
+import com.yuki.yukihub.ui.DynamicSnowBackgroundView;
+import com.yuki.yukihub.ui.DynamicTheme;
+import com.yuki.yukihub.ui.ThemeColorExtractor;
 import com.yuki.yukihub.ui.ScanResultAdapter;
 import com.yuki.yukihub.util.AppExecutors;
 import com.yuki.yukihub.util.DevLogger;
@@ -246,6 +255,7 @@ private static final String KEY_CUSTOM_BACKGROUND = "custom_background";
 private static final String KEY_CUSTOM_BACKGROUND_TYPE = "custom_background_type";
 private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled";
 private static final String KEY_BACKGROUND_VIDEO_SOUND = "background_video_sound";
+private static final String KEY_BG_THEME_ENABLED = "bg_theme_enabled";
 private static final String KEY_UI_CLICK_SOUND = "ui_click_sound";
 private static final int UI_SOUND_CLICK = 0;
 private static final int UI_SOUND_CONFIRM = 1;
@@ -400,6 +410,7 @@ if (!ensureDisclaimerAccepted()) {
         boolean accepted = prefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false);
         if (accepted && acceptedAt > 0) return true;
         View content = LayoutInflater.from(this).inflate(R.layout.dialog_disclaimer_first_launch, null, false);
+        tintDialogRoot(content);
         CheckBox agree = content.findViewById(R.id.cbDisclaimerAgree);
         TextView btnExit = content.findViewById(R.id.btnDisclaimerExit);
         TextView btnContinue = content.findViewById(R.id.btnDisclaimerContinue);
@@ -508,8 +519,7 @@ pendingScanRootReplaceIndex = -2;
                     ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedDir)).setText(pendingDirUri);
                     Spinner launchSp = pendingEditDialog.findViewById(R.id.spLaunchTarget);
                     List<String> options = buildLaunchOptions(pendingDirUri);
-                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, options);
-                    adapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+                    ArrayAdapter<String> adapter = krSpinnerAdapter(options.toArray(new String[0]));
                     launchSp.setAdapter(adapter);
                     ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(emptyText(pendingCoverUri, "未选择封面"));
                 }
@@ -664,6 +674,7 @@ private void applyCustomBackground() {
         bgVideo.setVisibility(View.GONE);
         bgDim.setVisibility(View.GONE);
         dynamicBg.setVisibility(View.VISIBLE);
+        applyDynamicTheme(null);
         return;
     }
     try {
@@ -682,6 +693,12 @@ private void applyCustomBackground() {
             bgDim.setVisibility(dimEnabled ? View.VISIBLE : View.GONE);
             dynamicBg.setVisibility(View.GONE);
         }
+        // Extract theme colors from background if enabled
+        if (prefs.getBoolean(KEY_BG_THEME_ENABLED, false)) {
+            extractAndApplyTheme(bg, type);
+        } else {
+            applyDynamicTheme(null);
+        }
     } catch (Throwable t) {
         prefs.edit().remove(KEY_CUSTOM_BACKGROUND).remove(KEY_CUSTOM_BACKGROUND_TYPE).apply();
         stopBackgroundVideo();
@@ -690,7 +707,551 @@ private void applyCustomBackground() {
         bgVideo.setVisibility(View.GONE);
         bgDim.setVisibility(View.GONE);
         dynamicBg.setVisibility(View.VISIBLE);
+        applyDynamicTheme(null);
     }
+}
+
+private void extractAndApplyTheme(String bgUri, String type) {
+    DynamicTheme dt = DynamicTheme.getInstance();
+    dt.setEnabled(true);
+    if ("image".equals(type)) {
+        AppExecutors.io().execute(() -> {
+            ThemeColorExtractor.ThemeColors colors = dt.extractAndCache(this, bgUri);
+            runOnUiThread(() -> applyDynamicTheme(colors));
+        });
+    } else {
+        // For video, extract from first frame using MediaMetadataRetriever
+        AppExecutors.io().execute(() -> {
+            ThemeColorExtractor.ThemeColors colors = extractVideoFirstFrame(bgUri);
+            if (colors != null) {
+                runOnUiThread(() -> applyDynamicTheme(colors));
+            } else {
+                // Fallback: try cache
+                if (!dt.loadCache(prefs)) {
+                    // Last resort: try TextureView after delay
+                    runOnUiThread(this::scheduleVideoThemeExtraction);
+                } else {
+                    runOnUiThread(() -> applyDynamicTheme(dt.getColors()));
+                }
+            }
+        });
+    }
+}
+
+@Nullable
+private ThemeColorExtractor.ThemeColors extractVideoFirstFrame(String videoUri) {
+    android.media.MediaMetadataRetriever retriever = null;
+    try {
+        retriever = new android.media.MediaMetadataRetriever();
+        retriever.setDataSource(this, Uri.parse(videoUri));
+        android.graphics.Bitmap frame = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+        if (frame != null) {
+            // Scale down for faster Palette extraction
+            android.graphics.Bitmap scaled = frame;
+            if (frame.getWidth() > 200 || frame.getHeight() > 200) {
+                float scale = 200f / Math.max(frame.getWidth(), frame.getHeight());
+                scaled = Bitmap.createScaledBitmap(frame, 
+                        (int)(frame.getWidth() * scale), (int)(frame.getHeight() * scale), true);
+                if (scaled != frame) frame.recycle();
+            }
+            DynamicTheme dt = DynamicTheme.getInstance();
+            ThemeColorExtractor.ThemeColors colors = dt.extractFromBitmapAndCache(this, scaled);
+            scaled.recycle();
+            return colors;
+        }
+    } catch (Throwable ignored) {
+    } finally {
+        if (retriever != null) {
+            try { retriever.release(); } catch (Throwable ignored) {}
+        }
+    }
+    return null;
+}
+
+private void scheduleVideoThemeExtraction() {
+    TextureView bgVideo = findViewById(R.id.customBackgroundVideo);
+    if (bgVideo == null) return;
+    bgVideo.postDelayed(() -> {
+        try {
+            if (bgVideo.isAvailable()) {
+                android.graphics.Bitmap frame = bgVideo.getBitmap(100, 100);
+                if (frame != null) {
+                    DynamicTheme dt = DynamicTheme.getInstance();
+                    ThemeColorExtractor.ThemeColors colors = dt.extractFromBitmapAndCache(this, frame);
+                    frame.recycle();
+                    applyDynamicTheme(colors);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }, 1500);
+}
+
+/** Apply dynamic theme colors to all UI components. Pass null to reset to defaults. */
+private void applyDynamicTheme(ThemeColorExtractor.ThemeColors colors) {
+    DynamicTheme dt = DynamicTheme.getInstance();
+    boolean resetting = (colors == null);
+    if (resetting) {
+        dt.setEnabled(false);
+        colors = ThemeColorExtractor.DEFAULT;
+    }
+    // Update DynamicSnowBackgroundView
+    DynamicSnowBackgroundView dynamicBg = findViewById(R.id.dynamicBackground);
+    if (dynamicBg != null) {
+        dynamicBg.setThemeColors(colors.bg, colors.bg2, colors.auroraColor1, colors.auroraColor2, colors.auroraColor3);
+    }
+    // Update GameAdapter (card backgrounds only, not text)
+    if (adapter != null) {
+        adapter.setFullThemeColors(resetting ? null : colors);
+        adapter.notifyDataSetChanged();
+    }
+    // Update CardGlowView instances (via RecyclerView)
+    RecyclerView recycler = findViewById(R.id.recyclerGames);
+    if (recycler != null) {
+        for (int i = 0; i < recycler.getChildCount(); i++) {
+            View child = recycler.getChildAt(i);
+            if (child == null) continue;
+            CardGlowView glow = child.findViewById(R.id.cardGlow);
+            if (glow != null) glow.setThemeColors(colors.glowColor1, colors.glowColor2);
+        }
+    }
+
+    // --- Apply extracted colors to UI component backgrounds/borders only ---
+
+    // Title shadow
+    TextView tvTitle = findViewById(R.id.tvTitle);
+    if (tvTitle != null) {
+        tvTitle.setShadowLayer(3, 0, 1, (0x45 << 24) | (colors.primary & 0x00FFFFFF));
+    }
+
+    // Sidebar background
+    View sidebar = findViewById(R.id.sidebar);
+    if (sidebar != null) {
+        sidebar.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+    }
+    View sidebarScroll = findViewById(R.id.sidebarScroll);
+    if (sidebarScroll != null) {
+        sidebarScroll.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+    }
+
+    // Sidebar filter items (background only)
+    int[] sidebarIds = {R.id.filterAll, R.id.filterRecent, R.id.filterPlaying, R.id.filterCompleted, R.id.filterUnplayed, R.id.filterDeveloper};
+    for (int id : sidebarIds) {
+        TextView tv = findViewById(id);
+        if (tv != null) {
+            tv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
+        }
+    }
+
+    // Friends chat panel (background only)
+    TextView friendsChat = findViewById(R.id.friendsChatPanel);
+    if (friendsChat != null) {
+        friendsChat.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+    }
+
+    // Profile panel (background only)
+    View profilePanel = findViewById(R.id.profilePanel);
+    if (profilePanel != null) {
+        profilePanel.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+    }
+
+    // Search input (background only)
+    EditText etSearch = findViewById(R.id.etSearch);
+    if (etSearch != null) {
+        etSearch.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+    }
+
+    // Detail panel (right sidebar) — outer FrameLayout has bg_game_card
+    View detailPanel = findViewById(R.id.detailPanel);
+    if (detailPanel != null) {
+        // The outer FrameLayout is the detailPanel's parent (ScrollView's parent)
+        View detailOuterFrame = (View) detailPanel.getParent().getParent();
+        if (detailOuterFrame != null) {
+            detailOuterFrame.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_game_card) : tintCardSelected(colors));
+        }
+        // The ScrollView parent
+        View detailScrollParent = (View) detailPanel.getParent();
+        if (detailScrollParent != null) {
+            detailScrollParent.setBackgroundColor(0x00000000);
+        }
+    }
+
+    // Detail panel interactive element backgrounds
+    TextView sideMetadataSourceBadge = findViewById(R.id.sideMetadataSourceBadge);
+    if (sideMetadataSourceBadge != null) {
+        sideMetadataSourceBadge.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_chip) : tintChip(colors));
+    }
+    TextView sideTranslateToggle = findViewById(R.id.sideTranslateToggle);
+    if (sideTranslateToggle != null) {
+        sideTranslateToggle.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+    }
+
+    // Detail panel cover placeholder
+    TextView sideDetailPlaceholder = findViewById(R.id.sideDetailPlaceholder);
+    if (sideDetailPlaceholder != null) {
+        View coverFrame = (View) sideDetailPlaceholder.getParent();
+        if (coverFrame != null) {
+            coverFrame.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+        }
+    }
+
+    // Detail panel screenshot placeholders
+    ImageView sideScreenshot1 = findViewById(R.id.sideScreenshot1);
+    if (sideScreenshot1 != null) {
+        sideScreenshot1.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+    }
+    ImageView sideScreenshot2 = findViewById(R.id.sideScreenshot2);
+    if (sideScreenshot2 != null) {
+        sideScreenshot2.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+    }
+
+    // Launch button (background only)
+    TextView sideBtnLaunch = findViewById(R.id.sideBtnLaunch);
+    if (sideBtnLaunch != null) {
+        sideBtnLaunch.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+    }
+    // Options button (background only)
+    TextView sideBtnOptions = findViewById(R.id.sideBtnOptions);
+    if (sideBtnOptions != null) {
+        sideBtnOptions.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+    }
+
+    // Top bar buttons (background only)
+    View btnScan = findViewById(R.id.btnScan);
+    if (btnScan != null) btnScan.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+    TextView btnAdd = findViewById(R.id.btnAdd);
+    if (btnAdd != null) btnAdd.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+    TextView btnSettings = findViewById(R.id.btnSettings);
+    if (btnSettings != null) btnSettings.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+
+    // Background dim overlay color
+    View bgDim = findViewById(R.id.customBackgroundDim);
+    if (bgDim != null) {
+        bgDim.setBackgroundColor((0x66 << 24) | (colors.bg & 0x00FFFFFF));
+    }
+
+    // Sidebar header line
+    // The header line is a child of the sidebar layout — tint it via parent traversal
+    if (sidebar != null && sidebar instanceof ViewGroup) {
+        ViewGroup sidebarVG = (ViewGroup) sidebar;
+        for (int i = 0; i < sidebarVG.getChildCount(); i++) {
+            View child = sidebarVG.getChildAt(i);
+            if (child instanceof ViewGroup) {
+                ViewGroup childGroup = (ViewGroup) child;
+                for (int j = 0; j < childGroup.getChildCount(); j++) {
+                    View line = childGroup.getChildAt(j);
+                    if (line instanceof View && !(line instanceof ViewGroup) && line.getLayoutParams().height <= dp(2)) {
+                        // This is likely the header line
+                        if (resetting) {
+                            line.setBackgroundResource(R.drawable.bg_sidebar_header_line);
+                        } else {
+                            GradientDrawable lineBg = new GradientDrawable(
+                                    GradientDrawable.Orientation.LEFT_RIGHT,
+                                    new int[]{0x00000000, (0x66 << 24) | (colors.primary & 0x00FFFFFF), 0x00000000});
+                            lineBg.setCornerRadius(dp(999));
+                            line.setBackground(lineBg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Cover placeholders (profile avatar, detail panel cover, screenshots)
+    int[] placeholderIds = {R.id.tvCoverPlaceholder};
+    for (int id : placeholderIds) {
+        View v = findViewById(id);
+        if (v != null && v.getVisibility() == View.VISIBLE) {
+            v.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+        }
+    }
+
+    // Detail panel cover placeholder
+    View detailCoverPlaceholder = null;
+    View detailPanel2 = findViewById(R.id.detailPanel);
+    if (detailPanel2 != null && detailPanel2 instanceof ViewGroup) {
+        detailCoverPlaceholder = findViewByIdRecursive((ViewGroup) detailPanel2, R.id.tvCoverPlaceholder);
+    }
+    if (detailCoverPlaceholder != null) {
+        detailCoverPlaceholder.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+    }
+
+    // Profile avatar placeholder
+    View profileAvatar = findViewById(R.id.profilePanel);
+    if (profileAvatar != null && profileAvatar instanceof ViewGroup) {
+        View avatarFrame = findViewByIndex((ViewGroup) profileAvatar, 0);
+        if (avatarFrame != null) {
+            avatarFrame.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+        }
+    }
+
+    // Navigation bar color
+    getWindow().setNavigationBarColor(colors.bg);
+
+    // Tint all text colors in main layout
+    View mainRoot = findViewById(android.R.id.content);
+    if (mainRoot instanceof ViewGroup) {
+        tintMainTextColors((ViewGroup) mainRoot, resetting ? null : colors);
+    }
+}
+
+/** Recursively tint text colors in the main layout for dynamic theme. */
+private void tintMainTextColors(ViewGroup root, ThemeColorExtractor.ThemeColors colors) {
+    boolean enabled = (colors != null);
+    for (int i = 0; i < root.getChildCount(); i++) {
+        View child = root.getChildAt(i);
+        if (child instanceof ViewGroup) {
+            tintMainTextColors((ViewGroup) child, colors);
+        }
+        if (child instanceof TextView) {
+            TextView tv = (TextView) child;
+            if (enabled) {
+                int currentColor = tv.getCurrentTextColor();
+                boolean isDarkText = (currentColor & 0x00FFFFFF) < 0x555555;
+                // Buttons or dark-text TextViews (on bright buttons) → pure white
+                if (child instanceof Button || child instanceof CheckBox || isDarkText) {
+                    tv.setTextColor(0xFFFFFFFF);
+                }
+                // EditText → near-white text, gray hint
+                else if (child instanceof EditText) {
+                    tv.setTextColor(0xFFF0F4FA);
+                    tv.setHintTextColor(0xFF8090A8);
+                }
+                // Other TextViews → gray-white
+                else {
+                    tv.setTextColor(0xFFE8EDF5);
+                }
+            } else {
+                // Reset to original colors
+                int currentColor = tv.getCurrentTextColor();
+                boolean isDarkText = (currentColor & 0x00FFFFFF) < 0x555555;
+                if (child instanceof Button || child instanceof CheckBox || isDarkText) {
+                    tv.setTextColor(0xFF000000);
+                } else if (child instanceof EditText) {
+                    tv.setTextColor(getColorCompat(R.color.yh_text));
+                    tv.setHintTextColor(getColorCompat(R.color.yh_text_muted));
+                } else {
+                    tv.setTextColor(getColorCompat(R.color.yh_text));
+                }
+            }
+        }
+    }
+}
+
+/** Create a sidebar-style background with dynamic colors. */
+private android.graphics.drawable.GradientDrawable tintSidebar(ThemeColorExtractor.ThemeColors c) {
+    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
+    d.setColor((0xC8 << 24) | (c.bg & 0x00FFFFFF));
+    d.setCornerRadius(dp(10));
+    d.setStroke(dp(1), (0x42 << 24) | (c.primary & 0x00FFFFFF));
+    return d;
+}
+
+/** Create a sidebar item background with dynamic colors. */
+private android.graphics.drawable.StateListDrawable tintSidebarItem(ThemeColorExtractor.ThemeColors c) {
+    android.graphics.drawable.StateListDrawable sld = new android.graphics.drawable.StateListDrawable();
+    // Selected state
+    android.graphics.drawable.GradientDrawable selected = new android.graphics.drawable.GradientDrawable();
+    selected.setColor((0x27 << 24) | (c.primary & 0x00FFFFFF));
+    selected.setCornerRadius(dp(9));
+    selected.setStroke(dp(1), (0x7E << 24) | (c.primary & 0x00FFFFFF));
+    sld.addState(new int[]{android.R.attr.state_selected}, selected);
+    // Pressed state
+    android.graphics.drawable.GradientDrawable pressed = new android.graphics.drawable.GradientDrawable();
+    pressed.setColor((0x1A << 24) | (c.primary & 0x00FFFFFF));
+    pressed.setCornerRadius(dp(9));
+    pressed.setStroke(dp(1), (0x55 << 24) | (c.primary & 0x00FFFFFF));
+    sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
+    // Default state
+    android.graphics.drawable.GradientDrawable normal = new android.graphics.drawable.GradientDrawable();
+    normal.setColor(0x00000000);
+    normal.setCornerRadius(dp(9));
+    sld.addState(new int[]{}, normal);
+    return sld;
+}
+
+/** Create an input field background with dynamic colors. */
+private android.graphics.drawable.GradientDrawable tintInput(ThemeColorExtractor.ThemeColors c) {
+    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
+    d.setColor((0xA8 << 24) | (c.bg & 0x00FFFFFF));
+    d.setStroke(dp(1), (0x5E << 24) | (c.primary & 0x00FFFFFF));
+    d.setCornerRadius(dp(8));
+    return d;
+}
+
+/** Create a primary action button background with dynamic colors. */
+private android.graphics.drawable.GradientDrawable tintButton(ThemeColorExtractor.ThemeColors c) {
+    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{
+                    (0xB4 << 24) | (c.primary & 0x00FFFFFF),
+                    (0x86 << 24) | (c.primary & 0x00FFFFFF),
+                    (0x6B << 24) | (c.primary & 0x00FFFFFF)
+            });
+    d.setCornerRadius(dp(8));
+    d.setStroke(dp(1), (0xBF << 24) | (c.primary & 0x00FFFFFF));
+    return d;
+}
+
+/** Create a chip/tag background with dynamic colors. */
+private android.graphics.drawable.GradientDrawable tintChip(ThemeColorExtractor.ThemeColors c) {
+    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
+    d.setColor((0xAA << 24) | (c.card2 & 0x00FFFFFF));
+    d.setCornerRadius(dp(999));
+    d.setStroke(dp(1), (0x7A << 24) | (c.primary & 0x00FFFFFF));
+    return d;
+}
+
+/** Create a selected card background with dynamic colors. */
+private android.graphics.drawable.GradientDrawable tintCardSelected(ThemeColorExtractor.ThemeColors c) {
+    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{
+                    (0xE4 << 24) | (c.card & 0x00FFFFFF),
+                    (0xD9 << 24) | (c.card & 0x00FFFFFF),
+                    (0xD8 << 24) | (c.bg2 & 0x00FFFFFF)
+            });
+    d.setCornerRadius(dp(10));
+    d.setStroke(dp(2), (0x9C << 24) | (c.primary & 0x00FFFFFF));
+    return d;
+}
+
+/** Create a cover placeholder gradient with dynamic colors. */
+private GradientDrawable tintCoverPlaceholder(ThemeColorExtractor.ThemeColors c) {
+    GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.BL_TR,
+            new int[]{
+                    (0xFF << 24) | (c.card & 0x00FFFFFF),
+                    (0xFF << 24) | (c.card2 & 0x00FFFFFF),
+                    (0xFF << 24) | (c.secondary & 0x00FFFFFF)
+            });
+    d.setCornerRadius(dp(8));
+    d.setStroke(dp(1), 0x22FFFFFF);
+    return d;
+}
+
+/** Recursively find a view by ID within a ViewGroup. */
+private View findViewByIdRecursive(ViewGroup root, int id) {
+    if (root == null) return null;
+    for (int i = 0; i < root.getChildCount(); i++) {
+        View child = root.getChildAt(i);
+        if (child.getId() == id) return child;
+        if (child instanceof ViewGroup) {
+            View found = findViewByIdRecursive((ViewGroup) child, id);
+            if (found != null) return found;
+        }
+    }
+    return null;
+}
+
+/** Get child view at a specific index from a ViewGroup. */
+private View findViewByIndex(ViewGroup parent, int index) {
+    if (parent == null || index < 0 || index >= parent.getChildCount()) return null;
+    return parent.getChildAt(index);
+}
+
+/** Apply dynamic theme to a dialog's root view. Call after setting up the dialog content. */
+public void tintDialogRoot(View rootView) {
+    DynamicTheme dt = DynamicTheme.getInstance();
+    if (!dt.isEnabled()) return;
+    ThemeColorExtractor.ThemeColors colors = dt.getColors();
+    if (colors == null) return;
+    rootView.setBackground(tintDialog(colors));
+    // Postpone child tinting so all views are added first
+    rootView.post(() -> tintDialogChildren((ViewGroup) rootView, colors));
+}
+
+/** Create a dialog background with dynamic colors. */
+private GradientDrawable tintDialog(ThemeColorExtractor.ThemeColors c) {
+    GradientDrawable d = new GradientDrawable();
+    d.setColor((0xF0 << 24) | (c.card & 0x00FFFFFF));
+    d.setStroke(dp(1), (0x5E << 24) | (c.primary & 0x00FFFFFF));
+    d.setCornerRadius(dp(10));
+    return d;
+}
+
+/** Recursively tint known background patterns inside dialogs. */
+private void tintDialogChildren(ViewGroup root, ThemeColorExtractor.ThemeColors colors) {
+    for (int i = 0; i < root.getChildCount(); i++) {
+        View child = root.getChildAt(i);
+        // Recurse into child ViewGroups first
+        if (child instanceof ViewGroup) {
+            tintDialogChildren((ViewGroup) child, colors);
+        }
+
+        // ViewGroup with bg_dialog background → replace with tintDialog
+        if (child instanceof ViewGroup && !(child instanceof RecyclerView) && !(child instanceof FrameLayout)
+                && !(child instanceof Spinner) && !(child instanceof EditText)
+                && child.getBackground() != null) {
+            child.setBackground(tintDialog(colors));
+        }
+
+        // CheckBox → dynamic tint + white text
+        if (child instanceof CheckBox) {
+            ((CheckBox) child).setButtonTintList(android.content.res.ColorStateList.valueOf(colors.primary));
+            ((CheckBox) child).setTextColor(0xFFE8EDF5);
+            continue;
+        }
+
+        // SeekBar → dynamic progress tint
+        if (child instanceof SeekBar) {
+            ((SeekBar) child).setProgressTintList(android.content.res.ColorStateList.valueOf(colors.primary));
+            ((SeekBar) child).setThumbTintList(android.content.res.ColorStateList.valueOf(colors.primary));
+            continue;
+        }
+
+        // Button → tintButton + white text
+        if (child instanceof Button) {
+            child.setBackground(tintButton(colors));
+            ((Button) child).setTextColor(0xFFFFFFFF);
+            continue;
+        }
+        // EditText → tintInput + white text + gray hint
+        if (child instanceof EditText) {
+            child.setBackground(tintInput(colors));
+            ((EditText) child).setTextColor(0xFFF0F4FA);
+            ((EditText) child).setHintTextColor(0xFF8090A8);
+            continue;
+        }
+        // Spinner → tintInput + white text
+        if (child instanceof Spinner) {
+            child.setBackground(tintInput(colors));
+            continue;
+        }
+
+        Drawable bg = child.getBackground();
+        // TextView with background (labels, badges, action buttons like btnReset/btnPick)
+        if (child instanceof TextView && !(child instanceof EditText) && !(child instanceof Button)) {
+            TextView tv = (TextView) child;
+            int currentTextColor = tv.getCurrentTextColor();
+            // If text was dark (like #071221 on bright buttons), treat as action button
+            boolean isDarkText = (currentTextColor & 0x00FFFFFF) < 0x555555;
+            if (isDarkText) {
+                child.setBackground(tintButton(colors));
+                tv.setTextColor(0xFFFFFFFF);
+            } else if (bg != null) {
+                child.setBackground(tintLabel(colors));
+                tv.setTextColor(0xFFE8EDF5);
+            } else {
+                // TextView without background — just tint text
+                tv.setTextColor(0xFFE8EDF5);
+            }
+            continue;
+        }
+        // FrameLayout with background → cover placeholder
+        if (child instanceof FrameLayout && bg != null) {
+            child.setBackground(tintCoverPlaceholder(colors));
+        }
+    }
+}
+
+/** Create a label background with dynamic colors (replaces bg_label). */
+private GradientDrawable tintLabel(ThemeColorExtractor.ThemeColors c) {
+    GradientDrawable d = new GradientDrawable();
+    d.setColor((0x33 << 24) | (c.primary & 0x00FFFFFF));
+    d.setStroke(dp(1), (0x7A << 24) | (c.primary & 0x00FFFFFF));
+    d.setCornerRadius(dp(6));
+    d.setPadding(dp(10), dp(5), dp(10), dp(5));
+    return d;
 }
 
 private void playBackgroundVideo(TextureView textureView, Uri uri, boolean forceRestart) {
@@ -1107,6 +1668,7 @@ private void showProfileDialog() {
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundResource(R.drawable.bg_dialog);
+    tintDialogRoot(root);
     int pad = dp(16);
     root.setPadding(pad, dp(14), pad, dp(10));
 
@@ -1160,7 +1722,7 @@ private void showProfileDialog() {
 
     TextView avatarHint = new TextView(this);
     avatarHint.setText(isLoggedIn() ? "当前为云账户，退出登录后会恢复本地资料显示。" : "当前为本地账户：昵称、头像和游戏数据只保存在本机。登录后可开启云同步和好友/聊天。点击头像可更换头像。");
-    avatarHint.setTextColor(getColorCompat(R.color.yh_primary));
+    avatarHint.setTextColor(primaryTextColor());
     avatarHint.setTextSize(11);
     avatarHint.setPadding(0, dp(6), 0, dp(8));
     root.addView(avatarHint);
@@ -1169,8 +1731,8 @@ private void showProfileDialog() {
     accountRow.setOrientation(LinearLayout.HORIZONTAL);
     Button loginBtn = krButton(isLoggedIn() ? "账号设置" : "登录 / 注册");
     Button syncBtn = krButton("云同步");
-    loginBtn.setTextColor(getColorCompat(R.color.yh_primary));
-    syncBtn.setTextColor(isLoggedIn() ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text_muted));
+    loginBtn.setTextColor(primaryTextColor());
+    syncBtn.setTextColor(isLoggedIn() ? primaryTextColor() : getColorCompat(R.color.yh_text_muted));
     syncBtn.setEnabled(isLoggedIn());
     loginBtn.setOnClickListener(v -> showAuthPlaceholderDialog());
     syncBtn.setOnClickListener(v -> Toast.makeText(this, "登录后即可使用云同步", Toast.LENGTH_SHORT).show());
@@ -1191,7 +1753,7 @@ private void showProfileDialog() {
     root.addView(statCards);
 
     Button aiReviewBtn = krButton("AI 周点评");
-    aiReviewBtn.setTextColor(getColorCompat(R.color.yh_primary));
+    aiReviewBtn.setTextColor(primaryTextColor());
     aiReviewBtn.setOnClickListener(v -> aiReviewController.showAiReviewDialog());
     root.addView(aiReviewBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
     TextView aiReviewHint = new TextView(this);
@@ -1239,7 +1801,7 @@ private void showProfileDialog() {
     backupTitle.setPadding(0, dp(12), 0, dp(4));
     root.addView(backupTitle);
     Button syncCenterBtn = krButton("打开同步中心");
-    syncCenterBtn.setTextColor(getColorCompat(R.color.yh_primary));
+    syncCenterBtn.setTextColor(primaryTextColor());
     syncCenterBtn.setOnClickListener(v -> showWebDavSettingsDialog());
     root.addView(syncCenterBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
     TextView backupHint = new TextView(this);
@@ -1252,6 +1814,7 @@ private void showProfileDialog() {
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(false);
     scroll.setBackgroundResource(R.drawable.bg_dialog);
+    tintDialogRoot(scroll);
     scroll.addView(root, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
     AlertDialog dialog = new AlertDialog.Builder(this)
@@ -2554,7 +3117,7 @@ private void renderTagChips(String tagsText) {
         TextView chip = new TextView(this);
         chip.setText(tag);
         chip.setTextSize(7);
-        chip.setTextColor(getResources().getColor(R.color.yh_primary));
+        chip.setTextColor(primaryTextColor());
         chip.setSingleLine(true);
         chip.setEllipsize(android.text.TextUtils.TruncateAt.END);
         chip.setGravity(android.view.Gravity.CENTER);
@@ -2689,6 +3252,10 @@ private void styleAlertDialogDark(AlertDialog dialog) {
         Window w = dialog.getWindow();
         if (w != null) {
             w.setBackgroundDrawableResource(R.drawable.bg_dialog);
+            DynamicTheme dt = DynamicTheme.getInstance();
+            if (dt.isEnabled() && dt.getColors() != null) {
+                w.setBackgroundDrawable(tintDialog(dt.getColors()));
+            }
         }
         int text = getColorCompat(R.color.yh_text);
         int muted = getColorCompat(R.color.yh_text_muted);
@@ -2701,9 +3268,17 @@ private void styleAlertDialogDark(AlertDialog dialog) {
         Button p = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         Button n = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
         Button neu = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-        if (p != null) p.setTextColor(primary);
-        if (n != null) n.setTextColor(primary);
-        if (neu != null) neu.setTextColor(primary);
+        DynamicTheme dt2 = DynamicTheme.getInstance();
+        if (dt2.isEnabled() && dt2.getColors() != null) {
+            ThemeColorExtractor.ThemeColors dc = dt2.getColors();
+            if (p != null) { p.setBackground(tintButton(dc)); p.setTextColor(0xFFFFFFFF); }
+            if (n != null) { n.setBackground(tintInput(dc)); n.setTextColor(0xFFFFFFFF); }
+            if (neu != null) { neu.setBackground(tintInput(dc)); neu.setTextColor(0xFFFFFFFF); }
+        } else {
+            if (p != null) p.setTextColor(primary);
+            if (n != null) n.setTextColor(primary);
+            if (neu != null) neu.setTextColor(primary);
+        }
         android.widget.ListView list = dialog.getListView();
         if (list != null) {
             list.setBackgroundColor(Color.TRANSPARENT);
@@ -2726,6 +3301,7 @@ String rematchItem = "重新匹配" + sourceLabel;
         LinearLayout listRoot = new LinearLayout(this);
         listRoot.setOrientation(LinearLayout.VERTICAL);
         listRoot.setBackgroundResource(R.drawable.bg_dialog);
+        tintDialogRoot(listRoot);
         int hp = dp(18);
         listRoot.setPadding(0, dp(6), 0, dp(6));
         final AlertDialog[] ref = new AlertDialog[1];
@@ -2767,6 +3343,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         ScrollView optionScroll = new ScrollView(this);
         optionScroll.setFillViewport(false);
         optionScroll.setBackgroundResource(R.drawable.bg_dialog);
+        tintDialogRoot(optionScroll);
         optionScroll.addView(listRoot, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
         AlertDialog optionDialog = new AlertDialog.Builder(this)
                 .setTitle(emptyText(game.title, "游戏选项"))
@@ -2805,6 +3382,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundResource(R.drawable.bg_dialog);
+        tintDialogRoot(root);
         int pad = dp(16);
         root.setPadding(pad, dp(12), pad, dp(8));
 
@@ -2829,7 +3407,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         refreshScanRootListUi(scanRootList, scanInfo);
 
         Button addScanRootButton = krButton("+ 添加扫描目录");
-        addScanRootButton.setTextColor(getColorCompat(R.color.yh_primary));
+        addScanRootButton.setTextColor(primaryTextColor());
         addScanRootButton.setOnClickListener(v -> {
             if (getScanRootUris().size() >= MAX_SCAN_ROOTS) {
                 Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
@@ -3009,8 +3587,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         root.addView(sortInfo);
 
         Spinner sortSpinner = new Spinner(this);
-        ArrayAdapter<String> sortAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"最近游玩", "最近添加", "名称排序"});
-        sortAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> sortAdapter = krSpinnerAdapter(new String[]{"最近游玩", "最近添加", "名称排序"});
         sortSpinner.setAdapter(sortAdapter);
         String savedSortMode = prefs == null ? SORT_MODE_RECENT : prefs.getString(KEY_SORT_MODE, SORT_MODE_RECENT);
         if (SORT_MODE_NEWEST.equals(savedSortMode)) sortSpinner.setSelection(1);
@@ -3075,8 +3652,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         root.addView(engineLabelTitle);
 
         Spinner engineLabelSpinner = new Spinner(this);
-        ArrayAdapter<String> engineLabelAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"游戏标题下方", "封面左下角"});
-        engineLabelAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> engineLabelAdapter = krSpinnerAdapter(new String[]{"游戏标题下方", "封面左下角"});
         engineLabelSpinner.setAdapter(engineLabelAdapter);
         String engineLabelPos = prefs == null ? "title" : prefs.getString(KEY_ENGINE_LABEL_POSITION, "title");
         engineLabelSpinner.setSelection("cover".equals(engineLabelPos) ? 1 : 0);
@@ -3103,8 +3679,8 @@ LinearLayout accountActions = new LinearLayout(this);
         accountActions.setOrientation(LinearLayout.HORIZONTAL);
         Button accountButton = krButton(isLoggedIn() ? "账号设置" : "登录/注册");
         Button webdavButton = krButton("同步中心");
-        accountButton.setTextColor(getColorCompat(R.color.yh_primary));
-        webdavButton.setTextColor(getColorCompat(R.color.yh_primary));
+        accountButton.setTextColor(primaryTextColor());
+        webdavButton.setTextColor(primaryTextColor());
         accountButton.setOnClickListener(v -> showAuthPlaceholderDialog());
         webdavButton.setOnClickListener(v -> showWebDavSettingsDialog());
         accountActions.addView(accountButton, new LinearLayout.LayoutParams(0, dp(40), 1));
@@ -3130,7 +3706,7 @@ LinearLayout accountActions = new LinearLayout(this);
         disclaimerInfo.setPadding(0, dp(4), 0, dp(6));
         root.addView(disclaimerInfo);
         Button disclaimerButton = krButton("查看完整免责声明");
-        disclaimerButton.setTextColor(getColorCompat(R.color.yh_primary));
+        disclaimerButton.setTextColor(primaryTextColor());
         disclaimerButton.setOnClickListener(v -> showDisclaimerDialog());
         root.addView(disclaimerButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
 
@@ -3150,7 +3726,7 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(aboutInfo);
 
         Button updateButton = krButton("检查更新");
-        updateButton.setTextColor(getColorCompat(R.color.yh_primary));
+        updateButton.setTextColor(primaryTextColor());
         updateButton.setOnClickListener(v -> checkUpdateManually());
         CheckBox updateOnStartupCheck = krCheckBox("启动时自动检查更新", prefs == null || prefs.getBoolean(KEY_CHECK_UPDATE_ON_STARTUP, true));
         root.addView(updateButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
@@ -3178,8 +3754,7 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(sourceTitle);
 
         Spinner sourceSpinner = new Spinner(this);
-        ArrayAdapter<String> sourceAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）"});
-        sourceAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
         if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(1);
@@ -3215,7 +3790,7 @@ else sourceSpinner.setSelection(0);
 
         TextView tokenLink = new TextView(this);
         tokenLink.setText("没有token?");
-        tokenLink.setTextColor(Color.rgb(138, 180, 255));
+        tokenLink.setTextColor(primaryTextColor());
         tokenLink.setTextSize(12);
         tokenLink.setTypeface(null, android.graphics.Typeface.BOLD);
         tokenLink.setPadding(0, dp(8), 0, dp(4));
@@ -3246,8 +3821,8 @@ else sourceSpinner.setSelection(0);
         Button chooseBgButton = krButton("图片背景");
         Button chooseVideoBgButton = krButton("视频背景");
         Button resetBgButton = krButton("恢复默认");
-        chooseBgButton.setTextColor(getColorCompat(R.color.yh_primary));
-        chooseVideoBgButton.setTextColor(getColorCompat(R.color.yh_primary));
+        chooseBgButton.setTextColor(primaryTextColor());
+        chooseVideoBgButton.setTextColor(primaryTextColor());
         resetBgButton.setTextColor(getColorCompat(R.color.yh_text));
         bgActions.addView(chooseBgButton, new LinearLayout.LayoutParams(0, dp(40), 1));
         LinearLayout.LayoutParams videoBgLp = new LinearLayout.LayoutParams(0, dp(40), 1);
@@ -3260,8 +3835,10 @@ else sourceSpinner.setSelection(0);
 
         CheckBox bgDimEnabled = krCheckBox("背景遮罩（提高文字可读性）", prefs.getBoolean(KEY_BACKGROUND_DIM_ENABLED, true));
         CheckBox bgVideoSound = krCheckBox("视频背景声音", prefs.getBoolean(KEY_BACKGROUND_VIDEO_SOUND, false));
+        CheckBox bgThemeEnabled = krCheckBox("背景UI取色（从背景提取色调）", prefs.getBoolean(KEY_BG_THEME_ENABLED, false));
         root.addView(bgDimEnabled);
         root.addView(bgVideoSound);
+        root.addView(bgThemeEnabled);
 
         TextView krTitle = new TextView(this);
         krTitle.setText("\nKRKR 引擎");
@@ -3289,7 +3866,7 @@ else sourceSpinner.setSelection(0);
         root.addView(artemisScopedSaveDir);
 
         Button nativeKrkrButton = krButton("进入原生KRKR");
-        nativeKrkrButton.setTextColor(getColorCompat(R.color.yh_primary));
+        nativeKrkrButton.setTextColor(primaryTextColor());
         nativeKrkrButton.setOnClickListener(v -> {
             try {
                 startActivity(EmulatorLauncher.buildInternalKrkrIntent(this, "", "", true));
@@ -3324,7 +3901,7 @@ else sourceSpinner.setSelection(0);
         logActions.setPadding(0, dp(8), 0, 0);
 
         Button exportLogBtn = krButton("导出日志");
-        exportLogBtn.setTextColor(getColorCompat(R.color.yh_primary));
+        exportLogBtn.setTextColor(primaryTextColor());
         exportLogBtn.setOnClickListener(v -> {
             File logFile = DevLogger.getLogFile();
             if (logFile == null || !logFile.exists()) {
@@ -3370,6 +3947,7 @@ else sourceSpinner.setSelection(0);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
         scroll.setBackgroundResource(R.drawable.bg_dialog);
+        tintDialogRoot(scroll);
         scroll.addView(root, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -3410,6 +3988,7 @@ else sourceSpinner.setSelection(0);
                     .putString(KEY_SORT_MODE, sortMode)
                     .putBoolean(KEY_BACKGROUND_DIM_ENABLED, bgDimEnabled.isChecked())
                 .putBoolean(KEY_BACKGROUND_VIDEO_SOUND, bgVideoSound.isChecked())
+                .putBoolean(KEY_BG_THEME_ENABLED, bgThemeEnabled.isChecked())
                 .putBoolean(KEY_UI_CLICK_SOUND, uiClickSoundCheck.isChecked())
                 .putString(KEY_KR_ENGINE_VERSION, krEngineVersionFromLabel(String.valueOf(krEngineVersion.getSelectedItem())))
 .putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
@@ -3436,6 +4015,7 @@ else sourceSpinner.setSelection(0);
         resetBgButton.setOnClickListener(v -> {
             String oldBg = prefs.getString(KEY_CUSTOM_BACKGROUND, "");
             prefs.edit().remove(KEY_CUSTOM_BACKGROUND).remove(KEY_CUSTOM_BACKGROUND_TYPE).apply();
+            DynamicTheme.getInstance().clearCache(prefs);
             deleteInternalFileUri(oldBg);
             applyCustomBackground();
             bgInfo.setText("当前：默认动态背景");
@@ -3626,7 +4206,7 @@ private LinearLayout scanRootCard(String uri, int index, Runnable refresh) {
         card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         TextView change = new TextView(this);
         change.setText("更换");
-        change.setTextColor(getColorCompat(R.color.yh_primary));
+        change.setTextColor(primaryTextColor());
         change.setTextSize(12);
         change.setTypeface(null, android.graphics.Typeface.BOLD);
         change.setPadding(dp(10), 0, dp(8), 0);
@@ -3914,6 +4494,7 @@ private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundResource(R.drawable.bg_dialog);
+    tintDialogRoot(root);
     root.setPadding(dp(14), dp(8), dp(14), dp(8));
     final AlertDialog[] ref = new AlertDialog[1];
     int selected = playStatusIndex(game.playStatus);
@@ -3921,7 +4502,7 @@ private void showPlayStatusDialog(Game game, Dialog parentDialog) {
         final int index = i;
         TextView row = new TextView(this);
         row.setText((index == selected ? "●  " : "○  ") + labels[index]);
-        row.setTextColor(getColorCompat(index == selected ? R.color.yh_primary : R.color.yh_text));
+        row.setTextColor(index == selected ? primaryTextColor() : getColorCompat(R.color.yh_text));
         row.setTextSize(18);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row.setBackgroundResource(R.drawable.bg_input);
@@ -3961,6 +4542,7 @@ private void showDetailDialog(Game game) {
         });
         d.setOnDismissListener(dialog -> enterImmersiveMode());
         d.setContentView(R.layout.dialog_game_detail);
+        tintDialogRoot(d.findViewById(android.R.id.content));
         if (d.getWindow() != null) {
             d.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
@@ -4037,6 +4619,7 @@ private void showDetailDialog(Game game) {
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setContentView(R.layout.dialog_gamehub_shortcut_picker);
+        tintDialogRoot(dialog.findViewById(android.R.id.content));
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.74f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
@@ -4122,6 +4705,12 @@ private void showDetailDialog(Game game) {
             h.id.setText(item.localGameId);
             if (item.icon != null) h.icon.setImageDrawable(item.icon); else h.icon.setImageResource(android.R.mipmap.sym_def_app_icon);
             h.itemView.setOnClickListener(v -> { if (callback != null) callback.onPick(item); });
+            // Dynamic theme text colors
+            DynamicTheme dt = DynamicTheme.getInstance();
+            if (dt.isEnabled() && dt.getColors() != null) {
+                h.label.setTextColor(0xFFF0F4FA);
+                h.id.setTextColor(0xFFB0B8C8);
+            }
         }
         @Override public int getItemCount() { return items.size(); }
         class Holder extends RecyclerView.ViewHolder {
@@ -4518,6 +5107,7 @@ private void showDetailDialog(Game game) {
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setContentView(R.layout.dialog_app_picker);
+        tintDialogRoot(dialog.findViewById(android.R.id.content));
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.74f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
@@ -4651,6 +5241,12 @@ private void showDetailDialog(Game game) {
             h.pkg.setText(item.packageName);
             if (item.icon != null) h.icon.setImageDrawable(item.icon); else h.icon.setImageResource(android.R.mipmap.sym_def_app_icon);
             h.itemView.setOnClickListener(v -> { if (callback != null) callback.onPick(item); });
+            // Dynamic theme text colors
+            DynamicTheme dt = DynamicTheme.getInstance();
+            if (dt.isEnabled() && dt.getColors() != null) {
+                h.label.setTextColor(0xFFF0F4FA);
+                h.pkg.setTextColor(0xFFB0B8C8);
+            }
         }
         @Override public int getItemCount() { return items.size(); }
         class Holder extends RecyclerView.ViewHolder {
@@ -4735,6 +5331,16 @@ private String displayPath(String value) {
         Dialog d = new Dialog(this); pendingEditDialog = d;
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         d.setContentView(R.layout.dialog_game_edit);
+        // Apply dynamic theme to the dialog's root ScrollView
+        View dialogRoot = d.findViewById(R.id.editDialogTitle);
+        if (dialogRoot != null) {
+            View scrollView = (View) dialogRoot.getParent();
+            while (scrollView != null && !(scrollView instanceof ScrollView)) {
+                ViewParent p = scrollView.getParent();
+                scrollView = p instanceof View ? (View) p : null;
+            }
+            if (scrollView != null) tintDialogRoot(scrollView);
+        }
         if (d.getWindow() != null) {
             d.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
@@ -4781,18 +5387,14 @@ private String displayPath(String value) {
             public void onTextChanged(CharSequence s, int st, int b, int c) { updateWinlatorAdvanced.run(); }
             public void afterTextChanged(Editable e) {}
         });
-        ArrayAdapter<String> spAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "PSP", "UNKNOWN"});
-        spAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "PSP", "UNKNOWN"});
         sp.setAdapter(spAdapter);
-        ArrayAdapter<String> winlatorModeAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"启动到游戏", "启动到程序"});
-        winlatorModeAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> winlatorModeAdapter = krSpinnerAdapter(new String[]{"启动到游戏", "启动到程序"});
         winlatorModeSp.setAdapter(winlatorModeAdapter);
-        ArrayAdapter<String> gamehubModeAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, new String[]{"启动到游戏", "启动到程序"});
-        gamehubModeAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> gamehubModeAdapter = krSpinnerAdapter(new String[]{"启动到游戏", "启动到程序"});
         gamehubModeSp.setAdapter(gamehubModeAdapter);
         List<String> launchOptions = buildLaunchOptions(pendingDirUri);
-        ArrayAdapter<String> launchAdapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, launchOptions);
-        launchAdapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> launchAdapter = krSpinnerAdapter(launchOptions.toArray(new String[0]));
         launchSp.setAdapter(launchAdapter);
         if (game != null) {
             tvPlayTimeInfo.setVisibility(View.VISIBLE);
@@ -4999,6 +5601,7 @@ private void showEditPlayTimeDialog(Game game) {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundResource(R.drawable.bg_dialog);
+        tintDialogRoot(root);
         int pad = dp(16);
         root.setPadding(pad, dp(12), pad, dp(10));
 
@@ -5341,8 +5944,13 @@ private void showEditPlayTimeDialog(Game game) {
 CheckBox v = new CheckBox(this);
 v.setText(text);
 v.setChecked(checked);
-v.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
-v.setButtonTintList(android.content.res.ColorStateList.valueOf(getColorCompat(com.yuki.yukihub.R.color.yh_primary)));
+DynamicTheme dt = DynamicTheme.getInstance();
+if (dt.isEnabled() && dt.getColors() != null) {
+    v.setButtonTintList(android.content.res.ColorStateList.valueOf(dt.getColors().primary));
+} else {
+    v.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+    v.setButtonTintList(android.content.res.ColorStateList.valueOf(getColorCompat(com.yuki.yukihub.R.color.yh_primary)));
+}
 attachUiTouchSound(v, UI_SOUND_SWITCH);
 return v;
 }
@@ -5351,8 +5959,14 @@ private Button krButton(String text) {
 Button b = new Button(this);
 b.setText(text);
 b.setAllCaps(false);
-b.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
-b.setBackgroundColor(getColorCompat(com.yuki.yukihub.R.color.yh_card_2));
+DynamicTheme dt = DynamicTheme.getInstance();
+if (dt.isEnabled() && dt.getColors() != null) {
+    b.setBackground(tintButton(dt.getColors()));
+    b.setTextColor(0xFFFFFFFF);
+} else {
+    b.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+    b.setBackgroundColor(getColorCompat(com.yuki.yukihub.R.color.yh_card_2));
+}
 attachUiTouchSound(b, UI_SOUND_CONFIRM);
 return b;
 }
@@ -5362,7 +5976,12 @@ return b;
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row.setPadding(dp(16), 0, dp(16), 0);
-        row.setBackgroundResource(R.drawable.bg_auth_tab_inactive);
+        DynamicTheme dt = DynamicTheme.getInstance();
+        if (dt.isEnabled() && dt.getColors() != null) {
+            row.setBackground(tintInput(dt.getColors()));
+        } else {
+            row.setBackgroundResource(R.drawable.bg_auth_tab_inactive);
+        }
         row.setMinimumHeight(dp(48));
         ImageView icon = new ImageView(this);
         try {
@@ -5401,9 +6020,12 @@ return b;
 
     private Spinner krSpinner(String[] values, String selected) {
         Spinner sp = new Spinner(this);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.spinner_item_dark, values);
-        adapter.setDropDownViewResource(R.layout.spinner_dropdown_dark);
+        ArrayAdapter<String> adapter = krSpinnerAdapter(values);
         sp.setAdapter(adapter);
+        DynamicTheme dt = DynamicTheme.getInstance();
+        if (dt.isEnabled() && dt.getColors() != null) {
+            sp.setBackground(tintInput(dt.getColors()));
+        }
         for (int i = 0; i < values.length; i++) if (values[i].equalsIgnoreCase(selected)) { sp.setSelection(i); break; }
         return sp;
     }
@@ -5411,6 +6033,23 @@ return b;
     private int getColorCompat(int id) {
         if (Build.VERSION.SDK_INT >= 23) return getColor(id);
         return getResources().getColor(id);
+    }
+
+    /** In dynamic theme mode, returns white for button text; otherwise returns yh_primary. */
+    private int primaryTextColor() {
+        DynamicTheme dt = DynamicTheme.getInstance();
+        return (dt.isEnabled() && dt.getColors() != null) ? 0xFFFFFFFF : getColorCompat(R.color.yh_primary);
+    }
+
+    /** Create an ArrayAdapter with dynamic theme text colors for Spinner. */
+    private ArrayAdapter<String> krSpinnerAdapter(String[] items) {
+        DynamicTheme dt = DynamicTheme.getInstance();
+        boolean themed = dt.isEnabled() && dt.getColors() != null;
+        int itemLayout = themed ? R.layout.spinner_item_themed : R.layout.spinner_item_dark;
+        int dropLayout = themed ? R.layout.spinner_dropdown_themed : R.layout.spinner_dropdown_dark;
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, itemLayout, items);
+        adapter.setDropDownViewResource(dropLayout);
+        return adapter;
     }
 
     private String rendererToLabel(String value) {
@@ -5595,6 +6234,7 @@ private String pref(Map<String, String> prefs, String key, String def) {
 private void showScanResults(List<ScanResult> results) {
         if (results.isEmpty()) { Toast.makeText(this, "未发现子目录候选游戏", Toast.LENGTH_LONG).show(); return; }
         Dialog d = new Dialog(this); d.requestWindowFeature(Window.FEATURE_NO_TITLE); d.setContentView(R.layout.dialog_scan_result);
+        tintDialogRoot(d.findViewById(android.R.id.content));
         if (d.getWindow() != null) {
             d.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.88f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);

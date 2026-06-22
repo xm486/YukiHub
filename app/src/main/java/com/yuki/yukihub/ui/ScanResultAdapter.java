@@ -23,6 +23,12 @@ public class ScanResultAdapter extends RecyclerView.Adapter<ScanResultAdapter.Ho
         ScanResult r = results.get(p);
         h.title.setText(r.title);
         h.info.setText(r.engine.getDisplayName() + " · confidence " + r.confidence + " · " + r.uri);
+        // Dynamic theme text colors
+        DynamicTheme dt = DynamicTheme.getInstance();
+        if (dt.isEnabled() && dt.getColors() != null) {
+            h.title.setTextColor(0xFFF0F4FA);
+            h.info.setTextColor(0xFFB0B8C8);
+        }
     }
     @Override public int getItemCount() { return results.size(); }
     static class Holder extends RecyclerView.ViewHolder {

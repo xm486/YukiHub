@@ -24,7 +24,7 @@
         android:textColor="@color/yh_text_muted"
         android:textSize="12sp" />
 
-    <EditText
+    <androidx.appcompat.widget.AppCompatEditText
         android:id="@+id/etAppSearch"
         android:layout_width="match_parent"
         android:layout_height="42dp"
@@ -76,7 +76,7 @@
         </LinearLayout>
     </FrameLayout>
 
-    <Button
+    <androidx.appcompat.widget.AppCompatButton
         android:id="@+id/btnCloseAppPicker"
         android:layout_width="match_parent"
         android:layout_height="42dp"

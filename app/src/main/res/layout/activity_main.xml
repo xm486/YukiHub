@@ -60,7 +60,7 @@
             android:shadowDy="1"
             android:shadowRadius="3" />
 
-        <EditText
+        <androidx.appcompat.widget.AppCompatEditText
             android:id="@+id/etSearch"
             android:layout_width="0dp"
             android:layout_height="28dp"
@@ -75,11 +75,11 @@
             android:background="@drawable/bg_input" />
 
         <FrameLayout android:id="@+id/btnScan" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="8dp" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless">
-            <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="⌕ 扫描" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="⌕ 扫描" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
             <ImageView android:id="@+id/ivScanLoading" android:layout_width="11dp" android:layout_height="11dp" android:layout_gravity="center_vertical|end" android:layout_marginEnd="4dp" android:src="@android:drawable/ic_popup_sync" android:tint="#EAF7FF" android:visibility="gone" />
         </FrameLayout>
-        <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="＋ 添加" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
-        <TextView android:id="@+id/btnSettings" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⚙ 设置" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+        <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="＋ 添加" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
+        <TextView android:id="@+id/btnSettings" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⚙ 设置" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
     </LinearLayout>
 
     <LinearLayout
