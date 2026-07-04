@@ -59,8 +59,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="landscape"
-            android:configChanges="keyboardHidden|orientation|screenSize">
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="keyboardHidden|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -70,9 +70,9 @@
         <activity
             android:name=".AuthActivity"
             android:exported="false"
-            android:screenOrientation="landscape"
+            android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.YukiHub.AuthDialog"
-            android:configChanges="keyboardHidden|orientation|screenSize" />
+            android:configChanges="keyboardHidden|screenSize" />
 
         <activity
             android:name="org.tvp.kirikiri2.KR2Activity"
@@ -83,7 +83,7 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.YukiHub.Kirikiroid2"
             android:windowSoftInputMode="adjustPan"
-            android:configChanges="keyboardHidden|orientation|screenSize" />
+            android:configChanges="keyboardHidden|screenSize" />
 
         <activity
             android:name="com.akira.tyranoemu.remote.Kirikiroid139"
@@ -94,7 +94,7 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.YukiHub.Kirikiroid2"
             android:windowSoftInputMode="adjustPan"
-            android:configChanges="keyboardHidden|orientation|screenSize" />
+            android:configChanges="keyboardHidden|screenSize" />
 
         <activity
             android:name="com.akira.tyranoemu.remote.Kirikiroid134"
@@ -105,7 +105,7 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.YukiHub.Kirikiroid2Compatible"
             android:windowSoftInputMode="adjustPan"
-            android:configChanges="keyboardHidden|orientation|screenSize" />
+            android:configChanges="keyboardHidden|screenSize" />
 
  <activity
             android:name="com.yuki.yukihub.tyrano.TyranoActivity"
@@ -114,7 +114,7 @@
             android:launchMode="singleInstance"
             android:taskAffinity="com.yuki.yukihub.Tyrano"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="keyboardHidden|orientation|screenSize" />
+            android:configChanges="keyboardHidden|screenSize" />
 
         <activity
   android:name="com.akira.tyranoemu.remote.ArtemisActivityV1"
@@ -123,7 +123,7 @@
  android:launchMode="singleInstance"
  android:taskAffinity="com.yuki.yukihub.Artemis"
  android:screenOrientation="sensorLandscape"
- android:configChanges="keyboardHidden|orientation|screenSize">
+ android:configChanges="keyboardHidden|screenSize">
  <meta-data android:name="android.app.lib_name" android:value="artemis" />
  </activity>
 
@@ -134,7 +134,7 @@
  android:launchMode="singleInstance"
  android:taskAffinity="com.yuki.yukihub.Artemis"
  android:screenOrientation="sensorLandscape"
- android:configChanges="keyboardHidden|orientation|screenSize">
+ android:configChanges="keyboardHidden|screenSize">
  <meta-data android:name="android.app.lib_name" android:value="artemis-compatible" />
  </activity>
 
@@ -145,7 +145,7 @@
  android:launchMode="singleInstance"
  android:taskAffinity="com.yuki.yukihub.Artemis"
  android:screenOrientation="sensorLandscape"
- android:configChanges="keyboardHidden|orientation|screenSize">
+ android:configChanges="keyboardHidden|screenSize">
  <meta-data android:name="android.app.lib_name" android:value="artemis-compatible-v2" />
  </activity>
 
@@ -154,7 +154,7 @@
   android:exported="false"
   android:process=":artemis"
   android:screenOrientation="sensorLandscape"
-  android:configChanges="keyboardHidden|orientation|screenSize" />
+  android:configChanges="keyboardHidden|screenSize" />
 
         <activity
             android:name="com.yuri.onscripter.ONScripter"
@@ -163,14 +163,14 @@
             android:launchMode="singleInstance"
             android:taskAffinity="com.yuki.yukihub.ONScripter"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode" />
+            android:configChanges="keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode" />
 
         <activity
             android:name="com.yuki.yukihub.ons.OnsVideoActivity"
             android:exported="false"
             android:process=":ons"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="keyboardHidden|orientation|screenSize" />
+            android:configChanges="keyboardHidden|screenSize" />
 
     </application>
 </manifest>
