@@ -27,10 +27,18 @@ public class ThemeColorExtractor {
         public final int auroraColor1; // DynamicSnowBackgroundView aurora 1
         public final int auroraColor2; // DynamicSnowBackgroundView aurora 2
         public final int auroraColor3; // DynamicSnowBackgroundView aurora 3
+        public final boolean isGradient; // true = 渐变模式，UI 应使用双色渐变
 
         public ThemeColors(int bg, int bg2, int card, int card2, int primary, int secondary,
                            int textMuted, int line, int glowColor1, int glowColor2,
                            int auroraColor1, int auroraColor2, int auroraColor3) {
+            this(bg, bg2, card, card2, primary, secondary, textMuted, line,
+                 glowColor1, glowColor2, auroraColor1, auroraColor2, auroraColor3, false);
+        }
+
+        public ThemeColors(int bg, int bg2, int card, int card2, int primary, int secondary,
+                           int textMuted, int line, int glowColor1, int glowColor2,
+                           int auroraColor1, int auroraColor2, int auroraColor3, boolean isGradient) {
             this.bg = bg;
             this.bg2 = bg2;
             this.card = card;
@@ -44,6 +52,7 @@ public class ThemeColorExtractor {
             this.auroraColor1 = auroraColor1;
             this.auroraColor2 = auroraColor2;
             this.auroraColor3 = auroraColor3;
+            this.isGradient = isGradient;
         }
     }
 

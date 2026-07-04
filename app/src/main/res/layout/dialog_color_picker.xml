@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="14dp"
+    android:background="#F0171E33">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:text="自定义主题颜色"
+        android:textColor="#FFF0F4FA"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:gravity="center" />
+
+    <RadioGroup
+        android:id="@+id/radioColorMode"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingTop="2dp">
+
+        <RadioButton
+            android:id="@+id/radioSingleColor"
+            android:layout_width="120dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:text="单色"
+            android:textColor="#FFE8EDF5"
+            android:textSize="14sp"
+            android:checked="true" />
+
+        <RadioButton
+            android:id="@+id/radioGradient"
+            android:layout_width="140dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:text="渐变色"
+            android:textColor="#FFE8EDF5"
+            android:textSize="14sp"
+            android:layout_marginStart="16dp" />
+    </RadioGroup>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="false"
+        android:paddingTop="8dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1.1"
+            android:orientation="vertical"
+            android:paddingEnd="14dp">
+
+            <com.yuki.yukihub.ui.colorpicker.ColorPickerView
+                android:id="@+id/colorPicker"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.9"
+            android:orientation="vertical"
+            android:paddingStart="14dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="正在编辑"
+                android:textColor="#FFB0B8C8"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:id="@+id/gradientTargets"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:orientation="horizontal"
+                android:visibility="gone"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp">
+
+                <TextView
+                    android:id="@+id/btnGradientStart"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="起始色"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_button_primary" />
+
+                <TextView
+                    android:id="@+id/btnGradientEnd"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="结束色"
+                    android:textColor="#FFE8EDF5"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_button_secondary"
+                    android:layout_marginStart="8dp" />
+            </LinearLayout>
+
+            <View
+                android:id="@+id/colorPreview"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:minHeight="80dp"
+                android:background="#FF8AB4FF"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:id="@+id/tvColorValue"
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:text="#FF8AB4FF"
+                android:textColor="#FFE8EDF5"
+                android:textSize="12sp"
+                android:gravity="center" />
+
+            <TextView
+                android:id="@+id/tvAlphaHint"
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
+                android:text="透明度：100%"
+                android:textColor="#FFB0B8C8"
+                android:textSize="11sp"
+                android:gravity="center" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical|end">
+
+                <Button
+                    android:id="@+id/btnCancel"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:text="取消"
+                    android:textColor="#FFB0B8C8"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_button_secondary" />
+
+                <Button
+                    android:id="@+id/btnApply"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1.2"
+                    android:text="应用颜色"
+                    android:textColor="#FFF0F4FA"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_button_primary"
+                    android:layout_marginStart="10dp" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

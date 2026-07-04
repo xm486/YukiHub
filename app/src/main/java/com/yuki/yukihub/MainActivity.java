@@ -145,6 +145,7 @@ import com.yuki.yukihub.ui.DynamicSnowBackgroundView;
 import com.yuki.yukihub.ui.DynamicTheme;
 import com.yuki.yukihub.ui.ThemeColorExtractor;
 import com.yuki.yukihub.ui.ScanResultAdapter;
+import com.yuki.yukihub.ui.colorpicker.ColorPickerDialog;
 import com.yuki.yukihub.util.AppExecutors;
 import com.yuki.yukihub.util.DevLogger;
 import com.yuki.yukihub.util.TimeFormatUtil;
@@ -211,8 +212,9 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private ImageView ivScanLoading;
     private SharedPreferences prefs;
     private static final String PREFS_NAME = "yukihub_prefs";
-private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
+    private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
     private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
+    private static final String KEY_USE_BUILTIN_FILE_CHOOSER = "use_builtin_file_chooser"; // true=内置, false=原生SAF
     private static final String KEY_SCAN_ROOT_ENABLED = "scan_root_enabled"; // 保存每个目录的开关状态
     private static final int MAX_SCAN_ROOTS = 3;
     private static final String KEY_STARTUP_SCAN_DEPTH = "startup_scan_depth";
@@ -501,7 +503,7 @@ boolean changed = addOrReplaceScanRoot(uri.toString(), pendingScanRootReplaceInd
 pendingScanRootReplaceIndex = -2;
 if (changed) {
 refreshActiveScanRootListUi();
-Toast.makeText(this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
+Toast.makeText(MainActivity.this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
 }
 } else {
 pendingScanRootReplaceIndex = -2;
@@ -535,7 +537,7 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
             if (uri != null) {
                 String avatar = copyImageToInternalStorage(uri, "avatars", "avatar_", 320, 90);
                 if (avatar == null || avatar.isEmpty()) {
-                    Toast.makeText(this, "头像保存失败", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "头像保存失败", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 prefs.edit().putString(KEY_PROFILE_AVATAR, avatar).apply();
@@ -547,24 +549,24 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
             if (uri != null) {
                 String bg = copyImageToInternalStorage(uri, "backgrounds", "bg_", 1920, 88);
                 if (bg == null || bg.isEmpty()) {
-                    Toast.makeText(this, "背景保存失败", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "背景保存失败", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 replaceCustomBackground(bg, "image");
                 applyCustomBackground();
-                Toast.makeText(this, "已设置图片背景", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "已设置图片背景", Toast.LENGTH_SHORT).show();
             }
         });
         videoBackgroundPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
             if (uri != null) {
                 String bg = copyVideoToInternalStorage(uri);
                 if (bg == null || bg.isEmpty()) {
-                    Toast.makeText(this, "视频背景保存失败", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "视频背景保存失败", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 replaceCustomBackground(bg, "video");
                 applyCustomBackground();
-                Toast.makeText(this, "已设置视频背景", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "已设置视频背景", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -627,7 +629,7 @@ if (meta == null) meta = anyCachedMetadata(g.id);
             allGames.clear();
             allGames.addAll(repository.getAll());
             applyFilter();
-            Toast.makeText(this, "已恢复 " + finalChanged + " 个同步封面", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已恢复 " + finalChanged + " 个同步封面", Toast.LENGTH_SHORT).show();
         });
     });
 }
@@ -667,6 +669,9 @@ private void applyCustomBackground() {
     String bg = prefs.getString(KEY_CUSTOM_BACKGROUND, "");
     String type = prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image");
     boolean dimEnabled = prefs.getBoolean(KEY_BACKGROUND_DIM_ENABLED, true);
+    boolean customColorEnabled = prefs.getBoolean(DynamicTheme.KEY_CUSTOM_COLOR_ENABLED, false);
+    DynamicTheme theme = DynamicTheme.getInstance();
+    theme.loadCustomColorSettings(prefs);
     if (bg == null || bg.isEmpty()) {
         stopBackgroundVideo();
         bgImage.setImageDrawable(null);
@@ -674,7 +679,13 @@ private void applyCustomBackground() {
         bgVideo.setVisibility(View.GONE);
         bgDim.setVisibility(View.GONE);
         dynamicBg.setVisibility(View.VISIBLE);
-        applyDynamicTheme(null);
+        if (customColorEnabled) {
+            theme.setEnabled(true);
+            theme.setCustomColorEnabled(true);
+            applyDynamicTheme(theme.getColors());
+        } else {
+            applyDynamicTheme(null);
+        }
         return;
     }
     try {
@@ -693,8 +704,12 @@ private void applyCustomBackground() {
             bgDim.setVisibility(dimEnabled ? View.VISIBLE : View.GONE);
             dynamicBg.setVisibility(View.GONE);
         }
-        // Extract theme colors from background if enabled
-        if (prefs.getBoolean(KEY_BG_THEME_ENABLED, false)) {
+        // 主题优先级：自定义颜色 > 背景取色 > 默认
+        if (customColorEnabled) {
+            theme.setEnabled(true);
+            theme.setCustomColorEnabled(true);
+            applyDynamicTheme(theme.getColors());
+        } else if (prefs.getBoolean(KEY_BG_THEME_ENABLED, false)) {
             extractAndApplyTheme(bg, type);
         } else {
             applyDynamicTheme(null);
@@ -707,7 +722,13 @@ private void applyCustomBackground() {
         bgVideo.setVisibility(View.GONE);
         bgDim.setVisibility(View.GONE);
         dynamicBg.setVisibility(View.VISIBLE);
-        applyDynamicTheme(null);
+        if (customColorEnabled) {
+            theme.setEnabled(true);
+            theme.setCustomColorEnabled(true);
+            applyDynamicTheme(theme.getColors());
+        } else {
+            applyDynamicTheme(null);
+        }
     }
 }
 
@@ -787,13 +808,23 @@ private void scheduleVideoThemeExtraction() {
 }
 
 /** Apply dynamic theme colors to all UI components. Pass null to reset to defaults. */
-private void applyDynamicTheme(ThemeColorExtractor.ThemeColors colors) {
-    DynamicTheme dt = DynamicTheme.getInstance();
-    boolean resetting = (colors == null);
-    if (resetting) {
-        dt.setEnabled(false);
-        colors = ThemeColorExtractor.DEFAULT;
-    }
+    private void applyDynamicTheme(ThemeColorExtractor.ThemeColors colors) {
+        DynamicTheme dt = DynamicTheme.getInstance();
+        boolean resetting = (colors == null);
+        if (resetting) {
+            dt.setEnabled(false);
+            dt.setCustomColorEnabled(false);
+            colors = ThemeColorExtractor.DEFAULT;
+        } else {
+            // 如果传入了颜色，检查是否是自定义颜色
+            if (dt.isCustomColorEnabled()) {
+                // 应用自定义颜色
+                dt.setEnabled(true);
+            } else {
+                // 应用背景提取的颜色
+                dt.setEnabled(true);
+            }
+        }
     // Update DynamicSnowBackgroundView
     DynamicSnowBackgroundView dynamicBg = findViewById(R.id.dynamicBackground);
     if (dynamicBg != null) {
@@ -1037,60 +1068,91 @@ private void tintMainTextColors(ViewGroup root, ThemeColorExtractor.ThemeColors 
     }
 }
 
-/** Create a sidebar-style background with dynamic colors. */
-private android.graphics.drawable.GradientDrawable tintSidebar(ThemeColorExtractor.ThemeColors c) {
-    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
-    d.setColor((0xC8 << 24) | (c.bg & 0x00FFFFFF));
-    d.setCornerRadius(dp(10));
-    d.setStroke(dp(1), (0x42 << 24) | (c.primary & 0x00FFFFFF));
-    return d;
-}
+/** Create a sidebar-style background with dynamic colors.
+     * 渐变模式时使用 c1→c2 真实渐变。 */
+    private android.graphics.drawable.GradientDrawable tintSidebar(ThemeColorExtractor.ThemeColors c) {
+        android.graphics.drawable.GradientDrawable d;
+        if (c.isGradient) {
+            d = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{
+                            (0xC8 << 24) | (c.bg & 0x00FFFFFF),
+                            (0xC8 << 24) | (c.bg2 & 0x00FFFFFF)
+                    });
+        } else {
+            d = new android.graphics.drawable.GradientDrawable();
+            d.setColor((0xC8 << 24) | (c.bg & 0x00FFFFFF));
+        }
+        d.setCornerRadius(dp(10));
+        d.setStroke(dp(1), (0x42 << 24) | (c.primary & 0x00FFFFFF));
+        return d;
+    }
 
-/** Create a sidebar item background with dynamic colors. */
-private android.graphics.drawable.StateListDrawable tintSidebarItem(ThemeColorExtractor.ThemeColors c) {
-    android.graphics.drawable.StateListDrawable sld = new android.graphics.drawable.StateListDrawable();
-    // Selected state
-    android.graphics.drawable.GradientDrawable selected = new android.graphics.drawable.GradientDrawable();
-    selected.setColor((0x27 << 24) | (c.primary & 0x00FFFFFF));
-    selected.setCornerRadius(dp(9));
-    selected.setStroke(dp(1), (0x7E << 24) | (c.primary & 0x00FFFFFF));
-    sld.addState(new int[]{android.R.attr.state_selected}, selected);
-    // Pressed state
-    android.graphics.drawable.GradientDrawable pressed = new android.graphics.drawable.GradientDrawable();
-    pressed.setColor((0x1A << 24) | (c.primary & 0x00FFFFFF));
-    pressed.setCornerRadius(dp(9));
-    pressed.setStroke(dp(1), (0x55 << 24) | (c.primary & 0x00FFFFFF));
-    sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
-    // Default state
-    android.graphics.drawable.GradientDrawable normal = new android.graphics.drawable.GradientDrawable();
-    normal.setColor(0x00000000);
-    normal.setCornerRadius(dp(9));
-    sld.addState(new int[]{}, normal);
-    return sld;
-}
+/** Create a sidebar item background with dynamic colors.
+     * 渐变模式时 selected 使用 secondary 色来体现双色渐变感。 */
+    private android.graphics.drawable.StateListDrawable tintSidebarItem(ThemeColorExtractor.ThemeColors c) {
+        android.graphics.drawable.StateListDrawable sld = new android.graphics.drawable.StateListDrawable();
+        // Selected state：渐变模式使用 secondary，单色模式使用 primary
+        int selColor = (c.isGradient) ? c.secondary : c.primary;
+        android.graphics.drawable.GradientDrawable selected = new android.graphics.drawable.GradientDrawable();
+        selected.setColor((0x27 << 24) | (selColor & 0x00FFFFFF));
+        selected.setCornerRadius(dp(9));
+        selected.setStroke(dp(1), (0x7E << 24) | (selColor & 0x00FFFFFF));
+        sld.addState(new int[]{android.R.attr.state_selected}, selected);
+        // Pressed state
+        android.graphics.drawable.GradientDrawable pressed = new android.graphics.drawable.GradientDrawable();
+        pressed.setColor((0x1A << 24) | (c.primary & 0x00FFFFFF));
+        pressed.setCornerRadius(dp(9));
+        pressed.setStroke(dp(1), (0x55 << 24) | (c.primary & 0x00FFFFFF));
+        sld.addState(new int[]{android.R.attr.state_pressed}, pressed);
+        // Default state
+        android.graphics.drawable.GradientDrawable normal = new android.graphics.drawable.GradientDrawable();
+        normal.setColor(0x00000000);
+        normal.setCornerRadius(dp(9));
+        sld.addState(new int[]{}, normal);
+        return sld;
+    }
 
-/** Create an input field background with dynamic colors. */
-private android.graphics.drawable.GradientDrawable tintInput(ThemeColorExtractor.ThemeColors c) {
-    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
-    d.setColor((0xA8 << 24) | (c.bg & 0x00FFFFFF));
-    d.setStroke(dp(1), (0x5E << 24) | (c.primary & 0x00FFFFFF));
-    d.setCornerRadius(dp(8));
-    return d;
-}
+/** Create an input field background with dynamic colors.
+     * 渐变模式时边框使用 c1→c2 渐变。 */
+    private android.graphics.drawable.GradientDrawable tintInput(ThemeColorExtractor.ThemeColors c) {
+        android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
+        d.setColor((0xA8 << 24) | (c.bg & 0x00FFFFFF));
+        d.setCornerRadius(dp(8));
+        if (c.isGradient) {
+            d.setStroke(dp(1), (0x5E << 24) | (c.secondary & 0x00FFFFFF));
+        } else {
+            d.setStroke(dp(1), (0x5E << 24) | (c.primary & 0x00FFFFFF));
+        }
+        return d;
+    }
 
-/** Create a primary action button background with dynamic colors. */
-private android.graphics.drawable.GradientDrawable tintButton(ThemeColorExtractor.ThemeColors c) {
-    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable(
-            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
-            new int[]{
-                    (0xB4 << 24) | (c.primary & 0x00FFFFFF),
-                    (0x86 << 24) | (c.primary & 0x00FFFFFF),
-                    (0x6B << 24) | (c.primary & 0x00FFFFFF)
-            });
-    d.setCornerRadius(dp(8));
-    d.setStroke(dp(1), (0xBF << 24) | (c.primary & 0x00FFFFFF));
-    return d;
-}
+/** Create a primary action button background with dynamic colors.
+     * 渐变模式时使用真正的渐变色 c1→c2。 */
+    private android.graphics.drawable.GradientDrawable tintButton(ThemeColorExtractor.ThemeColors c) {
+        android.graphics.drawable.GradientDrawable d;
+        if (c.isGradient) {
+            // 渐变模式：从 primary 到 secondary 的真实渐变
+            d = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                    new int[]{
+                            (0xB4 << 24) | (c.primary & 0x00FFFFFF),
+                            (0x86 << 24) | (c.secondary & 0x00FFFFFF)
+                    });
+        } else {
+            // 单色模式：保持原样
+            d = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{
+                            (0xB4 << 24) | (c.primary & 0x00FFFFFF),
+                            (0x86 << 24) | (c.primary & 0x00FFFFFF),
+                            (0x6B << 24) | (c.primary & 0x00FFFFFF)
+                    });
+        }
+        d.setCornerRadius(dp(8));
+        d.setStroke(dp(1), (0xBF << 24) | (c.primary & 0x00FFFFFF));
+        return d;
+    }
 
 /** Create a chip/tag background with dynamic colors. */
 private android.graphics.drawable.GradientDrawable tintChip(ThemeColorExtractor.ThemeColors c) {
@@ -1101,19 +1163,30 @@ private android.graphics.drawable.GradientDrawable tintChip(ThemeColorExtractor.
     return d;
 }
 
-/** Create a selected card background with dynamic colors. */
-private android.graphics.drawable.GradientDrawable tintCardSelected(ThemeColorExtractor.ThemeColors c) {
-    android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable(
-            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
-            new int[]{
-                    (0xE4 << 24) | (c.card & 0x00FFFFFF),
-                    (0xD9 << 24) | (c.card & 0x00FFFFFF),
-                    (0xD8 << 24) | (c.bg2 & 0x00FFFFFF)
-            });
-    d.setCornerRadius(dp(10));
-    d.setStroke(dp(2), (0x9C << 24) | (c.primary & 0x00FFFFFF));
-    return d;
-}
+/** Create a selected card background with dynamic colors.
+     * 渐变模式时使用 c1→c2 真实渐变。 */
+    private android.graphics.drawable.GradientDrawable tintCardSelected(ThemeColorExtractor.ThemeColors c) {
+        android.graphics.drawable.GradientDrawable d;
+        if (c.isGradient) {
+            d = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                    new int[]{
+                            (0xE4 << 24) | (c.card & 0x00FFFFFF),
+                            (0xD8 << 24) | (c.card2 & 0x00FFFFFF)
+                    });
+        } else {
+            d = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{
+                            (0xE4 << 24) | (c.card & 0x00FFFFFF),
+                            (0xD9 << 24) | (c.card & 0x00FFFFFF),
+                            (0xD8 << 24) | (c.bg2 & 0x00FFFFFF)
+                    });
+        }
+        d.setCornerRadius(dp(10));
+        d.setStroke(dp(2), (0x9C << 24) | (c.secondary & 0x00FFFFFF));
+        return d;
+    }
 
 /** Create a cover placeholder gradient with dynamic colors. */
 private GradientDrawable tintCoverPlaceholder(ThemeColorExtractor.ThemeColors c) {
@@ -1294,7 +1367,7 @@ private void startBackgroundMediaPlayer(TextureView textureView, Uri uri) {
             player.start();
         });
         mp.setOnErrorListener((player, what, extra) -> {
-            Toast.makeText(this, "视频背景播放失败，请尝试更换视频格式", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "视频背景播放失败，请尝试更换视频格式", Toast.LENGTH_SHORT).show();
             releaseBackgroundMediaPlayer();
             return true;
         });
@@ -1832,12 +1905,12 @@ private void showProfileDialog() {
         String name = nameInput.getText() == null ? "" : nameInput.getText().toString().trim();
         String sign = signatureInput.getText() == null ? "" : signatureInput.getText().toString().trim();
         if (name.isEmpty()) {
-            Toast.makeText(this, "昵称不能为空", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "昵称不能为空", Toast.LENGTH_SHORT).show();
             return;
         }
         prefs.edit().putString(KEY_PROFILE_NAME, name).putString(KEY_PROFILE_SIGNATURE, sign).apply();
         updateProfilePanel();
-        Toast.makeText(this, "个人资料已保存", Toast.LENGTH_SHORT).show();
+        Toast.makeText(MainActivity.this, "个人资料已保存", Toast.LENGTH_SHORT).show();
         dialog.dismiss();
     });
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> profileAvatarLauncher.launch("image/*"));
@@ -1945,7 +2018,7 @@ private void showAccountSettingsDialog() {
     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
         prefs.edit().putBoolean(KEY_CLOUD_SYNC_ENABLED, syncCheck.isChecked()).apply();
         updateProfilePanel();
-        Toast.makeText(this, "账号设置已保存", Toast.LENGTH_SHORT).show();
+        Toast.makeText(MainActivity.this, "账号设置已保存", Toast.LENGTH_SHORT).show();
         dialog.dismiss();
     });
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> confirmLogout(dialog));
@@ -2007,7 +2080,7 @@ private void logoutLocalOnly() {
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
     updateProfilePanel();
-    Toast.makeText(this, "已退出登录，本地账户仍可继续使用", Toast.LENGTH_SHORT).show();
+    Toast.makeText(MainActivity.this, "已退出登录，本地账户仍可继续使用", Toast.LENGTH_SHORT).show();
 }
 
 private String normalizeBaseUrl(String base) {
@@ -2244,10 +2317,10 @@ private void confirmImportLocalBackup() {
             .setTitle("本地导入")
             .setMessage("将从备份 JSON 导入个人资料、游戏库、游玩记录和元数据。\n\n导入策略：\n- 游戏按 rootUri 去重合并\n- 游玩记录按 session_uuid 去重\n- 图片只恢复 URI/URL，不复制图片文件\n\n是否继续？")
             .setPositiveButton("选择文件", (d, w) -> backupOpenLauncher.launch(new String[]{"application/json", "text/*", "*/*"}))
-            .setNegativeButton("取消", null)
-            .show();
-    styleAlertDialogDark(dialog);
-}
+.setNegativeButton("取消", null)
+        .show();
+        styleAlertDialogDark(dialog);
+    }
 
 private void exportLocalBackup(Uri uri) {
     try {
@@ -2920,7 +2993,7 @@ private void toggleOrTranslateDescription() {
             runOnUiThread(() -> {
                 if (selectedGame == null || selectedGame.id != gameId || currentSideMetadata != meta) return;
                 if (translated == null || translated.trim().isEmpty()) {
-                    Toast.makeText(this, "简介翻译失败", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "简介翻译失败", Toast.LENGTH_SHORT).show();
                     updateTranslateButtonState();
                     return;
                 }
@@ -2935,7 +3008,7 @@ private void toggleOrTranslateDescription() {
             Log.w("YukiHub", "translate description failed", t);
             runOnUiThread(() -> {
                 if (selectedGame != null && selectedGame.id == gameId) {
-                    Toast.makeText(this, "简介翻译失败", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "简介翻译失败", Toast.LENGTH_SHORT).show();
                     updateTranslateButtonState();
                 }
             });
@@ -3410,7 +3483,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         addScanRootButton.setTextColor(primaryTextColor());
         addScanRootButton.setOnClickListener(v -> {
             if (getScanRootUris().size() >= MAX_SCAN_ROOTS) {
-                Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
                 return;
             }
             launchScanRootPicker(-1);
@@ -3796,7 +3869,7 @@ else sourceSpinner.setSelection(0);
         tokenLink.setPadding(0, dp(8), 0, dp(4));
         tokenLink.setOnClickListener(v -> {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://next.bgm.tv/demo/access-token/create"))); }
-            catch (Throwable t) { Toast.makeText(this, "无法打开链接", Toast.LENGTH_SHORT).show(); }
+            catch (Throwable t) { Toast.makeText(MainActivity.this, "无法打开链接", Toast.LENGTH_SHORT).show(); }
         });
         root.addView(tokenLink);
 
@@ -3840,6 +3913,56 @@ else sourceSpinner.setSelection(0);
         root.addView(bgVideoSound);
         root.addView(bgThemeEnabled);
 
+        // 自定义颜色选项
+        CheckBox customColorEnabled = krCheckBox("自定义主题颜色", prefs.getBoolean(DynamicTheme.KEY_CUSTOM_COLOR_ENABLED, false));
+        root.addView(customColorEnabled);
+        
+        // 颜色选择按钮和预览
+        LinearLayout colorPickerRow = new LinearLayout(this);
+        colorPickerRow.setOrientation(LinearLayout.HORIZONTAL);
+        colorPickerRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        colorPickerRow.setPadding(0, dp(8), 0, dp(8));
+        
+        // 颜色预览
+        View colorPreview = new View(this);
+        colorPreview.setBackgroundColor(prefs.getInt(DynamicTheme.KEY_CUSTOM_COLOR_PRIMARY, 0xFF8AB4FF));
+        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(dp(32), dp(32));
+        previewLp.setMarginEnd(dp(12));
+        colorPreview.setLayoutParams(previewLp);
+        colorPickerRow.addView(colorPreview);
+        
+        // 选择颜色按钮
+        Button chooseColorBtn = krButton("选择主题颜色");
+        chooseColorBtn.setOnClickListener(v -> {
+            customColorEnabled.setChecked(true);
+            showColorPickerDialog(colorPreview, customColorEnabled);
+        });
+        colorPickerRow.addView(chooseColorBtn, new LinearLayout.LayoutParams(0, dp(40), 1));
+        
+        // 恢复默认值按钮
+        Button resetColorBtn = krButton("恢复默认");
+        resetColorBtn.setOnClickListener(v -> {
+            DynamicTheme dt = DynamicTheme.getInstance();
+            dt.setCustomColorEnabled(false);
+            dt.setCustomColorPrimary(0xFF8AB4FF);
+            dt.setCustomColorSecondary(0xFFFF8AB3);
+            dt.setCustomGradientAngle(0f);
+            dt.saveCustomColorSettings(this);
+            customColorEnabled.setChecked(false);
+            colorPreview.setBackgroundColor(0xFF8AB4FF);
+            applyDynamicTheme(null);
+            Toast.makeText(MainActivity.this, "已恢复默认主题颜色", Toast.LENGTH_SHORT).show();
+        });
+        LinearLayout.LayoutParams resetLp = new LinearLayout.LayoutParams(dp(80), dp(40));
+        resetLp.setMarginStart(dp(8));
+        colorPickerRow.addView(resetColorBtn, resetLp);
+        
+        root.addView(colorPickerRow);
+
+        // 文件选择器选项
+        CheckBox useBuiltinFileChooser = krCheckBox("使用内置文件选择器（避免权限问题）", prefs.getBoolean(KEY_USE_BUILTIN_FILE_CHOOSER, true));
+        root.addView(useBuiltinFileChooser);
+
         TextView krTitle = new TextView(this);
         krTitle.setText("\nKRKR 引擎");
         krTitle.setTextColor(getColorCompat(R.color.yh_text));
@@ -3871,7 +3994,7 @@ else sourceSpinner.setSelection(0);
             try {
                 startActivity(EmulatorLauncher.buildInternalKrkrIntent(this, "", "", true));
             } catch (Throwable t) {
-                Toast.makeText(this, "无法进入原生KRKR", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "无法进入原生KRKR", Toast.LENGTH_SHORT).show();
             }
         });
         LinearLayout.LayoutParams nativeKrkrLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
@@ -3905,7 +4028,7 @@ else sourceSpinner.setSelection(0);
         exportLogBtn.setOnClickListener(v -> {
             File logFile = DevLogger.getLogFile();
             if (logFile == null || !logFile.exists()) {
-                Toast.makeText(this, "暂无日志文件", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "暂无日志文件", Toast.LENGTH_SHORT).show();
                 return;
             }
             try {
@@ -3925,9 +4048,9 @@ else sourceSpinner.setSelection(0);
         clearLogBtn.setTextColor(getColorCompat(R.color.yh_text));
         clearLogBtn.setOnClickListener(v -> {
             if (DevLogger.clearLog()) {
-                Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "日志已清空", Toast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(this, "清空失败", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "清空失败", Toast.LENGTH_SHORT).show();
             }
         });
         LinearLayout.LayoutParams clearLogLp = new LinearLayout.LayoutParams(0, dp(40), 1);
@@ -3969,7 +4092,7 @@ else sourceSpinner.setSelection(0);
             String selectedMetadataSource = ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB));
             String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
             if ((bangumi || bangumiMirror) && token.isEmpty()) {
-                Toast.makeText(this, "选择 Bangumi 时需要填写 Token", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "选择 Bangumi 时需要填写 Token", Toast.LENGTH_SHORT).show();
                 return;
             }
             int depth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, scanDepthSeek.getProgress() + 1));
@@ -3987,22 +4110,29 @@ else sourceSpinner.setSelection(0);
                     .putString(KEY_ENGINE_LABEL_POSITION, engineLabelSpinner.getSelectedItemPosition() == 1 ? "cover" : "title")
                     .putString(KEY_SORT_MODE, sortMode)
                     .putBoolean(KEY_BACKGROUND_DIM_ENABLED, bgDimEnabled.isChecked())
-                .putBoolean(KEY_BACKGROUND_VIDEO_SOUND, bgVideoSound.isChecked())
-                .putBoolean(KEY_BG_THEME_ENABLED, bgThemeEnabled.isChecked())
-                .putBoolean(KEY_UI_CLICK_SOUND, uiClickSoundCheck.isChecked())
-                .putString(KEY_KR_ENGINE_VERSION, krEngineVersionFromLabel(String.valueOf(krEngineVersion.getSelectedItem())))
-.putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
-.putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
-.putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, artemisScopedSaveDir.isChecked())
-.putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
+                    .putBoolean(KEY_BACKGROUND_VIDEO_SOUND, bgVideoSound.isChecked())
+                    .putBoolean(KEY_BG_THEME_ENABLED, bgThemeEnabled.isChecked())
+                .putBoolean(DynamicTheme.KEY_CUSTOM_COLOR_ENABLED, customColorEnabled.isChecked())
+                .putBoolean(KEY_USE_BUILTIN_FILE_CHOOSER, useBuiltinFileChooser.isChecked())
+                    .putBoolean(KEY_UI_CLICK_SOUND, uiClickSoundCheck.isChecked())
+                    .putString(KEY_KR_ENGINE_VERSION, krEngineVersionFromLabel(String.valueOf(krEngineVersion.getSelectedItem())))
+                    .putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
+                    .putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
+                    .putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, artemisScopedSaveDir.isChecked())
+                    .putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
                     .putFloat(UiScaleUtil.KEY_UI_SCALE, UiScaleUtil.clampUiScale(UiScaleUtil.MIN_UI_SCALE + uiScaleSeek.getProgress() / 100f))
                     .putInt(KEY_GAME_COLUMNS, Math.max(2, Math.min(10, columnsSeek.getProgress() + 2)))
                     .putBoolean("dev_log_enabled", logEnabledCheck.isChecked())
                     .apply();
+                
+                // 保存自定义颜色设置
+                DynamicTheme dt = DynamicTheme.getInstance();
+                dt.setCustomColorEnabled(customColorEnabled.isChecked());
+                dt.saveCustomColorSettings(this);
             applyCustomBackground();
-            Toast.makeText(this, "已保存资料源：" + (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已保存资料源：" + (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
-            recreate();
+recreate();
         });
         chooseBgButton.setOnClickListener(v -> {
             dialog.dismiss();
@@ -4019,11 +4149,11 @@ else sourceSpinner.setSelection(0);
             deleteInternalFileUri(oldBg);
             applyCustomBackground();
             bgInfo.setText("当前：默认动态背景");
-            Toast.makeText(this, "已恢复默认背景", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已恢复默认背景", Toast.LENGTH_SHORT).show();
         });
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
             if (getScanRootUris().size() >= MAX_SCAN_ROOTS) {
-                Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
                 return;
             }
             launchScanRootPicker(-1);
@@ -4032,6 +4162,70 @@ else sourceSpinner.setSelection(0);
             activeScanRootList = null;
             activeScanRootInfo = null;
         });
+    }
+    
+    private void showColorPickerDialog(View colorPreview, CheckBox customColorEnabledCheck) {
+        DynamicTheme dt = DynamicTheme.getInstance();
+        dt.loadCustomColorSettings(prefs);
+        final boolean oldCustomEnabled = dt.isCustomColorEnabled();
+        final int oldPrimary = dt.getCustomColorPrimary();
+        final int oldSecondary = dt.getCustomColorSecondary();
+        final float oldAngle = dt.getCustomGradientAngle();
+        final boolean[] applied = {false};
+        
+        ColorPickerDialog colorPickerDialog = new ColorPickerDialog(this);
+        colorPickerDialog.setInitialColor(dt.getCustomColorPrimary());
+        colorPickerDialog.setInitialGradient(dt.getCustomColorPrimary(), dt.getCustomColorSecondary(), dt.getCustomGradientAngle());
+        colorPickerDialog.setOnColorPreviewListener((color1, color2, gradientAngle, gradientMode) -> {
+            dt.setCustomColorPrimary(color1);
+            dt.setCustomColorSecondary(color2);
+            dt.setCustomGradientAngle(gradientAngle);
+            dt.setCustomColorMode(gradientMode ? 1 : 0);
+            dt.setCustomColorEnabled(true);
+            dt.setEnabled(true);
+            colorPreview.setBackgroundColor(color1);
+            applyDynamicTheme(dt.getColors());
+        });
+        
+        colorPickerDialog.setOnColorSelectedListener((color1, color2, gradientAngle) -> {
+            // 更新自定义颜色设置
+            dt.setCustomColorPrimary(color1);
+            dt.setCustomColorSecondary(color2);
+            dt.setCustomGradientAngle(gradientAngle);
+            // 使用对话框的实际模式，而不是比较颜色
+            dt.setCustomColorMode(colorPickerDialog.getCurrentMode() == ColorPickerDialog.ColorMode.GRADIENT_COLOR ? 1 : 0);
+            dt.setCustomColorEnabled(true);
+            if (customColorEnabledCheck != null) customColorEnabledCheck.setChecked(true);
+            applied[0] = true;
+            dt.saveCustomColorSettings(this);
+            
+            // 更新预览颜色
+            colorPreview.setBackgroundColor(color1);
+            
+            // 应用新的主题颜色（直接应用，不调用 applyCustomBackground 避免重新加载设置）
+            applyDynamicTheme(dt.getColors());
+            
+            Toast.makeText(MainActivity.this, "已应用自定义主题颜色", Toast.LENGTH_SHORT).show();
+        });
+        colorPickerDialog.setOnDismissListener(d -> {
+            if (!applied[0]) {
+                dt.setCustomColorEnabled(oldCustomEnabled);
+                if (customColorEnabledCheck != null) customColorEnabledCheck.setChecked(oldCustomEnabled);
+                dt.setCustomColorPrimary(oldPrimary);
+                dt.setCustomColorSecondary(oldSecondary);
+                dt.setCustomGradientAngle(oldAngle);
+                if (oldCustomEnabled) {
+                    dt.setEnabled(true);
+                    applyDynamicTheme(dt.getColors());
+                    colorPreview.setBackgroundColor(oldPrimary);
+                } else {
+                    applyCustomBackground();
+                    colorPreview.setBackgroundColor(0xFF8AB4FF);
+                }
+            }
+        });
+        
+        colorPickerDialog.show();
     }
 
     private List<String> getScanRootUris() {
@@ -4138,7 +4332,7 @@ roots.remove(value);
 if (replaceIndex >= 0 && replaceIndex < roots.size()) roots.set(replaceIndex, value);
 else if (roots.size() < MAX_SCAN_ROOTS) roots.add(value);
 else {
-Toast.makeText(this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
+Toast.makeText(MainActivity.this, "最多绑定 " + MAX_SCAN_ROOTS + " 个扫描目录", Toast.LENGTH_SHORT).show();
 return false;
 }
 saveScanRootUris(roots);
@@ -4174,10 +4368,33 @@ if (last != null && !last.isEmpty()) return java.net.URLDecoder.decode(last, "UT
 return s.length() > 72 ? "..." + s.substring(s.length() - 72) : s;
 }
 
-private void launchScanRootPicker(int replaceIndex) {
-pendingScanRootReplaceIndex = replaceIndex;
-scanDirLauncher.launch(null);
-}
+private boolean useBuiltinFileChooser() {
+        return prefs == null || prefs.getBoolean(KEY_USE_BUILTIN_FILE_CHOOSER, true);
+    }
+
+    private void launchScanRootPicker(int replaceIndex) {
+        pendingScanRootReplaceIndex = replaceIndex;
+        if (useBuiltinFileChooser()) {
+            new com.yuki.yukihub.ui.filechooser.FileChooserDialog(this)
+                .setMode(com.yuki.yukihub.ui.filechooser.FileChooserDialog.Mode.DIRECTORY)
+                .setTitle("选择扫描目录")
+                .setOnFileSelectedListener(new com.yuki.yukihub.ui.filechooser.FileChooserDialog.OnFileSelectedListener() {
+                    @Override public void onFileSelected(Uri uri, String path, String fileName) {}
+                    @Override public void onDirectorySelected(Uri uri, String path) {
+                        boolean changed = addOrReplaceScanRoot(path, pendingScanRootReplaceIndex);
+                        pendingScanRootReplaceIndex = -2;
+                        if (changed) {
+                            refreshActiveScanRootListUi();
+                            Toast.makeText(MainActivity.this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                })
+                .setOnSafRequestListener(() -> scanDirLauncher.launch(null))
+                .show();
+        } else {
+            scanDirLauncher.launch(null);
+        }
+    }
 
 private LinearLayout scanRootCard(String uri, int index, Runnable refresh) {
         LinearLayout card = new LinearLayout(this);
@@ -4271,7 +4488,7 @@ private void checkUpdateOnStartupIfEnabled() {
     }
 
     private void checkUpdateManually() {
-        Toast.makeText(this, "正在检查更新...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(MainActivity.this, "正在检查更新...", Toast.LENGTH_SHORT).show();
         checkUpdate(true);
     }
 
@@ -4428,7 +4645,7 @@ private void checkUpdateOnStartupIfEnabled() {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             startActivity(intent);
         } catch (Throwable t) {
-            Toast.makeText(this, "无法打开链接", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "无法打开链接", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -4638,7 +4855,7 @@ private void showDetailDialog(Game game) {
             if (gamehubIdTarget != null) gamehubIdTarget.setText(item.localGameId);
             if (titleTarget != null && (titleTarget.getText() == null || titleTarget.getText().toString().trim().isEmpty())) titleTarget.setText(item.localAppName);
             if (pkgTarget != null && (pkgTarget.getText() == null || pkgTarget.getText().toString().trim().isEmpty())) pkgTarget.setText(guessInstalledGameHubPackage());
-            Toast.makeText(this, "已导入 GameHub 快捷方式", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已导入 GameHub 快捷方式", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });
         rv.setAdapter(adapterRef[0]);
@@ -4746,7 +4963,7 @@ private void showDetailDialog(Game game) {
                     if (gamehubIdTarget != null) gamehubIdTarget.setText(item.localGameId);
                     if (titleTarget != null && (titleTarget.getText() == null || titleTarget.getText().toString().trim().isEmpty())) titleTarget.setText(item.localAppName);
                     if (pkgTarget != null && (pkgTarget.getText() == null || pkgTarget.getText().toString().trim().isEmpty())) pkgTarget.setText(guessInstalledGameHubPackage());
-                    Toast.makeText(this, "已导入 GameHub 快捷方式参数", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "已导入 GameHub 快捷方式参数", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -4927,7 +5144,7 @@ private void showDetailDialog(Game game) {
 
     private void copyGameHubShortcutDiagnostics() {
         if (requestShizukuPermissionIfNeeded()) return;
-        Toast.makeText(this, "正在生成 GameHub 快捷方式诊断...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(MainActivity.this, "正在生成 GameHub 快捷方式诊断...", Toast.LENGTH_SHORT).show();
         AppExecutors.runOnSingle(() -> {
             String result;
             try {
@@ -5447,11 +5664,39 @@ private String displayPath(String value) {
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
         });
-        d.findViewById(R.id.btnPickDir).setOnClickListener(v -> editDirLauncher.launch(null));
+        d.findViewById(R.id.btnPickDir).setOnClickListener(v -> {
+            if (useBuiltinFileChooser()) {
+                new com.yuki.yukihub.ui.filechooser.FileChooserDialog(this)
+                    .setMode(com.yuki.yukihub.ui.filechooser.FileChooserDialog.Mode.DIRECTORY)
+                    .setTitle("选择游戏目录")
+                    .setOnFileSelectedListener(new com.yuki.yukihub.ui.filechooser.FileChooserDialog.OnFileSelectedListener() {
+                        @Override public void onFileSelected(Uri uri, String path, String fileName) {}
+                        @Override public void onDirectorySelected(Uri uri, String path) {
+                            pendingDirUri = path;
+                            if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
+                                Uri autoCover = findFirstLevelImage(pendingDirUri);
+                                if (autoCover != null) pendingCoverUri = copyCoverToInternalStorage(autoCover);
+                            }
+                            if (pendingEditDialog != null) {
+                                ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedDir)).setText(pendingDirUri);
+                                Spinner launchSp = pendingEditDialog.findViewById(R.id.spLaunchTarget);
+                                List<String> options = buildLaunchOptions(pendingDirUri);
+                                ArrayAdapter<String> adapter = krSpinnerAdapter(options.toArray(new String[0]));
+                                launchSp.setAdapter(adapter);
+                                ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(emptyText(pendingCoverUri, "未选择封面"));
+                            }
+                        }
+                    })
+                    .setOnSafRequestListener(() -> editDirLauncher.launch(null))
+                    .show();
+            } else {
+                editDirLauncher.launch(null);
+            }
+        });
         d.findViewById(R.id.btnPickCover).setOnClickListener(v -> coverLauncher.launch("image/*"));
         d.findViewById(R.id.btnCancel).setOnClickListener(v -> d.dismiss());
         d.findViewById(R.id.btnSave).setOnClickListener(v -> {
-            if (title.getText().toString().trim().isEmpty()) { Toast.makeText(this, "请填写标题", Toast.LENGTH_SHORT).show(); return; }
+            if (title.getText().toString().trim().isEmpty()) { Toast.makeText(MainActivity.this, "请填写标题", Toast.LENGTH_SHORT).show(); return; }
             Game g = game == null ? new Game() : game;
             if ((pendingCoverUri == null || pendingCoverUri.isEmpty()) && pendingDirUri != null && !pendingDirUri.isEmpty()) {
                 Uri autoCover = findFirstLevelImage(pendingDirUri);
@@ -5655,7 +5900,7 @@ private void showEditPlayTimeDialog(Game game) {
             Long totalMinutes = parseDurationToMinutes(totalInput.getText() == null ? "" : totalInput.getText().toString().trim());
             Long addMinutes = parseDurationToMinutes(addInput.getText() == null ? "" : addInput.getText().toString().trim());
             if ((totalMinutes == null || totalMinutes < 0) && (addMinutes == null || addMinutes <= 0)) {
-                Toast.makeText(this, "请填写有效的时长", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "请填写有效的时长", Toast.LENGTH_SHORT).show();
                 return;
             }
             long currentDuration = Math.max(0L, game.totalPlayTime);
@@ -5667,7 +5912,7 @@ private void showEditPlayTimeDialog(Game game) {
                 finalDuration += addMinutes * 60_000L;
             }
             repository.setManualPlayTimeForGame(game.id, finalDuration);
-            Toast.makeText(this, "游玩时长已更新", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "游玩时长已更新", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
             loadGames();
             updateSideDetail(game);
@@ -5748,7 +5993,7 @@ private void showEditPlayTimeDialog(Game game) {
 
     private void showKrSettingsDialog(Game game) {
         if (game == null || game.rootUri == null || game.rootUri.isEmpty()) {
-            Toast.makeText(this, "请先选择游戏目录", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "请先选择游戏目录", Toast.LENGTH_SHORT).show();
             return;
         }
         Map<String, String> prefs = loadKrPrefs(game.rootUri);
@@ -5833,7 +6078,7 @@ private void showEditPlayTimeDialog(Game game) {
             prefs.put("force_default_font", forceFont.isChecked() ? "1" : "0");
             prefs.put("default_font", defaultFont.getText().toString().trim());
             if (saveKrPrefs(game.rootUri, prefs)) {
-                Toast.makeText(this, "KR 设置已保存", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "KR 设置已保存", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
             } else {
                 Toast.makeText(this, "保存 KR 设置失败", Toast.LENGTH_LONG).show();
@@ -5920,7 +6165,7 @@ private void showEditPlayTimeDialog(Game game) {
                 repository.update(game);
                 loadGames();
             }
-            Toast.makeText(this, "ONS 设置已保存", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "ONS 设置已保存", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });
         dialog.show();
@@ -6257,7 +6502,7 @@ if (rootUris == null || rootUris.isEmpty()) return;
 if (autoLibraryScanRunning) return;
 autoLibraryScanRunning = true;
 runOnUiThread(() -> setScanLoading(true));
-if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目录，请稍候...", Toast.LENGTH_SHORT).show();
+if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size() + " 个目录，请稍候...", Toast.LENGTH_SHORT).show();
         int scanDepth = prefs == null ? DEFAULT_STARTUP_SCAN_DEPTH : prefs.getInt(KEY_STARTUP_SCAN_DEPTH, DEFAULT_STARTUP_SCAN_DEPTH);
         scanDepth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, scanDepth));
         final int finalScanDepth = scanDepth;
@@ -6347,7 +6592,7 @@ if (showToast) Toast.makeText(this, "正在扫描 " + rootUris.size() + " 个目
         int finalChanged = changed;
         if (finalChanged > 0) runOnUiThread(() -> {
             loadGames();
-            Toast.makeText(this, "已自动补全 " + finalChanged + " 个 VNDB 封面", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已自动补全 " + finalChanged + " 个 VNDB 封面", Toast.LENGTH_SHORT).show();
         });
     }
 
@@ -6882,7 +7127,7 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
                         try {
                             startActivity(EmulatorLauncher.getPPSSPPDownloadIntent());
                         } catch (Exception e) {
-                            Toast.makeText(this, "无法打开应用商店", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "无法打开应用商店", Toast.LENGTH_SHORT).show();
                         }
                     })
                     .setNegativeButton("取消", null)
@@ -6945,13 +7190,13 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
                     repository.finishPlaySession(open.sessionId, System.currentTimeMillis(), MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
                     loadGames();
                     updateProfilePanel();
-                    Toast.makeText(this, "已补记上次游玩时长", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "已补记上次游玩时长", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("忽略", (d, w) -> {
                     repository.deleteOpenPlaySession(open.sessionId);
                     loadGames();
                     updateProfilePanel();
-                    Toast.makeText(this, "已忽略上次未完成记录", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "已忽略上次未完成记录", Toast.LENGTH_SHORT).show();
                 })
                 .setCancelable(false)
                 .show();
