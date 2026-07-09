@@ -222,8 +222,10 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private static final String KEY_CHECK_UPDATE_ON_STARTUP = "check_update_on_startup";
     private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
     private static final long UPDATE_AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
-    private static final String UPDATE_API_URL = "https://api.github.com/repos/xm486/YukiHub/releases/latest";
-    private static final String UPDATE_REPO_URL = "https://github.com/xm486/YukiHub";
+    private static final String UPDATE_GITHUB_API_URL = "https://api.github.com/repos/xm486/YukiHub/releases/latest";
+    private static final String UPDATE_GITHUB_REPO_URL = "https://github.com/xm486/YukiHub";
+    private static final String UPDATE_GITCODE_API_URL = "https://gitcode.com/api/v5/repos/xm486/YukiHub/releases/latest";
+    private static final String UPDATE_GITCODE_REPO_URL = "https://gitcode.com/xm486/YukiHub";
     private static final String KEY_ENGINE_LABEL_POSITION = "engine_label_position";
     private static final int DEFAULT_STARTUP_SCAN_DEPTH = 2;
     private static final int MAX_STARTUP_SCAN_DEPTH = 4;
@@ -1512,16 +1514,10 @@ private String copyImageToInternalStorage(Uri uri, String folder, String prefix,
     }
 
     private Uri findFirstLevelImage(String rootUri) {
-        try {
-            if (rootUri == null || rootUri.trim().isEmpty()) return null;
-            DocumentFile dir = null;
-            if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
-                File file = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri);
-                dir = DocumentFile.fromFile(file);
-            } else {
-                dir = DocumentFile.fromTreeUri(this, Uri.parse(rootUri));
-            }
-            if (dir == null || !dir.isDirectory()) return null;
+try {
+if (rootUri == null || rootUri.trim().isEmpty()) return null;
+DocumentFile dir = gameDir(rootUri);
+if (dir == null || !dir.isDirectory()) return null;
             DocumentFile[] files = dir.listFiles();
             if (files == null) return null;
             DocumentFile best = null;
@@ -4381,8 +4377,9 @@ private boolean useBuiltinFileChooser() {
                 .setOnFileSelectedListener(new com.yuki.yukihub.ui.filechooser.FileChooserDialog.OnFileSelectedListener() {
                     @Override public void onFileSelected(Uri uri, String path, String fileName) {}
                     @Override public void onDirectorySelected(Uri uri, String path) {
-                        boolean changed = addOrReplaceScanRoot(path, pendingScanRootReplaceIndex);
-                        pendingScanRootReplaceIndex = -2;
+String selectedDir = uri != null ? uri.toString() : path;
+boolean changed = addOrReplaceScanRoot(selectedDir, pendingScanRootReplaceIndex);
+pendingScanRootReplaceIndex = -2;
                         if (changed) {
                             refreshActiveScanRootListUi();
                             Toast.makeText(MainActivity.this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
@@ -4516,23 +4513,48 @@ private void checkUpdateOnStartupIfEnabled() {
     }
 
     private UpdateInfo fetchLatestRelease() throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(UPDATE_API_URL).openConnection();
+        UpdateSource[] sources = new UpdateSource[]{
+                new UpdateSource("GitHub", UPDATE_GITHUB_API_URL, UPDATE_GITHUB_REPO_URL, "application/vnd.github+json"),
+                new UpdateSource("GitCode", UPDATE_GITCODE_API_URL, UPDATE_GITCODE_REPO_URL, "application/json")
+        };
+        Exception lastError = null;
+        for (UpdateSource source : sources) {
+            try {
+                return fetchLatestReleaseFrom(source);
+            } catch (Exception e) {
+                lastError = e;
+                Log.w("YukiHub", "update check source failed: " + source.name, e);
+            }
+        }
+        throw lastError == null ? new RuntimeException("所有更新源均不可用") : lastError;
+    }
+
+    private UpdateInfo fetchLatestReleaseFrom(UpdateSource source) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(source.apiUrl).openConnection();
         c.setRequestMethod("GET");
         c.setInstanceFollowRedirects(true);
         c.setConnectTimeout(12000);
         c.setReadTimeout(15000);
-        c.setRequestProperty("Accept", "application/vnd.github+json");
+        c.setRequestProperty("Accept", source.accept);
         c.setRequestProperty("User-Agent", "YukiHub-Android/" + getCurrentVersionName());
         int code = c.getResponseCode();
         String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
-        if (code < 200 || code >= 300) throw new RuntimeException("GitHub HTTP " + code + ": " + trimForDialog(text, 160));
+        if (code < 200 || code >= 300) throw new RuntimeException(source.name + " HTTP " + code + ": " + trimForDialog(text, 160));
         JSONObject o = new JSONObject(text == null ? "{}" : text);
+        UpdateInfo info = parseReleaseInfo(o, source);
+        if (info.version == null || info.version.isEmpty()) throw new RuntimeException(source.name + " 未返回有效版本号");
+        return info;
+    }
+
+    private UpdateInfo parseReleaseInfo(JSONObject o, UpdateSource source) {
         UpdateInfo info = new UpdateInfo();
+        info.sourceName = source.name;
+        info.repoUrl = source.repoUrl;
         info.tagName = o.optString("tag_name", "");
         info.version = normalizeVersion(info.tagName);
         info.name = o.optString("name", info.tagName);
         info.body = o.optString("body", "");
-        info.releaseUrl = o.optString("html_url", UPDATE_REPO_URL + "/releases");
+        info.releaseUrl = o.optString("html_url", source.repoUrl + "/releases");
         JSONArray assets = o.optJSONArray("assets");
         if (assets != null) {
             for (int i = 0; i < assets.length(); i++) {
@@ -4611,13 +4633,13 @@ private void checkUpdateOnStartupIfEnabled() {
         if (body != null && !body.trim().isEmpty()) {
             msg.append("更新内容：\n").append(body.trim());
         } else {
-            msg.append("发现新的 GitHub Release，可前往发布页查看详情。");
+            msg.append("发现新的 ").append(emptyText(info.sourceName, "发布源")).append(" Release，可前往发布页查看详情。");
         }
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("发现新版本 " + emptyText(latestLabel, ""))
                 .setMessage(msg.toString())
                 .setPositiveButton("前往下载", (d, w) -> openExternalUrl(emptyText(info.apkUrl, info.releaseUrl)))
-                .setNeutralButton("发布页", (d, w) -> openExternalUrl(emptyText(info.releaseUrl, UPDATE_REPO_URL + "/releases")))
+                .setNeutralButton("发布页", (d, w) -> openExternalUrl(emptyText(info.releaseUrl, emptyText(info.repoUrl, UPDATE_GITHUB_REPO_URL) + "/releases")))
                 .setNegativeButton("稍后", null)
                 .show();
         styleAlertDialogDark(dialog);
@@ -4630,7 +4652,23 @@ private void checkUpdateOnStartupIfEnabled() {
         return t.substring(0, max) + "\n...";
     }
 
+    private static class UpdateSource {
+        final String name;
+        final String apiUrl;
+        final String repoUrl;
+        final String accept;
+
+        UpdateSource(String name, String apiUrl, String repoUrl, String accept) {
+            this.name = name;
+            this.apiUrl = apiUrl;
+            this.repoUrl = repoUrl;
+            this.accept = accept;
+        }
+    }
+
     private static class UpdateInfo {
+        String sourceName;
+        String repoUrl;
         String tagName;
         String version;
         String name;
@@ -5672,8 +5710,8 @@ private String displayPath(String value) {
                     .setOnFileSelectedListener(new com.yuki.yukihub.ui.filechooser.FileChooserDialog.OnFileSelectedListener() {
                         @Override public void onFileSelected(Uri uri, String path, String fileName) {}
                         @Override public void onDirectorySelected(Uri uri, String path) {
-                            pendingDirUri = path;
-                            if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
+pendingDirUri = uri != null ? uri.toString() : path;
+if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
                                 Uri autoCover = findFirstLevelImage(pendingDirUri);
                                 if (autoCover != null) pendingCoverUri = copyCoverToInternalStorage(autoCover);
                             }
@@ -5827,12 +5865,51 @@ return false;
 }
 
 private DocumentFile gameDir(String rootUri) {
-if (rootUri == null || rootUri.trim().isEmpty()) return null;
-if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
-File file = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri);
-return DocumentFile.fromFile(file);
+return documentDir(rootUri);
 }
-return DocumentFile.fromTreeUri(this, Uri.parse(rootUri));
+
+private DocumentFile documentDir(String value) {
+if (value == null || value.trim().isEmpty()) return null;
+String s = value.trim();
+if (s.startsWith("/") || s.startsWith("file://")) {
+File file = fileFromRootUri(s);
+return file == null ? null : DocumentFile.fromFile(file);
+}
+try {
+Uri uri = Uri.parse(s);
+if ("content".equalsIgnoreCase(uri.getScheme())) {
+DocumentFile documentTree = documentBackedTreeDir(uri);
+if (documentTree != null) return documentTree;
+}
+return DocumentFile.fromTreeUri(this, uri);
+} catch (Throwable ignored) {
+return null;
+}
+}
+
+private DocumentFile documentBackedTreeDir(Uri uri) {
+try {
+if (uri == null || uri.getAuthority() == null) return null;
+String path = uri.getPath();
+if (path == null || !path.contains("/document/")) return null;
+String docId = DocumentsContract.getDocumentId(uri);
+if (docId == null || docId.trim().isEmpty()) return null;
+Uri treeUri = DocumentsContract.buildTreeDocumentUri(uri.getAuthority(), docId);
+DocumentFile dir = DocumentFile.fromTreeUri(this, treeUri);
+return dir != null && dir.isDirectory() ? dir : null;
+} catch (Throwable ignored) {
+return null;
+}
+}
+
+private File fileFromRootUri(String value) {
+if (value == null || value.trim().isEmpty()) return null;
+String s = value.trim();
+if (s.startsWith("file://")) {
+String path = Uri.parse(s).getPath();
+return path == null || path.isEmpty() ? null : new File(path);
+}
+return new File(s);
 }
 
 private void deleteFileQuietly(File file) {
@@ -6345,16 +6422,15 @@ private String pref(Map<String, String> prefs, String key, String def) {
                 if (!name.isEmpty() && !options.contains(name)) options.add(name);
             }
             try {
-                DocumentFile dir = DocumentFile.fromTreeUri(this, Uri.parse(rootUri));
+                DocumentFile dir = gameDir(rootUri);
                 if (dir != null && dir.isDirectory()) {
                     DocumentFile[] files = dir.listFiles();
                     if (files != null) {
                         for (DocumentFile file : files) {
                             String name = file.getName();
                             if (name == null || !file.isFile()) continue;
-                            String lower = name.toLowerCase(Locale.ROOT);
-                            if (lower.endsWith(".xp3") || lower.endsWith(".tjs") || lower.endsWith(".ks") || lower.endsWith(".html") || lower.endsWith(".txt") || lower.endsWith(".dat") || lower.endsWith(".pfs") || lower.endsWith(".desktop")) {
-                                if (!options.contains(name)) options.add(name);
+                            if (isLaunchCandidate(name) && !options.contains(name)) {
+                                options.add(name);
                             }
                         }
                     }
@@ -6369,6 +6445,17 @@ private String pref(Map<String, String> prefs, String key, String def) {
         options.add("[游戏目录]");
         if (options.isEmpty()) options.add("未扫描到可启动文件，请先选择目录");
         return options;
+    }
+
+    private boolean isLaunchCandidate(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".xp3") || lower.endsWith(".tjs") || lower.endsWith(".ks")
+                || lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".txt")
+                || lower.endsWith(".dat") || lower.endsWith(".pfs") || lower.endsWith(".desktop")
+                || lower.endsWith(".nsa") || lower.endsWith(".sar")
+                || lower.endsWith(".iso") || lower.endsWith(".cso") || lower.endsWith(".chd")
+                || lower.endsWith(".elf") || lower.endsWith(".pbp");
     }
 
     private int findLaunchSelection(List<String> options, String target) {
@@ -6418,26 +6505,21 @@ private String pref(Map<String, String> prefs, String key, String def) {
     // KR 引擎版本只保留全局设置，不再通过单个游戏目录的 .1.3.4 标记读写，避免与右上角设置冲突。
 
     private DocumentFile krGameDir(String rootUri) {
-        if (rootUri == null || rootUri.trim().isEmpty()) return null;
-        if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
-            File file = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri);
-            return DocumentFile.fromFile(file);
-        }
-        return DocumentFile.fromTreeUri(this, Uri.parse(rootUri));
-    }
+return documentDir(rootUri);
+}
 
     private InputStream openKrPrefsInput(String rootUri) {
-        try {
-            if (rootUri == null || rootUri.isEmpty()) return null;
-            if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
-                File f = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri, "Kirikiroid2Preference.xml");
-                return f.exists() ? new FileInputStream(f) : null;
-            }
-            DocumentFile dir = DocumentFile.fromTreeUri(this, Uri.parse(rootUri));
-            DocumentFile file = dir == null ? null : dir.findFile("Kirikiroid2Preference.xml");
-            return file == null || !file.isFile() ? null : getContentResolver().openInputStream(file.getUri());
-        } catch (Throwable ignored) { return null; }
-    }
+try {
+if (rootUri == null || rootUri.isEmpty()) return null;
+if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
+File f = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri, "Kirikiroid2Preference.xml");
+return f.exists() ? new FileInputStream(f) : null;
+}
+DocumentFile dir = documentDir(rootUri);
+DocumentFile file = dir == null ? null : dir.findFile("Kirikiroid2Preference.xml");
+return file == null || !file.isFile() ? null : getContentResolver().openInputStream(file.getUri());
+} catch (Throwable ignored) { return null; }
+}
 
     private boolean saveKrPrefs(String rootUri, Map<String, String> prefs) {
         try {
@@ -6462,20 +6544,20 @@ private String pref(Map<String, String> prefs, String key, String def) {
     }
 
     private OutputStream openKrPrefsOutput(String rootUri) {
-        try {
-            if (rootUri == null || rootUri.isEmpty()) return null;
-            if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
-                File dir = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri);
-                if (!dir.exists() && !dir.mkdirs()) return null;
-                return new FileOutputStream(new File(dir, "Kirikiroid2Preference.xml"));
-            }
-            DocumentFile dir = DocumentFile.fromTreeUri(this, Uri.parse(rootUri));
-            if (dir == null || !dir.isDirectory()) return null;
-            DocumentFile file = dir.findFile("Kirikiroid2Preference.xml");
-            if (file == null) file = dir.createFile("text/xml", "Kirikiroid2Preference.xml");
-            return file == null ? null : getContentResolver().openOutputStream(file.getUri(), "wt");
-        } catch (Throwable ignored) { return null; }
-    }
+try {
+if (rootUri == null || rootUri.isEmpty()) return null;
+if (rootUri.startsWith("/") || rootUri.startsWith("file://")) {
+File dir = new File(rootUri.startsWith("file://") ? Uri.parse(rootUri).getPath() : rootUri);
+if (!dir.exists() && !dir.mkdirs()) return null;
+return new FileOutputStream(new File(dir, "Kirikiroid2Preference.xml"));
+}
+DocumentFile dir = documentDir(rootUri);
+if (dir == null || !dir.isDirectory()) return null;
+DocumentFile file = dir.findFile("Kirikiroid2Preference.xml");
+if (file == null) file = dir.createFile("text/xml", "Kirikiroid2Preference.xml");
+return file == null ? null : getContentResolver().openOutputStream(file.getUri(), "wt");
+} catch (Throwable ignored) { return null; }
+}
 private void showScanResults(List<ScanResult> results) {
         if (results.isEmpty()) { Toast.makeText(this, "未发现子目录候选游戏", Toast.LENGTH_LONG).show(); return; }
         Dialog d = new Dialog(this); d.requestWindowFeature(Window.FEATURE_NO_TITLE); d.setContentView(R.layout.dialog_scan_result);

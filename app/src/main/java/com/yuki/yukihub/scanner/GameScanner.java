@@ -2,6 +2,7 @@ package com.yuki.yukihub.scanner;
 
 import android.content.Context;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.util.Log;
 
 import androidx.documentfile.provider.DocumentFile;
@@ -27,9 +28,9 @@ public class GameScanner {
 
         DocumentFile root;
         try {
-            root = DocumentFile.fromTreeUri(context, rootUri);
+            root = rootDocument(context, rootUri);
         } catch (Throwable t) {
-            Log.w(TAG, "fromTreeUri failed uri=" + rootUri, t);
+            Log.w(TAG, "rootDocument failed uri=" + rootUri, t);
             return results;
         }
         if (root == null) return results;
@@ -41,6 +42,37 @@ public class GameScanner {
         }
         scanChildren(root, 1, depth, results, seenUris);
         return results;
+    }
+
+    private static DocumentFile rootDocument(Context context, Uri rootUri) {
+        if (context == null || rootUri == null) return null;
+        String raw = rootUri.toString();
+        if (raw.startsWith("/")) return DocumentFile.fromFile(new java.io.File(raw));
+        String scheme = rootUri.getScheme();
+        if ("file".equalsIgnoreCase(scheme)) {
+            String path = rootUri.getPath();
+            return path == null || path.trim().isEmpty() ? null : DocumentFile.fromFile(new java.io.File(path));
+        }
+        if ("content".equalsIgnoreCase(scheme)) {
+            DocumentFile documentTree = documentBackedTreeDir(context, rootUri);
+            if (documentTree != null) return documentTree;
+        }
+        return DocumentFile.fromTreeUri(context, rootUri);
+    }
+
+    private static DocumentFile documentBackedTreeDir(Context context, Uri uri) {
+        try {
+            if (context == null || uri == null || uri.getAuthority() == null) return null;
+            String path = uri.getPath();
+            if (path == null || !path.contains("/document/")) return null;
+            String docId = DocumentsContract.getDocumentId(uri);
+            if (docId == null || docId.trim().isEmpty()) return null;
+            Uri treeUri = DocumentsContract.buildTreeDocumentUri(uri.getAuthority(), docId);
+            DocumentFile dir = DocumentFile.fromTreeUri(context, treeUri);
+            return dir != null && dir.isDirectory() ? dir : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static void scanChildren(DocumentFile dir, int level, int maxDepth, List<ScanResult> results, Set<String> seenUris) {
