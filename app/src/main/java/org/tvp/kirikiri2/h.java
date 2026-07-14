@@ -8,6 +8,20 @@ import org.cocos2dx.lib.Cocos2dxGLSurfaceView;
 public final class h extends Cocos2dxGLSurfaceView {
     public h(Context context) { super(context); }
 
+    private boolean usesCocosTouchPipeline() {
+        try {
+            KR2Activity activity = KR2Activity.getInstance();
+            if (activity == null) activity = KR2Activity.GetInstance();
+            if (activity == null) return false;
+            String version = activity.getIntent() == null ? null
+                    : activity.getIntent().getStringExtra("krEngineVersion");
+            return "1.3.4".equals(version)
+                    || activity.getClass().getName().endsWith("Kirikiroid134");
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     @Override public final void deleteBackward() { KR2Activity.nativeDeleteBackward(); }
     @Override public final void insertText(String str) { KR2Activity.nativeInsertText(str); }
 
@@ -65,6 +79,12 @@ public final class h extends Cocos2dxGLSurfaceView {
     }
 
     @Override public final boolean onTouchEvent(MotionEvent motionEvent) {
+        // libgame134's KR2Activity JNI path queues touch callbacks through an
+        // internal dispatcher that is not drained by its Cocos lifecycle on
+        // current Android.  Its standard Cocos JNI entry points are present and
+        // dispatch correctly when reached through GLSurfaceView.queueEvent().
+        if (usesCocosTouchPipeline()) return super.onTouchEvent(motionEvent);
+
         int pointerCount = motionEvent.getPointerCount();
         int[] ids = new int[pointerCount];
         float[] xs = new float[pointerCount];

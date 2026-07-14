@@ -9,14 +9,20 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import bridge.NativeBridge;
 import org.tvp.kirikiri2.KR2Activity;
 
 public abstract class r extends KR2Activity {
     private static final String TAG = "Kirikiroid2";
+    private static final int MAX_LAUNCH_ATTEMPTS = 15;
+    private static final long GL_LAUNCH_TIMEOUT_MS = 2500L;
     public static Context app;
     private TextView mask;
+    private volatile boolean nativeBridgeInitialized;
+    private volatile boolean destroyed;
 
     @Override
     public void onCreate(Bundle bundle) {
@@ -46,7 +52,12 @@ public abstract class r extends KR2Activity {
     @Override
     public void onLoadNativeLibraries() {
         boolean initialized = NativeBridge.initialize(soName());
+        nativeBridgeInitialized = initialized;
         Log.i(TAG, "native initialize result=" + initialized + " so=" + soName());
+        if (!initialized) {
+            Log.e(TAG, "native bridge initialization failed; skip KRKR hook setup");
+            return;
+        }
         Intent intent = getIntent();
         boolean scopedSaveDir = intent != null && intent.getBooleanExtra("scopedSaveDir", false);
         boolean safFileFallback = intent != null && intent.getBooleanExtra("safFileFallback", false);
@@ -87,34 +98,57 @@ public abstract class r extends KR2Activity {
 
 
     private void tryLaunchGame(String path, boolean maps) {
-        // 与Tyranor一致：在后台线程中重试launch，直到成功或达到上限
+        if (!nativeBridgeInitialized) {
+            Log.e(TAG, "skip launch because native bridge was not initialized");
+            showLaunchFailure("KRKR 引擎初始化失败");
+            return;
+        }
+        // Native launch must run on the GL thread. Wait for each queued call before retrying;
+        // otherwise the old loop can enqueue all retries before the first callback runs.
         new Thread(() -> {
-            final boolean[] launched = new boolean[]{false};
-            int retry = 15;
-            while (!launched[0] && retry-- > 0) {
-                final int currentRetry = 15 - retry;  // 用final变量记录当前重试次数
+            boolean launched = false;
+            for (int attempt = 1; !launched && attempt <= MAX_LAUNCH_ATTEMPTS; attempt++) {
+                if (destroyed || isFinishing()) break;
+                final int currentAttempt = attempt;
+                final boolean[] launchResult = new boolean[]{false};
+                final CountDownLatch launchCompleted = new CountDownLatch(1);
                 runOnGLThread(() -> {
                     try {
-                        boolean ok = NativeBridge.launch(soName(), path, maps);
-                        launched[0] = ok;
-                        Log.i(TAG, "launch result=" + ok + " path=" + path + " attempt=" + currentRetry);
-                        if (ok && mask != null) {
-                            mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
-                        }
+                        if (destroyed) return;
+                        launchResult[0] = NativeBridge.launch(soName(), path, maps);
+                        Log.i(TAG, "launch result=" + launchResult[0] + " path=" + path + " attempt=" + currentAttempt);
                     } catch (Throwable t) {
                         Log.e(TAG, "launch failed", t);
+                    } finally {
+                        launchCompleted.countDown();
                     }
                 });
-                if (!launched[0]) {
-                    try { Thread.sleep(1000L); } catch (InterruptedException ignored) { break; }
+                try {
+                    if (!launchCompleted.await(GL_LAUNCH_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                        Log.w(TAG, "launch callback timed out attempt=" + currentAttempt);
+                    }
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                launched = launchResult[0];
+                if (launched && mask != null) {
+                    mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
+                } else if (!destroyed && currentAttempt < MAX_LAUNCH_ATTEMPTS) {
+                    try { Thread.sleep(1000L); } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
-            if (!launched[0]) {
-                runOnUiThread(() -> {
-                    if (mask != null) mask.setText("启动失败");
-                });
-            }
-        }).start();
+            if (!launched && !destroyed) showLaunchFailure("启动失败");
+        }, "KrkrLaunch").start();
+    }
+
+    private void showLaunchFailure(String message) {
+        runOnUiThread(() -> {
+            if (!destroyed && !isFinishing() && mask != null) mask.setText(message);
+        });
     }
 
     private static String normalizeKrPath(String path) {
@@ -184,12 +218,13 @@ public abstract class r extends KR2Activity {
     @Override
     public void onDestroy() {
         try {
+            destroyed = true;
             mask = null;
             if (app == this) app = null;
         } catch (Throwable ignored) { }
-        super.onDestroy();
-        // 与Tyranor一致：总是清理进程，避免native资源残留导致WebP解码器竞态条件
-        Log.i(TAG, "terminate KR process after destroy to avoid stale native state");
+        // This Activity has a dedicated process. Do not enter Cocos teardown first:
+        // its RenderThread can still lock native state after that state is destroyed.
+        Log.i(TAG, "terminate dedicated KR process before Cocos teardown");
         android.os.Process.killProcess(android.os.Process.myPid());
     }
 
