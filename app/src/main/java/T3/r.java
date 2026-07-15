@@ -4,7 +4,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,7 +23,7 @@ public abstract class r extends KR2Activity {
     private static final int MAX_LAUNCH_ATTEMPTS = 15;
     private static final long GL_LAUNCH_TIMEOUT_MS = 2500L;
     public static Context app;
-    private TextView mask;
+    private View mask;
     private volatile boolean nativeBridgeInitialized;
     private volatile boolean destroyed;
 
@@ -32,15 +35,12 @@ public abstract class r extends KR2Activity {
         if (getIntent().getBooleanExtra("originMode", false)) {
             return;
         }
-        TextView textView = new TextView(this);
-        textView.setBackgroundColor(0xff000000);
-        textView.setText("Loading...");
-        textView.setTextColor(0xffffffff);
-        textView.setTextSize(32.0f);
-        textView.setGravity(17);
-        textView.setLayoutParams(new ViewGroup.LayoutParams(-1, -1));
-        this.mask = textView;
-        this.mFrameLayout.addView(textView);
+        boolean continueLoading = getIntent().getBooleanExtra(GameLoadingView.EXTRA_CONTINUE_LOADING, false);
+        int tipIndex = getIntent().getIntExtra(GameLoadingView.EXTRA_INITIAL_TIP_INDEX, -1);
+        GameLoadingView loadingView = new GameLoadingView(this, continueLoading, tipIndex);
+        loadingView.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+        this.mask = loadingView;
+        this.mFrameLayout.addView(loadingView);
         String path = getIntent().getStringExtra("path");
         boolean maps = getIntent().getBooleanExtra("maps", false);
         if (path != null && path.length() != 0) {
@@ -133,7 +133,15 @@ public abstract class r extends KR2Activity {
                 }
                 launched = launchResult[0];
                 if (launched && mask != null) {
-                    mask.post(() -> mask.animate().alpha(0.0f).setDuration(500L).setStartDelay(1500L).start());
+                    final View fadeMask = mask;
+                    fadeMask.post(() -> {
+                        fadeMask.animate().alpha(0.0f).setDuration(600L).setStartDelay(1200L)
+                                .setInterpolator(new AccelerateDecelerateInterpolator())
+                                .withEndAction(() -> {
+                                    try { ((ViewGroup) fadeMask.getParent()).removeView(fadeMask); } catch (Throwable ignored) { }
+                                })
+                                .start();
+                    });
                 } else if (!destroyed && currentAttempt < MAX_LAUNCH_ATTEMPTS) {
                     try { Thread.sleep(1000L); } catch (InterruptedException ignored) {
                         Thread.currentThread().interrupt();
@@ -147,7 +155,12 @@ public abstract class r extends KR2Activity {
 
     private void showLaunchFailure(String message) {
         runOnUiThread(() -> {
-            if (!destroyed && !isFinishing() && mask != null) mask.setText(message);
+            if (destroyed || isFinishing() || mask == null) return;
+            if (mask instanceof GameLoadingView) {
+                ((GameLoadingView) mask).showError(message);
+            } else if (mask instanceof TextView) {
+                ((TextView) mask).setText(message);
+            }
         });
     }
 

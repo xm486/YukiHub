@@ -6770,11 +6770,75 @@ try {
     private void launchGame(Game game) {
         lastStorageProbeResult = null;
         lastStorageProbeAt = 0L;
+        if (shouldShowLaunchLoadingOverlay(game)) {
+            showLaunchLoadingOverlay();
+        }
         if (shouldProbeStorageBeforeLaunch(game)) {
             launchGameWithStorageProbe(game);
             return;
         }
         doLaunchGame(game);
+    }
+
+    private View launchLoadingOverlay = null;
+    private int launchLoadingTipIndex = -1;
+
+    private boolean shouldShowLaunchLoadingOverlay(Game game) {
+        if (game == null) return false;
+        if (shouldProbeStorageBeforeLaunch(game)) return true;
+        String pkg = game.emulatorPackage == null ? "" : game.emulatorPackage.trim();
+        if (pkg.isEmpty() && game.engine == EngineType.KIRIKIRI) return true;
+        return isInternalKrkrLaunchPackage(pkg);
+    }
+
+    private boolean isInternalKrkrLaunchPackage(String emulatorPackage) {
+        String pkg = emulatorPackage == null ? "" : emulatorPackage.trim().toLowerCase(Locale.ROOT);
+        return pkg.startsWith("internal.krkr") || pkg.equals("org.tvp.kirikiri2.internal");
+    }
+
+    private void showLaunchLoadingOverlay() {
+        try {
+            if (launchLoadingOverlay != null) return;
+            T3.GameLoadingView overlay = new T3.GameLoadingView(this);
+            overlay.setLayoutParams(new android.widget.FrameLayout.LayoutParams(-1, -1));
+            ViewGroup root = findViewById(android.R.id.content);
+            if (root != null) {
+                root.addView(overlay);
+                launchLoadingOverlay = overlay;
+                launchLoadingTipIndex = overlay.getTipIndex();
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private void hideLaunchLoadingOverlay() {
+        try {
+            if (launchLoadingOverlay == null) return;
+            View v = launchLoadingOverlay;
+            launchLoadingOverlay = null;
+            launchLoadingTipIndex = -1;
+            v.animate().alpha(0f).setDuration(200L).setStartDelay(0)
+                    .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                    .withEndAction(() -> {
+                        try { ((ViewGroup) v.getParent()).removeView(v); } catch (Throwable ignored) { }
+                    }).start();
+        } catch (Throwable ignored) {
+            launchLoadingOverlay = null;
+            launchLoadingTipIndex = -1;
+        }
+    }
+
+    private void clearLaunchLoadingOverlay() {
+        try {
+            if (launchLoadingOverlay == null) return;
+            View v = launchLoadingOverlay;
+            launchLoadingOverlay = null;
+            launchLoadingTipIndex = -1;
+            try { v.animate().cancel(); } catch (Throwable ignored) { }
+            try { ((ViewGroup) v.getParent()).removeView(v); } catch (Throwable ignored) { }
+        } catch (Throwable ignored) {
+            launchLoadingOverlay = null;
+            launchLoadingTipIndex = -1;
+        }
     }
 
     private void doLaunchGame(Game game) {
@@ -6792,16 +6856,17 @@ try {
         if (game.engine == EngineType.ARTEMIS || game.engine == EngineType.TYRANO) launchTarget = "[游戏目录]";
         if (game.engine == EngineType.GAMEHUB) {
             String ghMode = game.gamehubLaunchMode == null ? "game" : game.gamehubLaunchMode.trim().toLowerCase(Locale.ROOT);
-            if (!("program".equals(ghMode) || "normal".equals(ghMode)) && (game.gamehubLocalGameId == null || game.gamehubLocalGameId.trim().isEmpty())) { Toast.makeText(this, "请先编辑游戏，通过Shizuku导入GameHub localGameId。", Toast.LENGTH_LONG).show(); return; }
+            if (!("program".equals(ghMode) || "normal".equals(ghMode)) && (game.gamehubLocalGameId == null || game.gamehubLocalGameId.trim().isEmpty())) { clearLaunchLoadingOverlay(); Toast.makeText(this, "请先编辑游戏，通过Shizuku导入GameHub localGameId。", Toast.LENGTH_LONG).show(); return; }
             launchTarget = game.title;
         }
-        if (emulatorPackage.isEmpty()) { Toast.makeText(this, "请先编辑游戏，填写模拟器包名。", Toast.LENGTH_LONG).show(); return; }
+        if (emulatorPackage.isEmpty()) { clearLaunchLoadingOverlay(); Toast.makeText(this, "请先编辑游戏，填写模拟器包名。", Toast.LENGTH_LONG).show(); return; }
         runningGameId = game.id;
         sessionStart = System.currentTimeMillis();
         String launchType = resolveLaunchType(emulatorPackage);
         runningSessionId = repository.startPlaySession(game.id, sessionStart, launchType);
         launchedExternal = true;
         if (!launchGameInternal(game, emulatorPackage, launchTarget)) {
+            clearLaunchLoadingOverlay();
             repository.cancelPlaySession(runningSessionId);
             launchedExternal = false;
             runningGameId = -1;
@@ -7187,7 +7252,12 @@ boolean compatMode = prefs != null && prefs.getBoolean(KEY_KR_COMPAT_MODE, false
 String krEngineVersion = prefs == null ? "auto" : prefs.getString(KEY_KR_ENGINE_VERSION, "auto");
 boolean safFileFallback = shouldUseKrSafFileFallback(game);
 if (safFileFallback) Log.i("YukiStorageProbe", "enable KR SAF file fallback for root=" + game.rootUri);
-return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.rootUri, launchTarget, false, compatMode, krEngineVersion, safFileFallback));
+android.content.Intent intent = EmulatorLauncher.buildInternalKrkrIntent(this, game.rootUri, launchTarget, false, compatMode, krEngineVersion, safFileFallback);
+if (launchLoadingOverlay != null) {
+    intent.putExtra(T3.GameLoadingView.EXTRA_CONTINUE_LOADING, true);
+    intent.putExtra(T3.GameLoadingView.EXTRA_INITIAL_TIP_INDEX, launchLoadingTipIndex);
+}
+return startActivitySafely(intent);
 }
         if (pkg.startsWith("internal.tyrano") || pkg.equals("com.yuki.yukihub.tyrano")) {
             return startActivitySafely(EmulatorLauncher.buildInternalTyranoIntent(this, game.rootUri, launchTarget));
@@ -7287,6 +7357,7 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
 
     @Override protected void onResume() {
     super.onResume();
+    clearLaunchLoadingOverlay();
     enterImmersiveMode();
     finishCurrentPlaySessionIfAny();
     resumeBackgroundVideoIfNeeded();
@@ -7307,6 +7378,11 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
 @Override protected void onPause() {
     pauseBackgroundVideoIfNeeded();
     super.onPause();
+}
+
+@Override protected void onStop() {
+    clearLaunchLoadingOverlay();
+    super.onStop();
 }
 
 @Override protected void onDestroy() {
