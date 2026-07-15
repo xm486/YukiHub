@@ -460,8 +460,12 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
             long existingUpdatedAt = exists ? Math.max(0L, g.updatedAt) : 0L;
             long incomingUpdatedAt = Math.max(0L, o.optLong("updated_at", existingUpdatedAt));
             boolean applyDetails = !exists || incomingUpdatedAt >= existingUpdatedAt;
+            // Title is metadata from the data source; always apply it regardless of
+            // updated_at comparison. The default value preserves the local title when
+            // incoming is empty. This prevents auto-generated folder names from
+            // overwriting proper titles during merge.
+            g.title = o.optString("title", g.title == null ? "未命名游戏" : g.title);
             if (applyDetails) {
-                g.title = o.optString("title", g.title == null ? "未命名游戏" : g.title);
                 g.originalTitle = o.optString("original_title", g.originalTitle);
                 g.engine = EngineType.fromString(o.optString("engine", g.engine == null ? EngineType.UNKNOWN.name() : g.engine.name()));
                 if (!rootUri.isEmpty() || g.rootUri == null || g.rootUri.trim().isEmpty()) g.rootUri = rootUri;

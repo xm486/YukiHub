@@ -204,6 +204,7 @@ private static final long MIN_PLAY_SESSION_MS = 0L;
 private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
 private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private boolean coverScanRunning = false;
+    private boolean coverMetadataRepairRunning = false;
     private boolean coverMaintenanceDone = false;
     private boolean autoLibraryScanRunning = false;
     private boolean webDavAutoSyncRunning = false;
@@ -600,20 +601,25 @@ private boolean isMissingFileUri(String uriText) {
 
 private void repairMissingMetadataCoversIfNeeded() {
     if (allGames.isEmpty() || metadataRepository == null) return;
+    if (coverMetadataRepairRunning) return;
     List<Game> targets = new ArrayList<>();
     for (Game g : allGames) {
         if (g == null || g.id <= 0) continue;
+        // Target games that have no cover at all, OR have a cover URI pointing
+        // to a file that no longer exists (e.g. restored from backup on a new
+        // device where the cached cover file path is invalid).
         boolean noCover = !hasCover(g);
         boolean missingFile = isMissingFileUri(g.coverPersistUri) || isMissingFileUri(g.coverUri);
         if (noCover || missingFile) targets.add(g);
     }
     if (targets.isEmpty()) return;
+    coverMetadataRepairRunning = true;
     AppExecutors.runOnIo(() -> {
         int changed = 0;
         for (Game g : targets) {
             try {
                 VnMetadata meta = currentSourceMetadata(g.id);
-if (meta == null) meta = anyCachedMetadata(g.id);
+                if (meta == null) meta = anyCachedMetadata(g.id);
                 if (meta == null || meta.coverUrl == null || meta.coverUrl.trim().isEmpty()) continue;
                 String cover = cacheRemoteImageSync(meta.coverUrl, "repair_cover_" + emptyText(meta.id, String.valueOf(g.id)));
                 if (cover == null || cover.isEmpty()) continue;
@@ -627,11 +633,20 @@ if (meta == null) meta = anyCachedMetadata(g.id);
             }
         }
         int finalChanged = changed;
-        if (finalChanged > 0) runOnUiThread(() -> {
-            allGames.clear();
-            allGames.addAll(repository.getAll());
-            applyFilter();
-            Toast.makeText(MainActivity.this, "已恢复 " + finalChanged + " 个同步封面", Toast.LENGTH_SHORT).show();
+        runOnUiThread(() -> {
+            coverMetadataRepairRunning = false;
+            if (finalChanged > 0) {
+                allGames.clear();
+                allGames.addAll(repository.getAll());
+                applyFilter();
+                if (selectedGame != null && containsGameId(allGames, selectedGame.id)) {
+                    // Refresh side panel cover if it was the selected game
+                    for (Game g : allGames) {
+                        if (g.id == selectedGame.id) { selectedGame = g; break; }
+                    }
+                }
+                Toast.makeText(MainActivity.this, "已恢复 " + finalChanged + " 个同步封面", Toast.LENGTH_SHORT).show();
+            }
         });
     });
 }
@@ -2053,6 +2068,7 @@ private void maybeAutoWebDavSync() {
             runOnUiThread(() -> {
                 webDavAutoSyncRunning = false;
                 if (result != null && result.hasChanges()) {
+                    coverMaintenanceDone = false;
                     loadGames();
                     updateProfilePanel();
                     Toast.makeText(MainActivity.this, "WebDAV 自动同步完成", Toast.LENGTH_SHORT).show();
@@ -2346,6 +2362,9 @@ private void importLocalBackup(Uri uri) {
             return;
         }
         new com.yuki.yukihub.sync.SyncManager(this).importSnapshotFromLocalBackup(root);
+        // Reset cover maintenance so that newly imported games get their
+        // remote covers downloaded and local covers scanned automatically.
+        coverMaintenanceDone = false;
         loadGames();
         applyCustomBackground();
         updateProfilePanel();
@@ -2762,8 +2781,15 @@ private void loadRemoteImage(String url, ImageView target) {
     loadRemoteImage(url, target, "img");
 }
 
+private void invalidateRemoteImageRequest(ImageView target) {
+    if (target == null) return;
+    target.setTag(R.id.tag_remote_image_request, "cancel:" + System.nanoTime());
+}
+
 private void loadRemoteImage(String url, ImageView target, String prefix) {
     if (target == null) return;
+    final String requestTag = "remote:" + (prefix == null ? "img" : prefix) + ":" + (url == null ? "" : url.trim());
+    target.setTag(R.id.tag_remote_image_request, requestTag);
     if (url == null || url.trim().isEmpty()) { target.setImageDrawable(null); return; }
     final String imageUrl = url.trim();
     AppExecutors.runOnIo(() -> {
@@ -2785,6 +2811,8 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
             Bitmap finalBitmap = bitmap;
             runOnUiThread(() -> {
                 if (finalBitmap == null || target.getWindowToken() == null) return;
+                Object currentRequest = target.getTag(R.id.tag_remote_image_request);
+                if (!(currentRequest instanceof String) || !requestTag.equals(currentRequest)) return;
                 target.setImageBitmap(finalBitmap);
                 Object tag = target.getTag();
                 if (tag instanceof Game && prefix != null && prefix.startsWith("cover_") && cacheFile.exists()) {

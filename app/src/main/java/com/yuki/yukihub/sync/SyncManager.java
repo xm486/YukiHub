@@ -348,8 +348,11 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
     }
 
     private JSONObject mergeSnapshots(JSONObject local, JSONObject remote) throws Exception {
-        importSnapshot(remote);
+        // Import local first as a baseline, then overlay remote on top.
+        // This ensures that cloud-sourced metadata (titles, covers from VNDB/Bangumi)
+        // always wins over auto-generated folder names from local scans.
         importSnapshot(local);
+        importSnapshot(remote);
         return buildLocalSnapshot();
     }
 

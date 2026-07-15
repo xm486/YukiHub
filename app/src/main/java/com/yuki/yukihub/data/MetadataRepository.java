@@ -89,16 +89,17 @@ public class MetadataRepository {
     public JSONArray exportMetadataJson() throws Exception {
         JSONArray arr = new JSONArray();
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT m.game_id,g.root_uri,m.source,m.source_id,m.json,m.updated_at FROM metadata_cache m LEFT JOIN games g ON g.id=m.game_id ORDER BY m.updated_at ASC", null);
+        Cursor c = db.rawQuery("SELECT m.game_id,g.root_uri,g.title,m.source,m.source_id,m.json,m.updated_at FROM metadata_cache m LEFT JOIN games g ON g.id=m.game_id ORDER BY m.updated_at ASC", null);
         try {
             while (c.moveToNext()) {
                 JSONObject o = new JSONObject();
                 o.put("game_local_id", c.getLong(0));
                 o.put("game_root_uri", c.getString(1));
-                o.put("source", c.getString(2));
-                o.put("source_id", c.getString(3));
-                o.put("json", c.getString(4));
-                o.put("updated_at", c.getLong(5));
+                o.put("game_title", c.getString(2));
+                o.put("source", c.getString(3));
+                o.put("source_id", c.getString(4));
+                o.put("json", c.getString(5));
+                o.put("updated_at", c.getLong(6));
                 arr.put(o);
             }
         } finally {
@@ -116,7 +117,18 @@ public class MetadataRepository {
             if (o == null) continue;
             String rootUri = o.optString("game_root_uri", "");
             long gameId = findGameIdByRootUri(db, rootUri);
-            if (gameId <= 0 && (rootUri == null || rootUri.trim().isEmpty())) gameId = findGameIdByLocalId(db, o.optLong("game_local_id", -1));
+            // When rootUri is empty (common for GameHub/emulator entries), try
+            // title-based matching before falling back to local_id. local_id is
+            // an auto-increment primary key and differs across devices, so it
+            // cannot be relied on for cross-device sync.
+            if (gameId <= 0 && (rootUri == null || rootUri.trim().isEmpty())) {
+                String gameTitle = o.optString("game_title", "").trim();
+                gameId = findGameIdByTitle(db, gameTitle);
+                // Legacy backups may not contain game_title. In that case, do not
+                // fall back to local_id: it is an auto-increment primary key and
+                // can point to a completely different game on another device.
+                if (gameId <= 0 && !gameTitle.isEmpty()) gameId = findGameIdByLocalId(db, o.optLong("game_local_id", -1));
+            }
             String source = o.optString("source", "");
             String json = o.optString("json", "");
             if (gameId <= 0 || source.isEmpty() || json.isEmpty()) continue;
@@ -156,6 +168,16 @@ public class MetadataRepository {
     private long findGameIdByLocalId(SQLiteDatabase db, long localId) {
         if (localId <= 0) return -1;
         Cursor c = db.rawQuery("SELECT id FROM games WHERE id=? LIMIT 1", new String[]{String.valueOf(localId)});
+        try {
+            return c.moveToFirst() ? c.getLong(0) : -1;
+        } finally {
+            c.close();
+        }
+    }
+
+    private long findGameIdByTitle(SQLiteDatabase db, String title) {
+        if (title == null || title.trim().isEmpty()) return -1;
+        Cursor c = db.rawQuery("SELECT id FROM games WHERE title=? LIMIT 1", new String[]{title.trim()});
         try {
             return c.moveToFirst() ? c.getLong(0) : -1;
         } finally {

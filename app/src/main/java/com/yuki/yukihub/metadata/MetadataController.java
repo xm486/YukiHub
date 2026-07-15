@@ -176,6 +176,11 @@ public class MetadataController {
         delegate.prefs().edit().putString(KEY_VISIBLE_METADATA_SOURCE_PREFIX + gameId, normalizeMetadataSource(source)).apply();
     }
 
+    public void clearVisibleMetadataSource(long gameId) {
+        if (delegate.prefs() == null || gameId <= 0) return;
+        delegate.prefs().edit().remove(KEY_VISIBLE_METADATA_SOURCE_PREFIX + gameId).apply();
+    }
+
     public VnMetadata metadataForSource(long gameId, String source) {
         if (delegate.metadataRepository() == null || gameId <= 0) return null;
         String s = normalizeMetadataSource(source);
@@ -360,6 +365,7 @@ public class MetadataController {
         if (usingYmgal()) delegate.metadataRepository().clearYmgal(gameId);
         else if (usingBangumi()) delegate.metadataRepository().clearBangumi(gameId);
         else delegate.metadataRepository().clearVndb(gameId);
+        clearVisibleMetadataSource(gameId);
     }
 
     public VnMetadata currentSourceMetadata(long gameId) {
@@ -719,7 +725,8 @@ public class MetadataController {
                     ((TextView) itemView.findViewById(R.id.tvCandidateTitle)).setText("不匹配 / 暂不使用" + sourceLabel);
                     ((TextView) itemView.findViewById(R.id.tvCandidateOriginal)).setText("保留当前本地资料");
                     ((TextView) itemView.findViewById(R.id.tvCandidateInfo)).setText("关闭弹窗，不绑定" + sourceLabel);
-                    ((ImageView) itemView.findViewById(R.id.ivCandidateCover)).setImageDrawable(null);
+                    ImageView cover = itemView.findViewById(R.id.ivCandidateCover);
+                    delegate.loadRemoteImage("", cover, "cand_empty_" + position);
                 } else {
                     ((TextView) itemView.findViewById(R.id.tvCandidateTitle)).setText(delegate.emptyText(m.chineseTitle, delegate.emptyText(m.romanTitle, "未命名")));
                     ((TextView) itemView.findViewById(R.id.tvCandidateOriginal)).setText(delegate.emptyText(m.originalTitle, m.id));
@@ -742,8 +749,9 @@ public class MetadataController {
                         }
                         return;
                     } else {
-                        delegate.sideDetailOriginalTitle().setText("未绑定" + metadataSourceLabel());
-                        delegate.setSideDescription(delegate.emptyText(game.description, "已跳过" + metadataSourceLabel() + "匹配。"));
+                        clearCurrentSourceMetadata(game.id);
+                        applyVndbMetadata(null, game);
+                        delegate.setSideDescription(delegate.emptyText(game.description, "已跳过" + metadataSourceLabel() + "匹配，使用本地资料。"));
                     }
                     if (dialogRef[0] != null) dialogRef[0].dismiss();
                 });
@@ -769,7 +777,25 @@ public class MetadataController {
         if (meta == null) {
             updateSideMetadataSourceBadge("");
             delegate.updateTranslateButtonState();
-            delegate.setSideDescription(delegate.emptyText(game.description, metadataSourceLabel() + " 暂未匹配到资料。"));
+            delegate.sideDetailTitle().setText(delegate.emptyText(game == null ? "" : game.title, "未命名游戏"));
+            delegate.sideDetailOriginalTitle().setText("未绑定" + metadataSourceLabel());
+            delegate.loadRemoteImage("", delegate.sideDetailCover(), "cover_empty_" + gameId);
+            delegate.loadRemoteImage("", delegate.sideScreenshot1(), "shot1_empty_" + gameId);
+            delegate.loadRemoteImage("", delegate.sideScreenshot2(), "shot2_empty_" + gameId);
+            String localCover = game == null ? "" : delegate.safeCoverUri(game);
+            if (localCover != null && !localCover.isEmpty()) {
+                try {
+                    delegate.sideDetailCover().setImageURI(Uri.parse(localCover));
+                    delegate.sideDetailCover().setVisibility(View.VISIBLE);
+                    delegate.sideDetailPlaceholder().setVisibility(View.GONE);
+                } catch (Throwable ignored) { }
+            } else {
+                delegate.sideDetailCover().setImageDrawable(null);
+                delegate.sideDetailCover().setVisibility(View.GONE);
+                delegate.sideDetailPlaceholder().setVisibility(View.VISIBLE);
+                if (delegate.sideDetailPlaceholder() instanceof TextView) ((TextView) delegate.sideDetailPlaceholder()).setText(delegate.initials(game == null ? "" : game.title));
+            }
+            delegate.setSideDescription(delegate.emptyText(game == null ? "" : game.description, metadataSourceLabel() + " 暂未匹配到资料。"));
             return;
         }
         String visibleSourceLabel = metadataSourceLabelForVisibleMetadata(gameId, meta);
@@ -789,9 +815,16 @@ public class MetadataController {
             delegate.sideDetailPlaceholder().setVisibility(View.GONE);
             delegate.sideDetailCover().setTag(game);
             delegate.loadRemoteImage(meta.coverUrl, delegate.sideDetailCover(), "cover_" + delegate.emptyText(meta.id, String.valueOf(game.id)));
+        } else {
+            delegate.sideDetailCover().setTag(null);
+            delegate.loadRemoteImage("", delegate.sideDetailCover(), "cover_empty_" + gameId);
+            delegate.sideDetailCover().setVisibility(View.GONE);
+            delegate.sideDetailPlaceholder().setVisibility(View.VISIBLE);
         }
         if (meta.screenshotUrls.size() > 0) delegate.loadRemoteImage(meta.screenshotUrls.get(0), delegate.sideScreenshot1(), "shot1_" + delegate.emptyText(meta.id, String.valueOf(game.id)));
+        else delegate.loadRemoteImage("", delegate.sideScreenshot1(), "shot1_empty_" + gameId);
         if (meta.screenshotUrls.size() > 1) delegate.loadRemoteImage(meta.screenshotUrls.get(1), delegate.sideScreenshot2(), "shot2_" + delegate.emptyText(meta.id, String.valueOf(game.id)));
+        else delegate.loadRemoteImage("", delegate.sideScreenshot2(), "shot2_empty_" + gameId);
     }
 
     // ======================== sync to game card ========================
