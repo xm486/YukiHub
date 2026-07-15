@@ -17,7 +17,7 @@ import retrofit2.Retrofit;
 
 public class BangumiClient {
     private static final String SEARCH_ENDPOINT_BGM = "https://api.bgm.tv/v0/search/subjects";
-    private static final String SEARCH_ENDPOINT_MIRROR = "https://api.bangumi.one/v0/search/subjects";
+    private static final String SEARCH_ENDPOINT_MIRROR = "https://api.bangumi.lol/v0/search/subjects";
     private static final int MAX_RETRIES = 2;
     private static final long RETRY_DELAY_MS = 1500;
 
@@ -100,7 +100,7 @@ public class BangumiClient {
                                     .header("Accept", "application/json")
                                     .build()))
                             .build();
-                    Retrofit retrofit = HttpClient.retrofit("https://api.bangumi.one/", client);
+                    Retrofit retrofit = HttpClient.retrofit("https://api.bangumi.lol/", client);
                     mirrorService = retrofit.create(ApiService.class);
                 }
             }
