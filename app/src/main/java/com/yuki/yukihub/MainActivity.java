@@ -288,7 +288,11 @@ private int uiSwitchSoundId;
 private long lastUiSoundAt;
 private Uri pendingBackgroundVideoUri;
 private ActivityResultLauncher<String> backupCreateLauncher;
-private ActivityResultLauncher<String[]> backupOpenLauncher;
+    private ActivityResultLauncher<String[]> backupOpenLauncher;
+    private ActivityResultLauncher<String[]> playniteImportLauncher;
+    private ActivityResultLauncher<String[]> potatovnImportLauncher;
+    private ActivityResultLauncher<Uri> vniteImportLauncher;
+    private ActivityResultLauncher<String[]> lunaboxImportLauncher;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -578,6 +582,20 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
         });
         backupOpenLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
             if (uri != null) importLocalBackup(uri);
+        });
+
+        // ===== 三方平台导入 =====
+        playniteImportLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri != null) doImportFromPlaynite(uri);
+        });
+        potatovnImportLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri != null) doImportFromPotatoVN(uri);
+        });
+        vniteImportLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
+            if (uri != null) doImportFromVnite(uri);
+        });
+        lunaboxImportLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri != null) doImportFromLunaBox(uri);
         });
     }
 
@@ -2321,18 +2339,8 @@ public void openLocalBackupExportFromSyncCenter() {
 }
 
 public void openLocalBackupImportFromSyncCenter() {
-    confirmImportLocalBackup();
+    backupOpenLauncher.launch(new String[]{"application/json", "text/*", "*/*"});
 }
-
-private void confirmImportLocalBackup() {
-    AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle("本地导入")
-            .setMessage("将从备份 JSON 导入个人资料、游戏库、游玩记录和元数据。\n\n导入策略：\n- 游戏按 rootUri 去重合并\n- 游玩记录按 session_uuid 去重\n- 图片只恢复 URI/URL，不复制图片文件\n\n是否继续？")
-            .setPositiveButton("选择文件", (d, w) -> backupOpenLauncher.launch(new String[]{"application/json", "text/*", "*/*"}))
-.setNegativeButton("取消", null)
-        .show();
-        styleAlertDialogDark(dialog);
-    }
 
 private void exportLocalBackup(Uri uri) {
     try {
@@ -2354,39 +2362,765 @@ private void exportLocalBackup(Uri uri) {
 }
 
 private void importLocalBackup(Uri uri) {
-    try {
-        String text = readTextFromUri(uri);
-        JSONObject root = new JSONObject(text);
-        if (!"YukiHub".equals(root.optString("app", ""))) {
-            Toast.makeText(this, "不是有效的 YukiHub 备份", Toast.LENGTH_LONG).show();
-            return;
-        }
-        new com.yuki.yukihub.sync.SyncManager(this).importSnapshotFromLocalBackup(root);
-        // Reset cover maintenance so that newly imported games get their
-        // remote covers downloaded and local covers scanned automatically.
-        coverMaintenanceDone = false;
-        loadGames();
-        applyCustomBackground();
-        updateProfilePanel();
-        int gameCount = root.optJSONArray("games") == null ? 0 : root.optJSONArray("games").length();
-        int sessionCount = root.optJSONArray("play_sessions") == null ? 0 : root.optJSONArray("play_sessions").length();
-        int metaCount = root.optJSONArray("metadata_cache") == null ? 0 : root.optJSONArray("metadata_cache").length();
-        Toast.makeText(this, "导入完成：游戏 " + gameCount + "，记录 " + sessionCount + "，元数据 " + metaCount, Toast.LENGTH_LONG).show();
-} catch (Throwable t) {
-            Toast.makeText(this, "导入失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
-            Log.e("YukiHub", "import backup failed", t);
-        }
-}
+     try {
+         String text = readTextFromUri(uri);
+         JSONObject root = new JSONObject(text);
+         if (!"YukiHub".equals(root.optString("app", ""))) {
+             Toast.makeText(this, "不是有效的 YukiHub 备份", Toast.LENGTH_LONG).show();
+             return;
+         }
+         // 显示导入预览
+         showYukiHubBackupPreview(root);
+     } catch (Throwable t) {
+         Toast.makeText(this, "读取备份失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+         Log.e("YukiHub", "read backup failed", t);
+     }
+ }
 
-private String readTextFromUri(Uri uri) throws Exception {
-    try (InputStream in = getContentResolver().openInputStream(uri); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
-        if (in == null) throw new Exception("openInputStream failed");
-        byte[] buf = new byte[8192];
-        int len;
-        while ((len = in.read(buf)) != -1) bos.write(buf, 0, len);
-        return bos.toString("UTF-8");
+ /**
+  * YukiHub 备份导入预览：展示备份中的游戏/记录/元数据统计，用户确认后导入。
+  */
+ private void showYukiHubBackupPreview(JSONObject root) {
+     int gameCount = root.optJSONArray("games") == null ? 0 : root.optJSONArray("games").length();
+     int sessionCount = root.optJSONArray("play_sessions") == null ? 0 : root.optJSONArray("play_sessions").length();
+     int metaCount = root.optJSONArray("metadata_cache") == null ? 0 : root.optJSONArray("metadata_cache").length();
+     String backupType = root.optString("backup_type", "local_full");
+     String note = root.optString("note", "");
+     // 备份 JSON 写的字段名是 "schema"（整数），不是 "schema_version"
+     int schemaInt = root.optInt("schema", -1);
+     String schemaVersion = schemaInt > 0 ? String.valueOf(schemaInt) : root.optString("schema_version", "未知");
+     long createdAt = root.optLong("created_at", 0);
+
+     // 统计新游戏 vs 已存在
+     int newGames = 0, existingGames = 0;
+     JSONArray gamesArr = root.optJSONArray("games");
+     java.util.Set<String> existingNames = new java.util.HashSet<>();
+     if (repository != null && repository.getAll() != null) {
+         for (Game g : repository.getAll()) {
+             if (g.title != null) existingNames.add(g.title.trim().toLowerCase());
+         }
+     }
+     if (gamesArr != null) {
+         for (int i = 0; i < gamesArr.length(); i++) {
+             JSONObject o = gamesArr.optJSONObject(i);
+             if (o == null) continue;
+             String title = o.optString("title", "").trim().toLowerCase();
+             if (title.isEmpty()) continue;
+             if (existingNames.contains(title)) existingGames++;
+             else newGames++;
+         }
+     }
+
+     // 时间格式化
+     String dateStr = "";
+     if (createdAt > 0) {
+         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault());
+         dateStr = sdf.format(new java.util.Date(createdAt));
+     }
+
+     int pad = dp(16);
+     int itemSpacing = dp(10);
+
+     LinearLayout listRoot = new LinearLayout(this);
+     listRoot.setOrientation(LinearLayout.VERTICAL);
+     listRoot.setPadding(pad, dp(14), pad, dp(14));
+     // ── 备份信息卡片 ──
+     LinearLayout infoCard = new LinearLayout(this);
+     infoCard.setOrientation(LinearLayout.VERTICAL);
+     infoCard.setPadding(pad, dp(12), pad, dp(12));
+     infoCard.setBackgroundResource(R.drawable.bg_card);
+
+
+     TextView infoHeader = new TextView(this);
+     infoHeader.setText("📁 备份信息");
+     infoHeader.setTextColor(getColorCompat(R.color.yh_text));
+     infoHeader.setTextSize(14);
+     infoHeader.setTypeface(null, android.graphics.Typeface.BOLD);
+     infoHeader.setPadding(0, 0, 0, dp(8));
+     infoCard.addView(infoHeader);
+
+     // 用表格风格的两列展示信息
+     infoCard.addView(makeInfoRow("版本", schemaVersion));
+     infoCard.addView(makeInfoRow("类型", backupType));
+     if (!dateStr.isEmpty()) infoCard.addView(makeInfoRow("备份时间", dateStr));
+
+     listRoot.addView(infoCard);
+
+     // 间距
+     addVerticalSpace(listRoot, itemSpacing);
+
+     // ── 数据统计卡片 ──
+     LinearLayout statCard = new LinearLayout(this);
+     statCard.setOrientation(LinearLayout.VERTICAL);
+     statCard.setPadding(pad, dp(12), pad, dp(12));
+     statCard.setBackgroundResource(R.drawable.bg_card);
+
+     TextView statHeader = new TextView(this);
+     statHeader.setText("📊 数据概览");
+     statHeader.setTextColor(getColorCompat(R.color.yh_text));
+     statHeader.setTextSize(14);
+     statHeader.setTypeface(null, android.graphics.Typeface.BOLD);
+     statHeader.setPadding(0, 0, 0, dp(8));
+     statCard.addView(statHeader);
+
+     // 三列统计
+     LinearLayout statRow = new LinearLayout(this);
+     statRow.setOrientation(LinearLayout.HORIZONTAL);
+     statRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+     statRow.addView(makeStatBlock(gameCount + "", "游戏",
+             newGames > 0 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text)));
+     statRow.addView(makeStatBlock(sessionCount + "", "游玩记录", getColorCompat(R.color.yh_text)));
+     statRow.addView(makeStatBlock(metaCount + "", "元数据", getColorCompat(R.color.yh_text)));
+
+     statCard.addView(statRow);
+
+     // 新增/已存在标签
+     TextView existInfo = new TextView(this);
+     existInfo.setText("┃ 新增 " + newGames + " 个  ·  已存在 " + existingGames + " 个（将合并更新）");
+     existInfo.setTextColor(newGames > 0 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text_muted));
+     existInfo.setTextSize(11);
+     existInfo.setTypeface(null, android.graphics.Typeface.BOLD);
+     existInfo.setPadding(0, dp(10), 0, 0);
+     statCard.addView(existInfo);
+
+     listRoot.addView(statCard);
+
+     addVerticalSpace(listRoot, itemSpacing);
+
+     // ── 导入策略卡片 ──
+     LinearLayout strategyCard = new LinearLayout(this);
+     strategyCard.setOrientation(LinearLayout.VERTICAL);
+     strategyCard.setPadding(pad, dp(12), pad, dp(12));
+     strategyCard.setBackgroundResource(R.drawable.bg_card);
+
+     TextView strategyHeader = new TextView(this);
+     strategyHeader.setText("ℹ️ 导入策略");
+     strategyHeader.setTextColor(getColorCompat(R.color.yh_text));
+     strategyHeader.setTextSize(14);
+     strategyHeader.setTypeface(null, android.graphics.Typeface.BOLD);
+     strategyHeader.setPadding(0, 0, 0, dp(8));
+     strategyCard.addView(strategyHeader);
+
+     String[] strategies = {
+         "游戏按 rootUri/标题去重合并（字段更新，非跳过）",
+         "游玩记录按 session_uuid 去重",
+         "元数据缓存按来源 + source_id 匹配",
+         "图片只恢复 URI/URL，不复制图片文件"
+     };
+     for (String s : strategies) {
+         TextView item = new TextView(this);
+         item.setText("• " + s);
+         item.setTextColor(getColorCompat(R.color.yh_text_muted));
+         item.setTextSize(10);
+         item.setLineSpacing(dp(2), 1.0f);
+         item.setPadding(0, dp(2), 0, dp(2));
+         strategyCard.addView(item);
+     }
+
+     listRoot.addView(strategyCard);
+
+     // 备注
+     if (!note.isEmpty()) {
+         addVerticalSpace(listRoot, itemSpacing);
+         TextView noteText = new TextView(this);
+         noteText.setText("💬 " + note);
+         noteText.setTextColor(getColorCompat(R.color.yh_text_muted));
+         noteText.setTextSize(10);
+         noteText.setPadding(pad, dp(8), pad, dp(8));
+         noteText.setBackgroundColor(0x00000000);
+         listRoot.addView(noteText);
+     }
+
+     ScrollView scroll = new ScrollView(this);
+     scroll.setFillViewport(false);
+     scroll.setBackgroundResource(R.drawable.bg_dialog);
+     tintDialogRoot(scroll);
+     scroll.addView(listRoot, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+
+     AlertDialog dialog = new AlertDialog.Builder(this)
+             .setTitle("YukiHub 备份导入预览")
+             .setView(scroll)
+             .setPositiveButton("确认导入", null)
+             .setNegativeButton("取消", null)
+             .show();
+     styleAlertDialogDark(dialog);
+     if (dialog.getWindow() != null) {
+         dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.54f), (int) (getResources().getDisplayMetrics().heightPixels * 0.72f));
+     }
+     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+         dialog.dismiss();
+         executeYukiHubBackupImport(root);
+     });
+ }
+
+ /** 创建信息行：标签 + 值 */
+ private LinearLayout makeInfoRow(String label, String value) {
+     LinearLayout row = new LinearLayout(this);
+     row.setOrientation(LinearLayout.HORIZONTAL);
+     row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+     row.setPadding(0, dp(3), 0, dp(3));
+
+     TextView labelView = new TextView(this);
+     labelView.setText(label);
+     labelView.setTextColor(getColorCompat(R.color.yh_text_muted));
+     labelView.setTextSize(11);
+     labelView.setTypeface(null, android.graphics.Typeface.BOLD);
+     labelView.setMinWidth(dp(72));
+     row.addView(labelView);
+
+     TextView sepView = new TextView(this);
+     sepView.setText("  :  ");
+     sepView.setTextColor(getColorCompat(R.color.yh_text_muted));
+     sepView.setTextSize(11);
+     row.addView(sepView);
+
+     TextView valueView = new TextView(this);
+     valueView.setText(value);
+     valueView.setTextColor(getColorCompat(R.color.yh_text));
+     valueView.setTextSize(12);
+     row.addView(valueView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+     return row;
+ }
+
+ /** 创建统计块：大数字 + 小标签 */
+ private LinearLayout makeStatBlock(String number, String label, int color) {
+     LinearLayout block = new LinearLayout(this);
+     block.setOrientation(LinearLayout.VERTICAL);
+     block.setGravity(android.view.Gravity.CENTER);
+
+     TextView numView = new TextView(this);
+     numView.setText(number);
+     numView.setTextColor(color);
+     numView.setTextSize(22);
+     numView.setTypeface(null, android.graphics.Typeface.BOLD);
+     numView.setGravity(android.view.Gravity.CENTER);
+     block.addView(numView);
+
+     TextView labelView = new TextView(this);
+     labelView.setText(label);
+     labelView.setTextColor(getColorCompat(R.color.yh_text_muted));
+     labelView.setTextSize(10);
+     labelView.setGravity(android.view.Gravity.CENTER);
+     labelView.setPadding(0, dp(2), 0, 0);
+     block.addView(labelView);
+
+     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+     block.setLayoutParams(lp);
+     return block;
+ }
+
+ /** 添加垂直间距 */
+ private void addVerticalSpace(LinearLayout parent, int heightDp) {
+     View space = new View(this);
+     space.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightDp));
+     parent.addView(space);
+ }
+
+ private void executeYukiHubBackupImport(JSONObject root) {
+     showImportLoading("正在导入 YukiHub 备份…");
+     new Thread(() -> {
+         try {
+             new com.yuki.yukihub.sync.SyncManager(this).importSnapshotFromLocalBackup(root);
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 coverMaintenanceDone = false;
+                 loadGames();
+                 applyCustomBackground();
+                 updateProfilePanel();
+                 int gameCount = root.optJSONArray("games") == null ? 0 : root.optJSONArray("games").length();
+                 int sessionCount = root.optJSONArray("play_sessions") == null ? 0 : root.optJSONArray("play_sessions").length();
+                 int metaCount = root.optJSONArray("metadata_cache") == null ? 0 : root.optJSONArray("metadata_cache").length();
+                 Toast.makeText(this, "导入完成：游戏 " + gameCount + "，记录 " + sessionCount + "，元数据 " + metaCount, Toast.LENGTH_LONG).show();
+             });
+         } catch (Exception e) {
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 Toast.makeText(this, "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                 Log.e("YukiHub", "backup import failed", e);
+             });
+         }
+     }).start();
+ }
+
+ private String readTextFromUri(Uri uri) throws Exception {
+     try (InputStream in = getContentResolver().openInputStream(uri); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+         if (in == null) throw new Exception("openInputStream failed");
+         byte[] buf = new byte[8192];
+         int len;
+         while ((len = in.read(buf)) != -1) bos.write(buf, 0, len);
+         return bos.toString("UTF-8");
+     }
+ }
+
+ // ==================== 三方平台数据导入 ====================
+
+/**
+   * 弹出三方平台导入选择对话框。
+   * 四个平台：Playnite / PotatoVN / Vnite / LunaBox
+   */
+  private void showExternalImportDialog() {
+      int pad = dp(16);
+
+      LinearLayout root = new LinearLayout(this);
+      root.setOrientation(LinearLayout.VERTICAL);
+      root.setPadding(pad, dp(14), pad, dp(14));
+
+      // 说明文字
+      TextView intro = new TextView(this);
+      intro.setText("选择要导入数据的平台，导入前会先预览所有可导入的游戏。");
+      intro.setTextColor(getColorCompat(R.color.yh_text_muted));
+      intro.setTextSize(11);
+      intro.setLineSpacing(dp(2), 1.0f);
+      intro.setPadding(0, 0, 0, dp(12));
+      root.addView(intro);
+
+      // 四个平台卡片
+      String[][] platforms = {
+          {"🎮  Playnite", "JSON 文件", "在 Playnite 中导出游戏库为 JSON",
+           "application/json", "text/*", "*/*"},
+          {"🥔  PotatoVN", "ZIP 文件", "包含游戏列表、封面和游玩记录",
+           "application/zip", "application/octet-stream", "*/*"},
+          {"📁  Vnite", "导出目录", "选择 Vnite 的导出文件夹",
+           null, null, null},
+          {"🌙  LunaBox", "ZIP 备份", "LunaBox 完整备份（游戏 + 封面 + 游玩记录）",
+           "application/zip", "application/octet-stream", "*/*"}
+      };
+
+      for (int i = 0; i < platforms.length; i++) {
+          final int idx = i;
+          LinearLayout card = new LinearLayout(this);
+          card.setOrientation(LinearLayout.HORIZONTAL);
+          card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+          card.setPadding(pad, dp(12), pad, dp(12));
+          card.setBackgroundResource(R.drawable.bg_card);
+
+          // 左侧：图标 + 名称 + 格式
+          LinearLayout textCol = new LinearLayout(this);
+          textCol.setOrientation(LinearLayout.VERTICAL);
+          textCol.setPadding(0, 0, dp(8), 0);
+
+          TextView title = new TextView(this);
+          title.setText(platforms[i][0]);
+          title.setTextColor(getColorCompat(R.color.yh_text));
+          title.setTextSize(14);
+          title.setTypeface(null, android.graphics.Typeface.BOLD);
+          textCol.addView(title);
+
+          TextView subtitle = new TextView(this);
+          subtitle.setText(platforms[i][1] + "  ·  " + platforms[i][2]);
+          subtitle.setTextColor(getColorCompat(R.color.yh_text_muted));
+          subtitle.setTextSize(10);
+          subtitle.setPadding(0, dp(2), 0, 0);
+          textCol.addView(subtitle);
+
+          card.addView(textCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+          // 右侧：箭头
+          TextView arrow = new TextView(this);
+          arrow.setText("→");
+          arrow.setTextColor(getColorCompat(R.color.yh_primary));
+          arrow.setTextSize(18);
+          arrow.setTypeface(null, android.graphics.Typeface.BOLD);
+          card.addView(arrow);
+
+          // 点击事件
+          card.setOnClickListener(v -> {
+              switch (idx) {
+                  case 0: // Playnite
+                      playniteImportLauncher.launch(new String[]{"application/json", "text/*", "*/*"});
+                      break;
+                  case 1: // PotatoVN
+                      potatovnImportLauncher.launch(new String[]{"application/zip", "application/octet-stream", "*/*"});
+                      break;
+                  case 2: // Vnite
+                      vniteImportLauncher.launch(null);
+                      break;
+                  case 3: // LunaBox
+                      lunaboxImportLauncher.launch(new String[]{"application/zip", "application/octet-stream", "*/*"});
+                      break;
+              }
+          });
+
+          LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+          if (i > 0) cardLp.setMargins(0, dp(8), 0, 0);
+          root.addView(card, cardLp);
+      }
+
+      // 底部注意事项
+      addVerticalSpace(root, dp(12));
+      TextView notice = new TextView(this);
+      notice.setText("⚠️ 注意：游戏路径是 PC 路径，导入后不设游戏目录。已存在的同名游戏会自动跳过。游玩记录会自动导入。");
+      notice.setTextColor(getColorCompat(R.color.yh_text_muted));
+      notice.setTextSize(9);
+      notice.setLineSpacing(dp(2), 1.0f);
+      root.addView(notice);
+
+      ScrollView scroll = new ScrollView(this);
+      scroll.setFillViewport(false);
+      scroll.setBackgroundResource(R.drawable.bg_dialog);
+      tintDialogRoot(scroll);
+      scroll.addView(root, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+
+      AlertDialog dialog = new AlertDialog.Builder(this)
+              .setTitle("从其他平台导入")
+              .setView(scroll)
+              .setNegativeButton("关闭", null)
+              .show();
+      styleAlertDialogDark(dialog);
+      if (dialog.getWindow() != null) {
+          dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.56f), (int) (getResources().getDisplayMetrics().heightPixels * 0.72f));
+      }
+  }
+
+ /** 存储待确认的导入候选项（预览阶段） */
+ private java.util.List<com.yuki.yukihub.importer.ImportGameData> pendingImportGames;
+ /** 存储待确认导入的数据源标签 */
+ private String pendingImportSourceLabel;
+
+ /**
+  * 执行 Playnite JSON 导入（解析 → 预览）
+  */
+ private void doImportFromPlaynite(Uri uri) {
+     showImportLoading("正在解析 Playnite 数据…");
+     new Thread(() -> {
+         try {
+             java.util.List<com.yuki.yukihub.importer.ImportGameData> games =
+                     com.yuki.yukihub.importer.PlayniteImporter.parse(this, uri);
+             com.yuki.yukihub.importer.ImporterService service =
+                     new com.yuki.yukihub.importer.ImporterService(this);
+             service.markExisting(games);
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 pendingImportGames = games;
+                 pendingImportSourceLabel = "Playnite";
+                 showImportPreviewDialog(games, "Playnite");
+             });
+         } catch (Exception e) {
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 Toast.makeText(this, "Playnite 解析失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                 Log.e("YukiHub", "Playnite parse failed", e);
+             });
+         }
+     }).start();
+ }
+
+ /**
+  * 执行 PotatoVN ZIP 导入（解析 → 预览）
+  */
+ private void doImportFromPotatoVN(Uri uri) {
+     showImportLoading("正在解析 PotatoVN 数据…");
+     new Thread(() -> {
+         try {
+             java.util.List<com.yuki.yukihub.importer.ImportGameData> games =
+                     com.yuki.yukihub.importer.PotatoVnImporter.parse(this, uri);
+             com.yuki.yukihub.importer.ImporterService service =
+                     new com.yuki.yukihub.importer.ImporterService(this);
+             service.markExisting(games);
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 pendingImportGames = games;
+                 pendingImportSourceLabel = "PotatoVN";
+                 showImportPreviewDialog(games, "PotatoVN");
+             });
+         } catch (Exception e) {
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 Toast.makeText(this, "PotatoVN 解析失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                 Log.e("YukiHub", "PotatoVN parse failed", e);
+             });
+         }
+     }).start();
+ }
+
+/**
+     * 执行 Vnite 目录导入（解析 → 预览）
+     */
+    private void doImportFromVnite(Uri uri) {
+        showImportLoading("正在解析 Vnite 数据…");
+        new Thread(() -> {
+            try {
+                java.util.List<com.yuki.yukihub.importer.ImportGameData> games =
+                        com.yuki.yukihub.importer.VniteImporter.parse(this, uri);
+                com.yuki.yukihub.importer.ImporterService service =
+                        new com.yuki.yukihub.importer.ImporterService(this);
+                service.markExisting(games);
+                runOnUiThread(() -> {
+                    hideImportLoading();
+                    pendingImportGames = games;
+                    pendingImportSourceLabel = "Vnite";
+                    showImportPreviewDialog(games, "Vnite");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideImportLoading();
+                    Toast.makeText(this, "Vnite 解析失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                    Log.e("YukiHub", "Vnite parse failed", e);
+                });
+            }
+        }).start();
     }
-}
+
+    /**
+     * 执行 LunaBox ZIP 备份导入（解析 → 预览）
+     */
+    private void doImportFromLunaBox(Uri uri) {
+        showImportLoading("正在解析 LunaBox 备份…");
+        new Thread(() -> {
+            try {
+                java.util.List<com.yuki.yukihub.importer.ImportGameData> games =
+                        com.yuki.yukihub.importer.LunaBoxImporter.parse(this, uri);
+                com.yuki.yukihub.importer.ImporterService service =
+                        new com.yuki.yukihub.importer.ImporterService(this);
+                service.markExisting(games);
+                runOnUiThread(() -> {
+                    hideImportLoading();
+                    pendingImportGames = games;
+                    pendingImportSourceLabel = "LunaBox";
+                    showImportPreviewDialog(games, "LunaBox");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    hideImportLoading();
+                    Toast.makeText(this, "LunaBox 解析失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                    Log.e("YukiHub", "LunaBox parse failed", e);
+                });
+            }
+        }).start();
+    }
+
+ // ==================== 导入预览对话框（通用） ====================
+
+ /**
+  * 通用导入预览对话框：展示候选项列表 + 勾选，用户确认后才实际导入。
+  *
+  * 列表内容：游戏名、开发商、数据源、状态标签（新增/已存在）
+  * 底部按钮：全选/全不选、确认导入、取消
+  */
+ private void showImportPreviewDialog(java.util.List<com.yuki.yukihub.importer.ImportGameData> games, String sourceLabel) {
+     if (games == null || games.isEmpty()) {
+         Toast.makeText(this, "未找到可导入的游戏数据", Toast.LENGTH_SHORT).show();
+         return;
+     }
+
+     int newCount = 0, existCount = 0, sessionCount = 0;
+     for (com.yuki.yukihub.importer.ImportGameData g : games) {
+         if (g.exists) existCount++;
+         else newCount++;
+if (g.playedTimeMap != null) sessionCount += g.playedTimeMap.size();
+            else if (g.vniteTimers != null) sessionCount += g.vniteTimers.size();
+            else if (g.lunaBoxSessions != null) sessionCount += g.lunaBoxSessions.size();
+     }
+
+     // 列表容器
+     LinearLayout listRoot = new LinearLayout(this);
+     listRoot.setOrientation(LinearLayout.VERTICAL);
+     listRoot.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+     // 摘要
+     TextView summary = new TextView(this);
+     summary.setText("来源：" + sourceLabel + "  ·  共 " + games.size() + " 个游戏"
+             + "  ·  新增 " + newCount + "  ·  已存在 " + existCount
+             + (sessionCount > 0 ? "  ·  游玩记录 " + sessionCount : ""));
+     summary.setTextColor(getColorCompat(R.color.yh_text_muted));
+     summary.setTextSize(11);
+     summary.setPadding(dp(4), dp(4), dp(4), dp(8));
+     listRoot.addView(summary);
+
+     // 全选/全不选按钮行
+     LinearLayout actionRow = new LinearLayout(this);
+     actionRow.setOrientation(LinearLayout.HORIZONTAL);
+     actionRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+     Button selectAllBtn = krButton("全选新游戏");
+     Button deselectAllBtn = krButton("取消选择");
+     selectAllBtn.setTextColor(primaryTextColor());
+     deselectAllBtn.setTextColor(getColorCompat(R.color.yh_text));
+     actionRow.addView(selectAllBtn, new LinearLayout.LayoutParams(0, dp(36), 1));
+     LinearLayout.LayoutParams deselectLp = new LinearLayout.LayoutParams(0, dp(36), 1);
+     deselectLp.setMargins(dp(6), 0, 0, 0);
+     actionRow.addView(deselectAllBtn, deselectLp);
+
+     LinearLayout.LayoutParams actionRowLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+     actionRowLp.setMargins(0, 0, 0, dp(4));
+     listRoot.addView(actionRow, actionRowLp);
+
+     // 候选项列表（带勾选框）
+     LinearLayout itemsContainer = new LinearLayout(this);
+     itemsContainer.setOrientation(LinearLayout.VERTICAL);
+     listRoot.addView(itemsContainer);
+
+     // 渲染每个候选项
+     java.util.List<CheckBox> checkBoxes = new java.util.ArrayList<>();
+     for (int i = 0; i < games.size(); i++) {
+         com.yuki.yukihub.importer.ImportGameData g = games.get(i);
+         LinearLayout row = new LinearLayout(this);
+         row.setOrientation(LinearLayout.HORIZONTAL);
+         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+         row.setPadding(dp(4), dp(6), dp(4), dp(6));
+
+         CheckBox cb = new CheckBox(this);
+         cb.setChecked(g.selected);
+         cb.setEnabled(!g.exists);
+         if (g.exists) {
+             cb.setAlpha(0.4f);
+         }
+         checkBoxes.add(cb);
+         row.addView(cb);
+
+         // 文字部分：游戏名 + 附加信息
+         LinearLayout textCol = new LinearLayout(this);
+         textCol.setOrientation(LinearLayout.VERTICAL);
+         textCol.setPadding(dp(8), 0, 0, 0);
+
+         TextView nameText = new TextView(this);
+         String nameDisplay = g.name;
+         if (g.developer != null && !g.developer.isEmpty()) nameDisplay += "  · " + g.developer;
+         if (g.sourceType != null && !g.sourceType.isEmpty() && !"local".equals(g.sourceType)) {
+             nameDisplay += "  [" + g.sourceType.toUpperCase() + "]";
+         }
+         nameText.setText(nameDisplay);
+         nameText.setTextColor(g.exists ? getColorCompat(R.color.yh_text_muted) : getColorCompat(R.color.yh_text));
+         nameText.setTextSize(13);
+         nameText.setTypeface(null, android.graphics.Typeface.BOLD);
+         textCol.addView(nameText);
+
+         // 第二行：状态信息
+         TextView infoText = new TextView(this);
+         StringBuilder info = new StringBuilder();
+         if (g.exists) {
+             info.append("已存在，将跳过");
+         } else {
+             info.append("新增");
+         }
+         // 游玩状态标签
+         if (g.playStatus != null && !g.playStatus.isEmpty() && !"unplayed".equals(g.playStatus)) {
+             if ("completed".equals(g.playStatus)) info.append("  · 🏆已完成");
+             else if ("playing".equals(g.playStatus)) info.append("  · 🎮在玩");
+         }
+if (g.playedTimeMap != null && !g.playedTimeMap.isEmpty()) info.append("  · 游玩记录 ").append(g.playedTimeMap.size()).append(" 天");
+          if (g.vniteTimers != null && !g.vniteTimers.isEmpty()) info.append("  · 游玩记录 ").append(g.vniteTimers.size()).append(" 条");
+          if (g.lunaBoxSessions != null && !g.lunaBoxSessions.isEmpty()) info.append("  · 游玩记录 ").append(g.lunaBoxSessions.size()).append(" 条");
+         if (g.coverUrl != null && !g.coverUrl.isEmpty()) info.append("  · 有封面");
+         if (g.coverLocalPath != null && !g.coverLocalPath.isEmpty()) info.append("  · 有封面");
+         if (g.description != null && !g.description.isEmpty()) info.append("  · 有简介");
+         infoText.setText(info.toString());
+         infoText.setTextColor(getColorCompat(R.color.yh_text_muted));
+         infoText.setTextSize(10);
+         textCol.addView(infoText);
+
+         row.addView(textCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+         itemsContainer.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+         // 勾选变化监听
+         final int idx = i;
+         cb.setOnCheckedChangeListener((button, isChecked) -> {
+             games.get(idx).selected = isChecked;
+         });
+     }
+
+     // 全选/取消全选逻辑
+     selectAllBtn.setOnClickListener(v -> {
+         for (int i = 0; i < games.size(); i++) {
+             if (!games.get(i).exists) {
+                 games.get(i).selected = true;
+                 checkBoxes.get(i).setChecked(true);
+             }
+         }
+     });
+     deselectAllBtn.setOnClickListener(v -> {
+         for (int i = 0; i < games.size(); i++) {
+             if (!games.get(i).exists) {
+                 games.get(i).selected = false;
+                 checkBoxes.get(i).setChecked(false);
+             }
+         }
+     });
+
+     // 滚动容器
+     ScrollView scroll = new ScrollView(this);
+     scroll.setFillViewport(false);
+     scroll.setBackgroundResource(R.drawable.bg_dialog);
+     tintDialogRoot(scroll);
+     scroll.addView(listRoot, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+
+     AlertDialog dialog = new AlertDialog.Builder(this)
+             .setTitle("导入预览 — " + sourceLabel)
+             .setView(scroll)
+             .setPositiveButton("确认导入", null)
+             .setNegativeButton("取消", null)
+             .show();
+     styleAlertDialogDark(dialog);
+     if (dialog.getWindow() != null) {
+         dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.56f), (int) (getResources().getDisplayMetrics().heightPixels * 0.78f));
+     }
+     // 用PositiveButton的独立ClickListener防止对话框自动关闭
+     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+         dialog.dismiss();
+         executeExternalImport(games, sourceLabel);
+     });
+ }
+
+ /**
+  * 执行确认后的导入（后台线程）
+  */
+ private void executeExternalImport(java.util.List<com.yuki.yukihub.importer.ImportGameData> games, String sourceLabel) {
+     showImportLoading("正在导入" + sourceLabel + "数据…");
+     new Thread(() -> {
+         try {
+             com.yuki.yukihub.importer.ImporterService service =
+                     new com.yuki.yukihub.importer.ImporterService(this);
+             final com.yuki.yukihub.importer.ImportResult result = service.importSelected(games);
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 afterExternalImport(result);
+             });
+         } catch (Exception e) {
+             runOnUiThread(() -> {
+                 hideImportLoading();
+                 Toast.makeText(this, sourceLabel + " 导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                 Log.e("YukiHub", sourceLabel + " import failed", e);
+             });
+         }
+     }).start();
+ }
+
+ /**
+  * 外部平台导入完成后的统一处理
+  */
+ private void afterExternalImport(com.yuki.yukihub.importer.ImportResult result) {
+     coverMaintenanceDone = false;
+     loadGames();
+     updateProfilePanel();
+     String msg = "导入完成：" + result.toString();
+     if (!result.skippedNames.isEmpty()) {
+         msg += "\n跳过：" + String.join("、", result.skippedNames);
+     }
+     if (!result.failedNames.isEmpty()) {
+         msg += "\n失败：" + String.join("、", result.failedNames);
+     }
+     Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+ }
+
+ // 导入进度对话框
+ private AlertDialog importLoadingDialog;
+ private void showImportLoading(String message) {
+     if (importLoadingDialog != null) importLoadingDialog.dismiss();
+     importLoadingDialog = new AlertDialog.Builder(this)
+             .setTitle("数据导入")
+             .setMessage(message)
+             .setCancelable(false)
+             .show();
+     styleAlertDialogDark(importLoadingDialog);
+ }
+ private void hideImportLoading() {
+     if (importLoadingDialog != null) {
+         importLoadingDialog.dismiss();
+         importLoadingDialog = null;
+     }
+ }
 
 private void buildRecentActivityViews(LinearLayout container) {
     if (container == null) return;
@@ -3785,6 +4519,26 @@ LinearLayout accountActions = new LinearLayout(this);
         webdavLp.setMargins(dp(8), 0, 0, 0);
         accountActions.addView(webdavButton, webdavLp);
         root.addView(accountActions);
+
+        // ===== 从其他平台导入 =====
+        TextView importTitle = new TextView(this);
+        importTitle.setText("\n数据迁移");
+        importTitle.setTextColor(getColorCompat(R.color.yh_text));
+        importTitle.setTextSize(14);
+        importTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(importTitle);
+
+        TextView importInfo = new TextView(this);
+        importInfo.setText("从 Playnite、PotatoVN、Vnite、LunaBox 导入游戏列表、封面和游玩记录。");
+        importInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        importInfo.setTextSize(11);
+        importInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(importInfo);
+
+        Button externalImportBtn = krButton("从其他平台导入");
+        externalImportBtn.setTextColor(primaryTextColor());
+        externalImportBtn.setOnClickListener(v -> showExternalImportDialog());
+        root.addView(externalImportBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
 
         TextView disclaimerTitle = new TextView(this);
         disclaimerTitle.setText("\n使用说明与免责声明");
