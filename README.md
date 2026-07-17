@@ -6,7 +6,10 @@
 
 <p align="center">
   <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
-  <a href="https://yukihub.kesug.com/guide/introduction.html">使用指南-web</a>
+</p>
+
+<p align="center">
+  <a href="https://yukihub.kesug.com/guide/introduction.html">使用指南-web</a> | <a href="./USER_GUIDE.md">使用指南-md</a>
 </p>
 
 <p align="center">
