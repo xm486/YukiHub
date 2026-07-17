@@ -72,6 +72,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -183,6 +184,7 @@ private ImageView ivProfileAvatar;
 private View profileStatusDot;
 private LinearLayout detailPanel, detailMetaPanel;
 private ImageView sideDetailCover;
+private ProgressBar sideDetailCoverLoading;
     private TextView sideDetailPlaceholder, sideDetailTitle, sideMetadataSourceBadge, sideDetailOriginalTitle, sideDetailHint, sideDetailPath, sideDetailDeveloper, sideDetailDate, sideDetailRating, sideDetailLength, sideDetailTags, sideDescToggle, sideTranslateToggle;
 private LinearLayout sideTagContainer;
 private ImageView sideScreenshot1, sideScreenshot2;
@@ -1596,6 +1598,7 @@ ivProfileAvatar = findViewById(R.id.ivProfileAvatar);
 detailPanel = findViewById(R.id.detailPanel);
         detailMetaPanel = findViewById(R.id.detailMetaPanel);
         sideDetailCover = findViewById(R.id.sideDetailCover);
+        sideDetailCoverLoading = findViewById(R.id.sideDetailCoverLoading);
         sideDetailPlaceholder = findViewById(R.id.sideDetailPlaceholder);
         sideDetailTitle = findViewById(R.id.sideDetailTitle);
 sideMetadataSourceBadge = findViewById(R.id.sideMetadataSourceBadge);
@@ -3066,26 +3069,35 @@ if (g.playedTimeMap != null && !g.playedTimeMap.isEmpty()) info.append("  · 游
  /**
   * 执行确认后的导入（后台线程）
   */
- private void executeExternalImport(java.util.List<com.yuki.yukihub.importer.ImportGameData> games, String sourceLabel) {
-     showImportLoading("正在导入" + sourceLabel + "数据…");
-     new Thread(() -> {
-         try {
-             com.yuki.yukihub.importer.ImporterService service =
-                     new com.yuki.yukihub.importer.ImporterService(this);
-             final com.yuki.yukihub.importer.ImportResult result = service.importSelected(games);
-             runOnUiThread(() -> {
-                 hideImportLoading();
-                 afterExternalImport(result);
-             });
-         } catch (Exception e) {
-             runOnUiThread(() -> {
-                 hideImportLoading();
-                 Toast.makeText(this, sourceLabel + " 导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
-                 Log.e("YukiHub", sourceLabel + " import failed", e);
-             });
-         }
-     }).start();
- }
+private void executeExternalImport(java.util.List<com.yuki.yukihub.importer.ImportGameData> games, String sourceLabel) {
+      int selectedCount = 0;
+      if (games != null) {
+          for (com.yuki.yukihub.importer.ImportGameData g : games) {
+              if (g != null && g.selected && !g.exists) selectedCount++;
+          }
+      }
+      showImportLoading("正在导入" + sourceLabel + "数据…\n准备处理 " + selectedCount + " 个游戏", true, Math.max(1, selectedCount));
+      new Thread(() -> {
+          try {
+              com.yuki.yukihub.importer.ImporterService service =
+                      new com.yuki.yukihub.importer.ImporterService(this);
+              final com.yuki.yukihub.importer.ImportResult result = service.importSelected(games, (current, total, itemName) -> {
+                  String name = itemName == null || itemName.trim().isEmpty() ? "未命名游戏" : itemName.trim();
+                  runOnUiThread(() -> updateImportLoading("正在导入 " + sourceLabel + " 数据…\n" + current + "/" + total + "  《" + name + "》", current, total));
+              });
+              runOnUiThread(() -> {
+                  hideImportLoading();
+                  afterExternalImport(result);
+              });
+          } catch (Exception e) {
+              runOnUiThread(() -> {
+                  hideImportLoading();
+                  Toast.makeText(this, sourceLabel + " 导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                  Log.e("YukiHub", sourceLabel + " import failed", e);
+              });
+          }
+      }).start();
+  }
 
  /**
   * 外部平台导入完成后的统一处理
@@ -3104,23 +3116,61 @@ if (g.playedTimeMap != null && !g.playedTimeMap.isEmpty()) info.append("  · 游
      Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
  }
 
- // 导入进度对话框
- private AlertDialog importLoadingDialog;
- private void showImportLoading(String message) {
-     if (importLoadingDialog != null) importLoadingDialog.dismiss();
-     importLoadingDialog = new AlertDialog.Builder(this)
-             .setTitle("数据导入")
-             .setMessage(message)
-             .setCancelable(false)
-             .show();
-     styleAlertDialogDark(importLoadingDialog);
- }
- private void hideImportLoading() {
-     if (importLoadingDialog != null) {
-         importLoadingDialog.dismiss();
-         importLoadingDialog = null;
-     }
- }
+// 导入进度对话框
+  private AlertDialog importLoadingDialog;
+  private TextView importLoadingText;
+  private ProgressBar importProgressBar;
+  private void showImportLoading(String message) {
+      showImportLoading(message, false, 0);
+  }
+
+  private void showImportLoading(String message, boolean determinate, int max) {
+      if (importLoadingDialog != null) importLoadingDialog.dismiss();
+      LinearLayout root = new LinearLayout(this);
+      root.setOrientation(LinearLayout.VERTICAL);
+      root.setPadding(dp(18), dp(12), dp(18), dp(8));
+      root.setBackgroundResource(R.drawable.bg_dialog);
+
+      importLoadingText = new TextView(this);
+      importLoadingText.setText(message);
+      importLoadingText.setTextColor(getColorCompat(R.color.yh_text));
+      importLoadingText.setTextSize(12);
+      importLoadingText.setLineSpacing(dp(2), 1.0f);
+      root.addView(importLoadingText, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+      importProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+      importProgressBar.setIndeterminate(!determinate);
+      importProgressBar.setMax(Math.max(1, max));
+      importProgressBar.setProgress(0);
+      LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8));
+      barLp.setMargins(0, dp(12), 0, 0);
+      root.addView(importProgressBar, barLp);
+
+      importLoadingDialog = new AlertDialog.Builder(this)
+              .setTitle("数据导入")
+              .setView(root)
+              .setCancelable(false)
+              .show();
+      styleAlertDialogDark(importLoadingDialog);
+  }
+
+  private void updateImportLoading(String message, int progress, int max) {
+      if (importLoadingText != null) importLoadingText.setText(message);
+      if (importProgressBar != null) {
+          importProgressBar.setIndeterminate(false);
+          importProgressBar.setMax(Math.max(1, max));
+          importProgressBar.setProgress(Math.max(0, Math.min(progress, Math.max(1, max))));
+      }
+  }
+
+  private void hideImportLoading() {
+      if (importLoadingDialog != null) {
+          importLoadingDialog.dismiss();
+          importLoadingDialog = null;
+      }
+      importLoadingText = null;
+      importProgressBar = null;
+  }
 
 private void buildRecentActivityViews(LinearLayout container) {
     if (container == null) return;
@@ -3522,9 +3572,21 @@ private void invalidateRemoteImageRequest(ImageView target) {
 
 private void loadRemoteImage(String url, ImageView target, String prefix) {
     if (target == null) return;
+    final boolean isDetailCover = target == sideDetailCover && prefix != null && prefix.startsWith("cover_");
     final String requestTag = "remote:" + (prefix == null ? "img" : prefix) + ":" + (url == null ? "" : url.trim());
     target.setTag(R.id.tag_remote_image_request, requestTag);
-    if (url == null || url.trim().isEmpty()) { target.setImageDrawable(null); return; }
+    if (isDetailCover && sideDetailCoverLoading != null) {
+        sideDetailCoverLoading.setVisibility(View.VISIBLE);
+        if (sideDetailPlaceholder != null) {
+            sideDetailPlaceholder.setText("封面加载中…");
+            sideDetailPlaceholder.setVisibility(View.VISIBLE);
+        }
+    }
+    if (url == null || url.trim().isEmpty()) {
+        target.setImageDrawable(null);
+        if (isDetailCover && sideDetailCoverLoading != null) sideDetailCoverLoading.setVisibility(View.GONE);
+        return;
+    }
     final String imageUrl = url.trim();
     AppExecutors.runOnIo(() -> {
         try {
@@ -3538,9 +3600,16 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
             }
             if (bitmap == null) {
                 boolean ok = downloadImageAllowVndbWarningPage(imageUrl, cacheFile, 0);
-                if (!ok) return;
+                if (!ok) {
+                    showRemoteImageFailed(target, requestTag, isDetailCover);
+                    return;
+                }
                 bitmap = BitmapFactory.decodeFile(cacheFile.getAbsolutePath());
-                if (bitmap == null) { cacheFile.delete(); return; }
+                if (bitmap == null) {
+                    cacheFile.delete();
+                    showRemoteImageFailed(target, requestTag, isDetailCover);
+                    return;
+                }
             }
             Bitmap finalBitmap = bitmap;
             runOnUiThread(() -> {
@@ -3548,6 +3617,11 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
                 Object currentRequest = target.getTag(R.id.tag_remote_image_request);
                 if (!(currentRequest instanceof String) || !requestTag.equals(currentRequest)) return;
                 target.setImageBitmap(finalBitmap);
+                if (isDetailCover) {
+                    if (sideDetailCoverLoading != null) sideDetailCoverLoading.setVisibility(View.GONE);
+                    if (sideDetailPlaceholder != null) sideDetailPlaceholder.setVisibility(View.GONE);
+                    target.setVisibility(View.VISIBLE);
+                }
                 Object tag = target.getTag();
                 if (tag instanceof Game && prefix != null && prefix.startsWith("cover_") && cacheFile.exists()) {
                     Game taggedGame = (Game) tag;
@@ -3561,7 +3635,26 @@ private void loadRemoteImage(String url, ImageView target, String prefix) {
                     }
                 }
             });
-        } catch (Throwable ignored) { }
+        } catch (Throwable ignored) {
+            showRemoteImageFailed(target, requestTag, isDetailCover);
+        }
+    });
+}
+
+private void showRemoteImageFailed(ImageView target, String requestTag, boolean isDetailCover) {
+    if (target == null) return;
+    runOnUiThread(() -> {
+        Object currentRequest = target.getTag(R.id.tag_remote_image_request);
+        if (!(currentRequest instanceof String) || !requestTag.equals(currentRequest)) return;
+        target.setImageDrawable(null);
+        if (isDetailCover) {
+            if (sideDetailCoverLoading != null) sideDetailCoverLoading.setVisibility(View.GONE);
+            target.setVisibility(View.GONE);
+            if (sideDetailPlaceholder != null) {
+                sideDetailPlaceholder.setText("封面加载失败\n可稍后重试或手动设置");
+                sideDetailPlaceholder.setVisibility(View.VISIBLE);
+            }
+        }
     });
 }
 

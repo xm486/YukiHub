@@ -837,31 +837,77 @@ public class MetadataController {
             delegate.showToast("请先匹配" + label + "资料", Toast.LENGTH_SHORT);
             return;
         }
-        delegate.showToast("正在同步" + label + "到游戏卡片…", Toast.LENGTH_SHORT);
+
+        android.app.Activity ctx = delegate.activity();
+        TextView progressText = new TextView(ctx);
+        progressText.setText("正在准备同步" + label + "资料…");
+        progressText.setTextColor(ctx.getResources().getColor(R.color.yh_text));
+        progressText.setTextSize(12);
+        progressText.setLineSpacing(delegate.dp(2), 1.0f);
+        progressText.setPadding(delegate.dp(16), delegate.dp(12), delegate.dp(16), delegate.dp(12));
+        progressText.setBackgroundResource(R.drawable.bg_dialog);
+        AlertDialog progressDialog = new AlertDialog.Builder(ctx)
+                .setTitle("同步游戏资料")
+                .setView(progressText)
+                .setCancelable(false)
+                .create();
+        progressDialog.show();
+        delegate.styleAlertDialogDark(progressDialog);
+
         AppExecutors.runOnIo(() -> {
             String localCover = null;
-            if (meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
-                localCover = cacheRemoteImageSync(meta.coverUrl, "card_cover_" + delegate.emptyText(meta.id, String.valueOf(game.id)));
-            }
-            final String cover = localCover;
-            if (!isActivityAlive()) return;
-
-            delegate.runOnUiThread(() -> {
-                String newTitle = delegate.emptyText(meta.chineseTitle, delegate.emptyText(meta.originalTitle, meta.romanTitle));
-                if (!newTitle.isEmpty()) game.title = newTitle;
-                if (meta.originalTitle != null && !meta.originalTitle.isEmpty()) game.originalTitle = meta.originalTitle;
-                if (meta.description != null && !meta.description.isEmpty()) game.description = meta.description;
-                if (meta.tagsText != null && !meta.tagsText.isEmpty()) game.tags = meta.tagsText;
-                if (cover != null && !cover.isEmpty()) {
-                    game.coverUri = cover;
-                    game.coverPersistUri = cover;
-                    game.coverSourceType = 1;
+            boolean coverAttempted = false;
+            boolean coverFailed = false;
+            try {
+                if (meta.coverUrl != null && !meta.coverUrl.trim().isEmpty()) {
+                    coverAttempted = true;
+                    if (isActivityAlive()) {
+                        delegate.runOnUiThread(() -> progressText.setText("正在下载并缓存封面…\n这一步取决于图片站点速度，可能需要几秒。"));
+                    }
+                    localCover = cacheRemoteImageSync(meta.coverUrl, "card_cover_" + delegate.emptyText(meta.id, String.valueOf(game.id)));
+                    coverFailed = localCover == null || localCover.isEmpty();
                 }
-                delegate.gameRepository().update(game);
-                delegate.loadGames();
-                delegate.updateSideDetail(game);
-                delegate.showToast("已同步" + label + "标题和封面到游戏卡片", Toast.LENGTH_SHORT);
-            });
+
+                final String cover = localCover;
+                final boolean finalCoverAttempted = coverAttempted;
+                final boolean finalCoverFailed = coverFailed;
+                if (!isActivityAlive()) return;
+
+                delegate.runOnUiThread(() -> progressText.setText("正在写入游戏卡片…"));
+
+                delegate.runOnUiThread(() -> {
+                    try {
+                        String newTitle = delegate.emptyText(meta.chineseTitle, delegate.emptyText(meta.originalTitle, meta.romanTitle));
+                        if (!newTitle.isEmpty()) game.title = newTitle;
+                        if (meta.originalTitle != null && !meta.originalTitle.isEmpty()) game.originalTitle = meta.originalTitle;
+                        if (meta.description != null && !meta.description.isEmpty()) game.description = meta.description;
+                        if (meta.tagsText != null && !meta.tagsText.isEmpty()) game.tags = meta.tagsText;
+                        if (cover != null && !cover.isEmpty()) {
+                            game.coverUri = cover;
+                            game.coverPersistUri = cover;
+                            game.coverSourceType = 1;
+                        }
+                        delegate.gameRepository().update(game);
+                        delegate.loadGames();
+                        delegate.updateSideDetail(game);
+                        try { progressDialog.dismiss(); } catch (Throwable ignored) { }
+                        if (finalCoverAttempted && finalCoverFailed) {
+                            delegate.showToast("资料已同步，但封面下载失败。可稍后重试或手动设置封面。", Toast.LENGTH_LONG);
+                        } else {
+                            delegate.showToast("已同步" + label + "资料到游戏卡片", Toast.LENGTH_SHORT);
+                        }
+                    } catch (Throwable t) {
+                        try { progressDialog.dismiss(); } catch (Throwable ignored) { }
+                        delegate.showToast("同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()), Toast.LENGTH_LONG);
+                    }
+                });
+            } catch (Throwable t) {
+                if (!isActivityAlive()) return;
+                delegate.runOnUiThread(() -> {
+                    try { progressDialog.dismiss(); } catch (Throwable ignored) { }
+                    delegate.showToast("同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()), Toast.LENGTH_LONG);
+                });
+            }
         });
     }
 
@@ -894,8 +940,14 @@ public class MetadataController {
     }
 
     public String safeCacheName(String input) {
-        if (input == null) return "cache";
-        return input.replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (input == null || input.trim().isEmpty()) return "cache";
+        String raw = input.trim();
+        String cleaned = raw.replaceAll("[^a-zA-Z0-9._-]", "_");
+        // URL 可能很长，直接作为文件名会触发 ENAMETOOLONG，导致封面缓存静默失败。
+        // 保留前缀可读性，同时追加 hash 保证稳定且避免冲突。
+        String hash = Integer.toHexString(raw.hashCode());
+        if (cleaned.length() > 72) cleaned = cleaned.substring(0, 72);
+        return cleaned + "_" + hash;
     }
 
     public boolean downloadImageAllowVndbWarningPage(String imageUrl, File cacheFile, int depth) {

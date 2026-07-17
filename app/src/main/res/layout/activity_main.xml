@@ -199,6 +199,7 @@ android:id="@+id/profilePanel"
                 <FrameLayout android:layout_width="match_parent" android:layout_height="82dp" android:background="@drawable/bg_cover_placeholder">
                     <ImageView android:id="@+id/sideDetailCover" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:visibility="gone" />
                     <TextView android:id="@+id/sideDetailPlaceholder" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="选择游戏" android:textColor="@color/yh_text_muted" android:textSize="9sp" android:textStyle="bold" />
+                    <ProgressBar android:id="@+id/sideDetailCoverLoading" style="?android:attr/progressBarStyleSmall" android:layout_width="28dp" android:layout_height="28dp" android:layout_gravity="center" android:indeterminate="true" android:visibility="gone" />
                 </FrameLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal" android:gravity="center_vertical">

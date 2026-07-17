@@ -58,20 +58,41 @@ public class ImporterService {
     }
 
     /**
+     * 导入进度回调（可选）。
+     */
+    public interface ProgressListener {
+        void onProgress(int current, int total, String itemName);
+    }
+
+    /**
      * 只导入用户勾选的游戏（预览确认后调用）
      */
     public ImportResult importSelected(List<ImportGameData> games) {
+        return importSelected(games, null);
+    }
+
+    /**
+     * 只导入用户勾选的游戏（带进度回调）。
+     */
+    public ImportResult importSelected(List<ImportGameData> games, ProgressListener listener) {
         List<ImportGameData> selected = new ArrayList<>();
         for (ImportGameData g : games) {
             if (g.selected && !g.exists) selected.add(g);
         }
-        return importGames(selected, true);
+        return importGames(selected, true, listener);
     }
 
     /**
      * 执行导入（在后台线程调用）
      */
     public ImportResult importGames(List<ImportGameData> games, boolean skipExisting) {
+        return importGames(games, skipExisting, null);
+    }
+
+    /**
+     * 执行导入（在后台线程调用）
+     */
+    public ImportResult importGames(List<ImportGameData> games, boolean skipExisting, ProgressListener listener) {
         ImportResult result = new ImportResult();
         GameRepository repo = new GameRepository(context);
         List<Game> existing = repo.getAll();
@@ -81,7 +102,11 @@ public class ImporterService {
         }
 
         SQLiteDatabase db = dbHelper.getWritableDatabase();
+        int total = games == null ? 0 : games.size();
+        int index = 0;
         for (ImportGameData igd : games) {
+            index++;
+            if (listener != null) listener.onProgress(index, total, igd == null ? "" : igd.name);
             if (igd.name == null || igd.name.trim().isEmpty()) {
                 result.failed++;
                 result.failedNames.add("(空名称)");
