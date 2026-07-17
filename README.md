@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
+  <a href="https://yukihub.kesug.com/guide/introduction.html">使用指南-web</a>
 </p>
 
 <p align="center">
@@ -27,6 +28,7 @@
 
 ## 特性
 
+- 多种导入方式：支持手动添加、批量导入文件夹以及从第三方平台迁移（如 <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>、<a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>、<a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>、<a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>）。
 - 支持添加、编辑、删除游戏条目
 - 集合了VNDB和bangumi的游戏数据资料源
 - 支持目录为空的游戏条目
