@@ -258,6 +258,11 @@ private static final String AUTH_STATUS_EXPIRED = "expired";
 private static final String AUTH_STATUS_SYNCING = "syncing";
 private static final String KEY_PROFILE_SIGNATURE = "profile_signature";
 private static final String KEY_PROFILE_AVATAR = "profile_avatar";
+private static final String EXTRA_HOME_TARGET = "home_target";
+private static final String EXTRA_HOME_GAME_ID = "home_game_id";
+private static final String HOME_TARGET_PROFILE = "profile";
+private static final String HOME_TARGET_SETTINGS = "settings";
+private static final String HOME_TARGET_LAUNCH_GAME = "launch_game";
 private static final String KEY_CUSTOM_BACKGROUND = "custom_background";
 private static final String KEY_CUSTOM_BACKGROUND_TYPE = "custom_background_type";
 private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled";
@@ -413,6 +418,65 @@ if (!ensureDisclaimerAccepted()) {
         }
         checkUpdateOnStartupIfEnabled();
         ensureStoragePermissionForInternalKrkr();
+        handleHomeTargetIntent(getIntent());
+    }
+
+    private void handleHomeTargetIntent(Intent intent) {
+        if (intent == null) return;
+        String target = intent.getStringExtra(EXTRA_HOME_TARGET);
+        if (target == null || target.trim().isEmpty()) return;
+        long targetGameId = intent.getLongExtra(EXTRA_HOME_GAME_ID, -1L);
+        intent.removeExtra(EXTRA_HOME_TARGET);
+        intent.removeExtra(EXTRA_HOME_GAME_ID);
+        getWindow().getDecorView().post(() -> {
+            if (isFinishing() || (android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed())) return;
+            if (HOME_TARGET_PROFILE.equals(target)) {
+                showProfileDialog();
+            } else if (HOME_TARGET_SETTINGS.equals(target)) {
+                showSettingsDialog();
+            } else if (HOME_TARGET_LAUNCH_GAME.equals(target)) {
+                launchGameFromHome(targetGameId);
+            }
+        });
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleHomeTargetIntent(intent);
+    }
+
+    private void launchGameFromHome(long gameId) {
+        if (gameId <= 0L) {
+            Toast.makeText(this, "无法识别要启动的游戏", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Game target = null;
+        for (Game game : allGames) {
+            if (game != null && game.id == gameId) {
+                target = game;
+                break;
+            }
+        }
+        if (target == null && repository != null) {
+            List<Game> latest = repository.getAll();
+            if (latest != null) {
+                for (Game game : latest) {
+                    if (game != null && game.id == gameId) {
+                        target = game;
+                        break;
+                    }
+                }
+            }
+        }
+        if (target == null) {
+            Toast.makeText(this, "游戏不存在或已被删除", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        selectedGame = target;
+        updateSideDetail(target);
+        launchGame(target);
     }
 
     private boolean ensureDisclaimerAccepted() {
@@ -885,35 +949,13 @@ private void scheduleVideoThemeExtraction() {
 
     // --- Apply extracted colors to UI component backgrounds/borders only ---
 
-    // Title shadow
-    TextView tvTitle = findViewById(R.id.tvTitle);
-    if (tvTitle != null) {
-        tvTitle.setShadowLayer(3, 0, 1, (0x45 << 24) | (colors.primary & 0x00FFFFFF));
-    }
-
-    // Sidebar background
-    View sidebar = findViewById(R.id.sidebar);
-    if (sidebar != null) {
-        sidebar.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
-    }
-    View sidebarScroll = findViewById(R.id.sidebarScroll);
-    if (sidebarScroll != null) {
-        sidebarScroll.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
-    }
-
-    // Sidebar filter items (background only)
-    int[] sidebarIds = {R.id.filterAll, R.id.filterRecent, R.id.filterPlaying, R.id.filterCompleted, R.id.filterUnplayed, R.id.filterDeveloper};
+    //Sidebar filter items (background only)
+    int[] sidebarIds = {R.id.filterAll, R.id.filterFavorite, R.id.filterRecent, R.id.filterPlaying, R.id.filterCompleted, R.id.filterUnplayed, R.id.filterDeveloper};
     for (int id : sidebarIds) {
         TextView tv = findViewById(id);
         if (tv != null) {
             tv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
         }
-    }
-
-    // Friends chat panel (background only)
-    TextView friendsChat = findViewById(R.id.friendsChatPanel);
-    if (friendsChat != null) {
-        friendsChat.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
     }
 
     // Profile panel (background only)
@@ -988,8 +1030,55 @@ private void scheduleVideoThemeExtraction() {
     if (btnScan != null) btnScan.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
     TextView btnAdd = findViewById(R.id.btnAdd);
     if (btnAdd != null) btnAdd.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
-    TextView btnSettings = findViewById(R.id.btnSettings);
+    View btnSettings = findViewById(R.id.btnSettings);
     if (btnSettings != null) btnSettings.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+
+    // Nav buttons (background only)
+    int[] navIds = {R.id.navHome, R.id.navLibrary, R.id.navBigScreen, R.id.navChat};
+    for (int id : navIds) {
+        View nv = findViewById(id);
+        if (nv != null) {
+            if (id == R.id.navLibrary) {
+                // navLibrary is the active/selected nav — use bg_home_nav_active on reset, tintSidebar when themed
+                nv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_home_nav_active) : tintSidebar(colors));
+            } else {
+                nv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
+            }
+        }
+    }
+
+    // Sidebar container backgrounds (profile, nav, stats)
+    int[] sidebarContainerIds = {R.id.profileContainer, R.id.navContainer, R.id.statsContainer};
+    for (int id : sidebarContainerIds) {
+        View sc = findViewById(id);
+        if (sc != null) {
+            sc.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+        }
+    }
+
+    // Filter bar items + sort button (use bg_input style)
+    int[] filterIds = {R.id.filterAll, R.id.filterFavorite, R.id.filterRecent, R.id.filterPlaying, R.id.filterCompleted, R.id.filterUnplayed, R.id.filterDeveloper, R.id.btnSort};
+    for (int id : filterIds) {
+        View fv = findViewById(id);
+        if (fv != null) {
+            fv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+        }
+    }
+
+    // Status bar items (clock, battery — same bg_input style)
+    int[] statusIds = {R.id.tvClock, R.id.tvBatteryLevel};
+    for (int id : statusIds) {
+        View sv = findViewById(id);
+        if (sv != null) {
+            sv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+        }
+    }
+
+    // Notice button (uses bg_status_item on reset, tintInput when themed — no padding to avoid icon squeeze)
+    View btnNotice = findViewById(R.id.btnNotice);
+    if (btnNotice != null) {
+        btnNotice.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_status_item) : tintInput(colors));
+    }
 
     // Background dim overlay color
     View bgDim = findViewById(R.id.customBackgroundDim);
@@ -997,33 +1086,7 @@ private void scheduleVideoThemeExtraction() {
         bgDim.setBackgroundColor((0x66 << 24) | (colors.bg & 0x00FFFFFF));
     }
 
-    // Sidebar header line
-    // The header line is a child of the sidebar layout — tint it via parent traversal
-    if (sidebar != null && sidebar instanceof ViewGroup) {
-        ViewGroup sidebarVG = (ViewGroup) sidebar;
-        for (int i = 0; i < sidebarVG.getChildCount(); i++) {
-            View child = sidebarVG.getChildAt(i);
-            if (child instanceof ViewGroup) {
-                ViewGroup childGroup = (ViewGroup) child;
-                for (int j = 0; j < childGroup.getChildCount(); j++) {
-                    View line = childGroup.getChildAt(j);
-                    if (line instanceof View && !(line instanceof ViewGroup) && line.getLayoutParams().height <= dp(2)) {
-                        // This is likely the header line
-                        if (resetting) {
-                            line.setBackgroundResource(R.drawable.bg_sidebar_header_line);
-                        } else {
-                            GradientDrawable lineBg = new GradientDrawable(
-                                    GradientDrawable.Orientation.LEFT_RIGHT,
-                                    new int[]{0x00000000, (0x66 << 24) | (colors.primary & 0x00FFFFFF), 0x00000000});
-                            lineBg.setCornerRadius(dp(999));
-                            line.setBackground(lineBg);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+    // Profile avatar placeholder
     // Cover placeholders (profile avatar, detail panel cover, screenshots)
     int[] placeholderIds = {R.id.tvCoverPlaceholder};
     for (int id : placeholderIds) {
@@ -1587,6 +1650,8 @@ if (dir == null || !dir.isDirectory()) return null;
         return 10;
     }
  
+    private TextView tvGreeting;
+
     private void setupUi() {
         RecyclerView recycler = findViewById(R.id.recyclerGames);
         tvEmpty = findViewById(R.id.tvEmpty);
@@ -1595,6 +1660,7 @@ tvProfileName = findViewById(R.id.tvProfileName);
 tvProfileInitial = findViewById(R.id.tvProfileInitial);
 profileStatusDot = findViewById(R.id.profileStatusDot);
 ivProfileAvatar = findViewById(R.id.ivProfileAvatar);
+tvGreeting = findViewById(R.id.tvGreeting);
 detailPanel = findViewById(R.id.detailPanel);
         detailMetaPanel = findViewById(R.id.detailMetaPanel);
         sideDetailCover = findViewById(R.id.sideDetailCover);
@@ -1641,29 +1707,44 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
         ivScanLoading = findViewById(R.id.ivScanLoading);
- View settingsButton = findViewById(R.id.btnSettings);
         applyTopActionFeedback(addButton);
 applyTopActionFeedback(scanButton);
-applyTopActionFeedback(settingsButton);
 prepareManualClickFeedback(addButton);
 prepareManualClickFeedback(scanButton);
-prepareManualClickFeedback(settingsButton);
 addButton.setOnClickListener(v -> { clickFeedback(v); showEditDialog(null); });
 scanButton.setOnClickListener(v -> { clickFeedback(v); scanLastRootOrChoose(); });
 scanButton.setOnLongClickListener(v -> { clickFeedback(v); launchScanRootPicker(-1); return true; });
-settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
-        View friendsChatPanel = findViewById(R.id.friendsChatPanel);
-if (friendsChatPanel != null) {
-    prepareManualClickFeedback(friendsChatPanel);
-    friendsChatPanel.setOnClickListener(v -> { clickFeedback(v); showFriendsChatPlaceholder(); });
+// 设置按钮（右上角）
+View settingsButton = findViewById(R.id.btnSettings);
+if (settingsButton != null) {
+    applyTopActionFeedback(settingsButton);
+    prepareManualClickFeedback(settingsButton);
+    settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
 }
+// 通知按钮
+View btnNotice = findViewById(R.id.btnNotice);
+if (btnNotice != null) {
+    prepareManualClickFeedback(btnNotice);
+    btnNotice.setOnClickListener(v -> { clickFeedback(v); showNoticeDialog(); });
+}
+// 导航按钮
+View navHome = findViewById(R.id.navHome);
+View navBigScreen = findViewById(R.id.navBigScreen);
+View navChat = findViewById(R.id.navChat);
+if (navHome != null) { prepareManualClickFeedback(navHome); navHome.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, HomeActivity.class)); finish(); }); }
+if (navBigScreen != null) { prepareManualClickFeedback(navBigScreen); navBigScreen.setOnClickListener(v -> { clickFeedback(v); Toast.makeText(this, "大屏模式正在开发中，入口已为欧尼酱预留。", Toast.LENGTH_SHORT).show(); }); }
+if (navChat != null) { prepareManualClickFeedback(navChat); navChat.setOnClickListener(v -> { clickFeedback(v); showFriendsChatPlaceholder(); }); }
+// 排序按钮
+View btnSort = findViewById(R.id.btnSort);
+if (btnSort != null) { prepareManualClickFeedback(btnSort); btnSort.setOnClickListener(v -> { clickFeedback(v); showSortDialog(); }); }
+// 头像点击
 View profilePanel = findViewById(R.id.profilePanel);
 if (profilePanel != null) {
     prepareManualClickFeedback(profilePanel);
     profilePanel.setOnClickListener(v -> { clickFeedback(v); showProfileDialog(); });
 }
         setupDeveloperToggle();
-bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterRecent, "RECENT");
+bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "RECENT");
 bindFilter(R.id.filterPlaying, "PLAYING"); bindFilter(R.id.filterCompleted, "COMPLETED"); bindFilter(R.id.filterUnplayed, "UNPLAYED");
         updateFilterSelection();
         ((EditText)findViewById(R.id.etSearch)).addTextChangedListener(new TextWatcher() {
@@ -2011,6 +2092,146 @@ private void showFriendsChatPlaceholder() {
             .setPositiveButton("知道了", null)
             .show();
     styleAlertDialogDark(dialog);
+}
+
+private void showSortDialog() {
+    String[] items = {"最近游玩", "最近添加", "名称排序"};
+    String current = prefs == null ? SORT_MODE_RECENT : prefs.getString(KEY_SORT_MODE, SORT_MODE_RECENT);
+    int checkedItem = SORT_MODE_NEWEST.equals(current) ? 1 : (SORT_MODE_NAME.equals(current) ? 2 : 0);
+    final int[] selected = {checkedItem};
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("排序方式")
+            .setSingleChoiceItems(items, checkedItem, (d, which) -> {
+                selected[0] = which;
+            })
+            .setPositiveButton("确定", (d, w) -> {
+                String mode = SORT_MODE_RECENT;
+                if (selected[0] == 1) mode = SORT_MODE_NEWEST;
+                else if (selected[0] == 2) mode = SORT_MODE_NAME;
+                if (prefs != null) prefs.edit().putString(KEY_SORT_MODE, mode).apply();
+                applyFilter();
+            })
+            .setNegativeButton("取消", null)
+            .show();
+    styleAlertDialogDark(dialog);
+    // Color the radio list items (needs post to run after ListView measures children)
+    try {
+        android.widget.ListView list = dialog.getListView();
+        if (list != null) {
+            list.setBackgroundColor(Color.TRANSPARENT);
+            list.post(() -> {
+                for (int i = 0; i < list.getChildCount(); i++) {
+                    View child = list.getChildAt(i);
+                    if (child instanceof android.widget.CheckedTextView) {
+                        ((android.widget.CheckedTextView) child).setTextColor(
+                                i == selected[0] ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+                    }
+                }
+            });
+            list.setOnItemClickListener((parent, view, position, lid) -> {
+                selected[0] = position;
+                list.post(() -> {
+                    for (int i = 0; i < parent.getChildCount(); i++) {
+                        View c = parent.getChildAt(i);
+                        if (c instanceof android.widget.CheckedTextView) {
+                            ((android.widget.CheckedTextView) c).setTextColor(
+                                    i == position ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+                        }
+                    }
+                });
+            });
+        }
+    } catch (Throwable ignored) { }
+}
+
+private void showNoticeDialog() {
+    // 清除红点
+    View dot = findViewById(R.id.noticeRedDot);
+    if (dot != null) dot.setVisibility(View.GONE);
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("消息通知")
+            .setMessage("暂无新消息。")
+            .setPositiveButton("知道了", null)
+            .show();
+    styleAlertDialogDark(dialog);
+}
+
+private android.os.Handler statusBarHandler;
+private Runnable statusBarRunnable;
+private android.content.BroadcastReceiver batteryReceiver;
+
+private void startStatusBarUpdates() {
+    if (statusBarHandler == null) statusBarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    if (statusBarRunnable == null) statusBarRunnable = new Runnable() {
+        @Override
+        public void run() {
+            updateClock();
+            if (statusBarHandler != null) statusBarHandler.postDelayed(this, 5000L);
+        }
+    };
+    statusBarHandler.post(statusBarRunnable);
+    updateBatteryLevel();
+    registerBatteryReceiver();
+}
+
+private void stopStatusBarUpdates() {
+    if (statusBarHandler != null && statusBarRunnable != null) {
+        statusBarHandler.removeCallbacks(statusBarRunnable);
+    }
+    if (batteryReceiver != null) {
+        try { unregisterReceiver(batteryReceiver); } catch (Throwable ignored) { }
+        batteryReceiver = null;
+    }
+}
+
+private void updateClock() {
+    TextView tvClock = findViewById(R.id.tvClock);
+    if (tvClock == null) return;
+    java.util.Calendar cal = java.util.Calendar.getInstance();
+    int hour = cal.get(java.util.Calendar.HOUR_OF_DAY);
+    int minute = cal.get(java.util.Calendar.MINUTE);
+    int second = cal.get(java.util.Calendar.SECOND);
+    String timeStr = String.format(java.util.Locale.getDefault(), "%02d:%02d:%02d", hour, minute, second);
+    tvClock.setText("🕐 " + timeStr);
+}
+
+private void updateBatteryLevel() {
+    try {
+        android.os.BatteryManager bm = (android.os.BatteryManager) getSystemService(BATTERY_SERVICE);
+        if (bm == null) return;
+        int level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY);
+        int status = bm.isCharging() ? 1 : 0;
+        TextView tvBattery = findViewById(R.id.tvBatteryLevel);
+        if (tvBattery == null) return;
+        String icon;
+        int color;
+        if (status == 1) {
+            icon = "⚡";
+            color = getColorCompat(R.color.yh_success);
+        } else if (level <= 20) {
+            icon = "🪫";
+            color = getColorCompat(R.color.yh_secondary);
+        } else {
+            icon = "🔋";
+            color = getColorCompat(R.color.yh_text);
+        }
+        tvBattery.setText(icon + level + "%");
+        tvBattery.setTextColor(color);
+    } catch (Throwable ignored) { }
+}
+
+private void registerBatteryReceiver() {
+    if (batteryReceiver != null) return;
+    batteryReceiver = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(android.content.Context context, android.content.Intent intent) {
+            updateBatteryLevel();
+        }
+    };
+    android.content.IntentFilter filter = new android.content.IntentFilter();
+    filter.addAction(android.content.Intent.ACTION_BATTERY_CHANGED);
+    filter.addAction(android.content.Intent.ACTION_BATTERY_LOW);
+    try { registerReceiver(batteryReceiver, filter); } catch (Throwable ignored) { }
 }
 
 private void showAuthDialog() {
@@ -3225,15 +3446,20 @@ private String launchTypeLabel(String launchType) {
     return "外部模拟器";
 }
 
-private void updateProfilePanel() {
-    String name = displayProfileName();
-    long total = totalPlayTime();
-    if (tvProfileName != null) tvProfileName.setText(name);
-    if (tvProfileInitial != null) tvProfileInitial.setText(initials(name));
-    updateProfileStatusDot();
-    if (tvStats != null) tvStats.setText(allGames.size() + " Games\n" + TimeFormatUtil.playTime(total) + " Played");
-    loadProfileAvatarInto(ivProfileAvatar, tvProfileInitial);
-}
+    private void updateProfilePanel() {
+        String name = displayProfileName();
+        long total = totalPlayTime();
+        if (tvProfileName != null) tvProfileName.setText(name);
+        if (tvProfileInitial != null) tvProfileInitial.setText(initials(name));
+        updateProfileStatusDot();
+        if (tvStats != null) tvStats.setText(allGames.size() + " Games\n" + TimeFormatUtil.playTime(total) + " Played");
+        if (tvGreeting != null) {
+            int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+            String period = hour < 5 ? "夜深了" : hour < 11 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
+            tvGreeting.setText(period + "，" + name);
+        }
+        loadProfileAvatarInto(ivProfileAvatar, tvProfileInitial);
+    }
 
 private void updateProfileStatusDot() {
     if (profileStatusDot == null) return;
@@ -3434,6 +3660,7 @@ private void bindFilter(int id, String value) {
 
     private void updateFilterSelection() {
         updateFilterItem(R.id.filterAll, "ALL");
+        updateFilterItem(R.id.filterFavorite, "FAVORITE");
         updateFilterItem(R.id.filterRecent, "RECENT");
         updateFilterItem(R.id.filterPlaying, "PLAYING");
         updateFilterItem(R.id.filterCompleted, "COMPLETED");
@@ -3443,11 +3670,17 @@ private void bindFilter(int id, String value) {
 
     private void updateFilterItem(int id, String value) {
         View view = findViewById(id);
+        if (view == null) return;
         boolean selected = value.equals(filter);
-        view.setSelected(selected);
-        view.setAlpha(selected ? 1f : 0.72f);
+        view.setAlpha(selected ? 1f : 0.82f);
         if (view instanceof TextView) {
-            ((TextView) view).setTextColor(selected ? getColorCompat(R.color.yh_text) : getColorCompat(R.color.yh_text_muted));
+            if (selected) {
+                view.setBackgroundResource(R.drawable.bg_yuki_button);
+                ((TextView) view).setTextColor(0xFF071221);
+            } else {
+                view.setBackgroundResource(R.drawable.bg_input);
+                ((TextView) view).setTextColor(getColorCompat(R.color.yh_text));
+            }
             ((TextView) view).setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         }
     }
@@ -3474,6 +3707,7 @@ scanMissingCoversIfNeeded();
             total += g.totalPlayTime;
             if (!q.isEmpty() && (g.title == null || !g.title.toLowerCase(Locale.ROOT).contains(q))) continue;
             if ("RECENT".equals(filter) && g.lastPlayedAt <= 0) continue;
+            if ("FAVORITE".equals(filter) && !g.favorite) continue;
             if ("PLAYING".equals(filter) && !"playing".equals(normalizePlayStatus(g.playStatus))) continue;
             if ("COMPLETED".equals(filter) && !"completed".equals(normalizePlayStatus(g.playStatus))) continue;
             if ("UNPLAYED".equals(filter) && !"unplayed".equals(normalizePlayStatus(g.playStatus))) continue;
@@ -8248,10 +8482,12 @@ return startActivitySafely(intent);
     
     updateProfilePanel();
     maybeAutoWebDavSync();
+    startStatusBarUpdates();
 }
 
 @Override protected void onPause() {
     pauseBackgroundVideoIfNeeded();
+    stopStatusBarUpdates();
     super.onPause();
 }
 
@@ -8263,6 +8499,7 @@ return startActivitySafely(intent);
 @Override protected void onDestroy() {
 releaseBackgroundMediaPlayer();
 releaseUiSoundPool();
+stopStatusBarUpdates();
 super.onDestroy();
 }
 

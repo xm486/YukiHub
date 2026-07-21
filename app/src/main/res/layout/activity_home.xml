@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_home_gradient">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:layout_width="66dp"
+            android:layout_height="match_parent"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:id="@+id/homeProfileEntry"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_home_icon_circle"
+                android:clipToOutline="true"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:id="@+id/homeAvatar"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="用户头像"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/homeAvatarInitial"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="Y"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <View
+                    android:id="@+id/homeProfileStatusDot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:layout_gravity="right|bottom"
+                    android:layout_margin="2dp"
+                    android:background="@drawable/bg_profile_dot_online" />
+            </FrameLayout>
+
+            <Space android:layout_width="1dp" android:layout_height="6dp" />
+
+            <LinearLayout
+                android:layout_width="66dp"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_home_glass"
+                android:orientation="vertical"
+                android:padding="4dp">
+
+                <LinearLayout
+                    android:id="@+id/homeNavHome"
+                    android:layout_width="58dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/bg_home_nav_active"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="⌂" android:textColor="#FFFFFFFF" android:textSize="19sp" android:textStyle="bold" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="首页" android:textColor="#FFFFFFFF" android:textSize="9sp" android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/homeNavLibrary"
+                    android:layout_width="58dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="3dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="🎮" android:textColor="#E8FFFFFF" android:textSize="17sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="游戏库" android:textColor="#E8FFFFFF" android:textSize="9sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/homeNavBigScreen"
+                    android:layout_width="58dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="3dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="▣" android:textColor="#E8FFFFFF" android:textSize="18sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="大屏模式" android:textColor="#E8FFFFFF" android:textSize="9sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/homeNavChat"
+                    android:layout_width="58dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="3dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="💬" android:textColor="#E8FFFFFF" android:textSize="16sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="好友/聊天" android:textColor="#E8FFFFFF" android:textSize="8sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="❄ YukiHub" android:textColor="#FFFFFFFF" android:textSize="18sp" android:textStyle="bold" />
+                    <TextView android:id="@+id/homeGreeting" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="欢迎回来，Yuki" android:textColor="#D9FFFFFF" android:textSize="9sp" />
+                </LinearLayout>
+
+                <TextView android:id="@+id/homeSearch" android:layout_width="38dp" android:layout_height="38dp" android:background="@drawable/bg_home_glass" android:clickable="true" android:focusable="true" android:gravity="center" android:text="⌕" android:textColor="#FFFFFFFF" android:textSize="20sp" />
+
+                <FrameLayout
+                    android:id="@+id/homeNotice"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="7dp"
+                    android:background="@drawable/bg_home_glass"
+                    android:clickable="true"
+                    android:focusable="true">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:contentDescription="通知" android:src="@drawable/ic_home_notification" />
+                    <View android:layout_width="6dp" android:layout_height="6dp" android:layout_gravity="top|right" android:layout_marginTop="7dp" android:layout_marginEnd="7dp" android:background="@drawable/bg_profile_dot_expired" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/homeNavSettings"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="7dp"
+                    android:background="@drawable/bg_home_glass"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:text="⚙"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="5dp"
+                android:layout_weight="1"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1.6"
+                    android:orientation="vertical">
+
+                    <FrameLayout
+                        android:id="@+id/homeHeroCard"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_home_glass"
+                        android:clipToOutline="true">
+
+                        <ImageView android:id="@+id/homeHeroCover" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="最近游戏封面轮播" android:scaleType="centerCrop" android:src="@drawable/ic_launcher_foreground" />
+                        <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_home_hero_overlay" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="bottom"
+                            android:gravity="bottom|center_vertical"
+                            android:orientation="horizontal"
+                            android:padding="14dp">
+
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                                <TextView android:id="@+id/homeHeroTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="开始你的游戏旅程" android:textColor="#FFFFFFFF" android:textSize="17sp" android:textStyle="bold" />
+                                <TextView android:id="@+id/homeHeroSubtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="从游戏库添加或选择一个游戏" android:textColor="#E8FFFFFF" android:textSize="9sp" />
+                            </LinearLayout>
+
+                            <TextView android:id="@+id/homeHeroAction" android:layout_width="108dp" android:layout_height="40dp" android:background="@drawable/bg_home_primary_pill" android:clickable="true" android:focusable="true" android:gravity="center" android:text="▶ 继续游戏" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                        </LinearLayout>
+                    </FrameLayout>
+
+                    <LinearLayout android:id="@+id/homeHeroDots" android:layout_width="match_parent" android:layout_height="12dp" android:gravity="center" android:orientation="horizontal" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="center_vertical" android:text="🚀 快速启动" android:textColor="#FFFFFFFF" android:textSize="12sp" android:textStyle="bold" />
+
+                    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="84dp" android:layout_marginTop="3dp" android:fillViewport="false" android:overScrollMode="never" android:scrollbars="none">
+                        <LinearLayout android:id="@+id/homeQuickGames" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal" />
+                    </HorizontalScrollView>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1.1"
+                    android:orientation="vertical">
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:orientation="vertical" android:padding="8dp">
+                        <TextView android:layout_width="wrap_content" android:layout_height="16dp" android:gravity="center_vertical" android:text="▥ 今日数据" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:orientation="horizontal">
+                            <TextView android:id="@+id/homePlayTime" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="◷ 游玩时长\n0h 0m" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homeGameCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="🎮 游戏库\n0 款" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:orientation="horizontal">
+                            <TextView android:id="@+id/homeCompletedCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="🏆 已玩过\n0 个" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homePlayingCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="♡ 正在玩\n0 个" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:orientation="vertical" android:padding="8dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="16dp" android:gravity="center_vertical" android:text="▣ 最新动态" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
+                        <TextView android:id="@+id/homeRecentActivity" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="4dp" android:layout_weight="1" android:gravity="center_vertical" android:lineSpacingExtra="2dp" android:maxLines="4" android:text="欢迎来到 YukiHub\n从游戏库开始整理你的游戏收藏吧。" android:textColor="#E8FFFFFF" android:textSize="9sp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
