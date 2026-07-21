@@ -166,6 +166,62 @@
             android:singleLine="true"
             android:inputType="textEmailAddress" />
 
+        <!-- Email verify code (register only) - 邮箱验证码 -->
+        <LinearLayout
+            android:id="@+id/rowVerifyCode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/labelVerifyCode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="邮箱验证码"
+                android:textColor="#7A8BA8"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <androidx.appcompat.widget.AppCompatEditText
+                    android:id="@+id/etVerifyCode"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_auth_input"
+                    android:hint="输入邮箱验证码"
+                    android:textColorHint="#3A4568"
+                    android:textColor="#EAF7FF"
+                    android:textSize="14sp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:singleLine="true"
+                    android:inputType="number"
+                    android:maxLength="6" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnSendCode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="8dp"
+                    android:text="发送验证码"
+                    android:textColor="#5AC8FA"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_auth_input"
+                    android:stateListAnimator="@null"
+                    android:minWidth="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- Password -->
         <TextView
             android:id="@+id/labelPassword"

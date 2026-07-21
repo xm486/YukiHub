@@ -28,6 +28,7 @@ public class WebDavClient {
     private static final String TAG = "WebDavClient";
 
     private static final MediaType MEDIA_TYPE_JSON = MediaType.parse("application/json; charset=utf-8");
+    private static final MediaType MEDIA_TYPE_OCTET_STREAM = MediaType.parse("application/octet-stream");
     private static final MediaType MEDIA_TYPE_XML = MediaType.parse("application/xml");
 
     private final String serverUrl;
@@ -204,10 +205,10 @@ public class WebDavClient {
     }
 
     /**
-     * 写入文件
+     * 写入文件（二进制，用于 gzip 压缩数据）
      */
     public void writeFile(String path, byte[] data) throws IOException {
-        RequestBody body = RequestBody.create(data, MEDIA_TYPE_JSON);
+        RequestBody body = RequestBody.create(data, MEDIA_TYPE_OCTET_STREAM);
         Request request = new Request.Builder()
                 .url(resolveUrl(path))
                 .put(body)

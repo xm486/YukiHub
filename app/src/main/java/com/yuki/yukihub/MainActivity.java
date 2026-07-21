@@ -92,11 +92,14 @@ import org.w3c.dom.Document;
  import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.nio.charset.StandardCharsets;
    import java.io.OutputStream;
 import java.io.BufferedOutputStream;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.net.URL;
@@ -248,7 +251,7 @@ private static final String KEY_AUTH_NICKNAME = "auth_nickname";
 private static final String KEY_AUTH_AVATAR = "auth_avatar";
 private static final String KEY_AUTH_EMAIL = "auth_email";
 private static final String KEY_AUTH_STATUS = "auth_status";
-private static final String AUTH_BASE_URL = "https://yukihub.kesug.com/api";
+private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
 private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
 private static final String KEY_LAST_SYNC_AT = "last_sync_at";
 private static final String AUTH_STATUS_ONLINE = "online";
@@ -643,7 +646,7 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
             }
         });
 
-        backupCreateLauncher = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/json"), uri -> {
+        backupCreateLauncher = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/octet-stream"), uri -> {
             if (uri != null) exportLocalBackup(uri);
         });
         backupOpenLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
@@ -2077,12 +2080,8 @@ private void showAuthPlaceholderDialog() {
         showAccountSettingsDialog();
         return;
     }
-    AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle("功能暂未开放")
-            .setMessage("登录/注册功能暂未支持，请期待后续版本更新")
-            .setPositiveButton("确定", null)
-            .show();
-    styleAlertDialogDark(dialog);
+    // 解除限制，直接跳转登录/注册界面
+    startActivity(new Intent(this, AuthActivity.class));
 }
 
 private void showFriendsChatPlaceholder() {
@@ -2559,11 +2558,11 @@ private EditText profileEdit(String value, String hint) {
 }
 
 public void openLocalBackupExportFromSyncCenter() {
-    backupCreateLauncher.launch("yukihub_backup_" + System.currentTimeMillis() + ".json");
+    backupCreateLauncher.launch("yukihub_backup_" + System.currentTimeMillis() + ".ykbak");
 }
 
 public void openLocalBackupImportFromSyncCenter() {
-    backupOpenLauncher.launch(new String[]{"application/json", "text/*", "*/*"});
+    backupOpenLauncher.launch(new String[]{"application/octet-stream", "application/json", "text/*", "*/*"});
 }
 
 private void exportLocalBackup(Uri uri) {
@@ -2571,14 +2570,21 @@ private void exportLocalBackup(Uri uri) {
         JSONObject root = new com.yuki.yukihub.sync.SyncManager(this).exportSnapshotForLocalBackup();
         root.put("created_at", System.currentTimeMillis());
         root.put("backup_type", "local_full");
-        root.put("note", "Local backup uses the same schema as WebDAV sync, but keeps full play session history.");
-        byte[] bytes = root.toString(2).getBytes(StandardCharsets.UTF_8);
+        root.put("note", "Local backup keeps the latest 30 play sessions. Uses gzip compression.");
+        byte[] jsonBytes = root.toString(2).getBytes(StandardCharsets.UTF_8);
+        // gzip 压缩后写入文件
+        ByteArrayOutputStream gzipBos = new ByteArrayOutputStream(jsonBytes.length / 4);
+        try (GZIPOutputStream gzip = new GZIPOutputStream(gzipBos)) {
+            gzip.write(jsonBytes);
+            gzip.finish();
+        }
+        byte[] compressed = gzipBos.toByteArray();
         try (OutputStream out = getContentResolver().openOutputStream(uri)) {
             if (out == null) throw new Exception("openOutputStream failed");
-            out.write(bytes);
+            out.write(compressed);
             out.flush();
         }
-        Toast.makeText(this, "备份完成：" + (bytes.length / 1024) + "KB", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "备份完成：" + (compressed.length / 1024) + "KB（压缩后，原始 " + (jsonBytes.length / 1024) + "KB）", Toast.LENGTH_LONG).show();
 } catch (Throwable t) {
             Toast.makeText(this, "备份失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
             Log.e("YukiHub", "export backup failed", t);
@@ -2587,7 +2593,29 @@ private void exportLocalBackup(Uri uri) {
 
 private void importLocalBackup(Uri uri) {
      try {
-         String text = readTextFromUri(uri);
+         // 读取原始字节，自动检测 gzip 或纯 JSON
+         byte[] rawBytes;
+         try (InputStream in = getContentResolver().openInputStream(uri); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+             if (in == null) throw new Exception("openInputStream failed");
+             byte[] buf = new byte[8192];
+             int len;
+             while ((len = in.read(buf)) != -1) bos.write(buf, 0, len);
+             rawBytes = bos.toByteArray();
+         }
+         // gzip 文件头: 0x1f 0x8b
+         String text;
+         if (rawBytes.length >= 2 && (rawBytes[0] & 0xff) == 0x1f && (rawBytes[1] & 0xff) == 0x8b) {
+             // gzip 压缩格式，解压
+             try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(rawBytes)); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                 byte[] buf = new byte[8192];
+                 int len;
+                 while ((len = gzip.read(buf)) != -1) bos.write(buf, 0, len);
+                 text = bos.toString("UTF-8");
+             }
+         } else {
+             // 纯 JSON 文本，兼容老备份
+             text = new String(rawBytes, StandardCharsets.UTF_8);
+         }
          JSONObject root = new JSONObject(text);
          if (!"YukiHub".equals(root.optString("app", ""))) {
              Toast.makeText(this, "不是有效的 YukiHub 备份", Toast.LENGTH_LONG).show();

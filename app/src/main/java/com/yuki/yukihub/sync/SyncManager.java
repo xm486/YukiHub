@@ -11,6 +11,11 @@ import com.yuki.yukihub.util.AppExecutors;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+
 public class SyncManager {
     private static final String TAG = "SyncManager";
     private static final String SYNC_PREFS = "yukihub_sync";
@@ -52,7 +57,10 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
     private static final String KEY_UI_SCALE = "ui_scale";
 
     // 游戏库/游戏卡片信息必须完整同步；只限制动态类数据（游玩记录）数量。
-    private static final int MAX_PLAY_SESSIONS = 200;
+    // WebDAV 同步和本地备份统一限制，保持一致
+    private static final int MAX_PLAY_SESSIONS = 30;
+    // 本地备份保留最近30条游玩记录，足够查看历史且控制文件大小
+    private static final int LOCAL_BACKUP_PLAY_SESSION_LIMIT = 30;
 
     public static final int RESOLVE_CANCEL = 0;
     public static final int RESOLVE_USE_LOCAL = 1;
@@ -136,7 +144,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                 String remoteHash = "";
                 boolean remoteExists = c.exists(REMOTE_FILE);
                 if (remoteExists) {
-                    remoteText = c.readText(REMOTE_FILE);
+                    byte[] remoteBytes = c.readFile(REMOTE_FILE);
+                    remoteText = decompressIfGzip(remoteBytes);
                     remote = new JSONObject(remoteText);
                     if (!"YukiHub".equals(remote.optString("app", ""))) throw new Exception("云端文件不是有效的 YukiHub 同步文件");
                     remoteHash = sha256(remoteText);
@@ -147,7 +156,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                 result.remoteBytes = remoteText == null ? 0 : remoteText.getBytes("UTF-8").length;
 
                 if (!remoteExists) {
-                    c.writeText(REMOTE_FILE, localText);
+                    c.writeFile(REMOTE_FILE, compressGzip(localText));
                     markSynced(localHash);
                     result.uploaded = true;
                     if (listener != null) listener.onProgress("首次上传", true);
@@ -158,7 +167,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                 boolean localChanged = !localHash.equals(lastHash);
                 boolean remoteChanged = !remoteHash.equals(lastHash);
 
-                // 新设备首次同步：本地没有游戏库而云端已有数据时，直接下载云端，避免默认本地资料参与“智能合并”覆盖云端资料。
+                // 新设备首次同步：本地没有游戏库而云端已有数据时，直接下载云端，避免默认本地资料参与"智能合并"覆盖云端资料。
                 if ((lastHash == null || lastHash.isEmpty()) && remoteExists && isSnapshotEmpty(local)) {
                     importSnapshot(remote);
                     markSynced(remoteHash);
@@ -176,7 +185,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                     return;
                 }
                 if (localChanged && !remoteChanged) {
-                    c.writeText(REMOTE_FILE, localText);
+                    c.writeFile(REMOTE_FILE, compressGzip(localText));
                     markSynced(localHash);
                     result.uploaded = true;
                     if (listener != null) listener.onProgress("上传本地修改", true);
@@ -204,14 +213,14 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                     markSynced(remoteHash);
                     result.downloaded = true;
                 } else if (decision == RESOLVE_USE_LOCAL) {
-                    c.writeText(REMOTE_FILE, localText);
+                    c.writeFile(REMOTE_FILE, compressGzip(localText));
                     markSynced(localHash);
                     result.uploaded = true;
                 } else {
                     JSONObject merged = mergeSnapshots(local, remote);
                     String mergedText = merged.toString();
                     importSnapshot(new JSONObject(mergedText));
-                    c.writeText(REMOTE_FILE, mergedText);
+                    c.writeFile(REMOTE_FILE, compressGzip(mergedText));
                     markSynced(sha256(mergedText));
                     result.merged = true;
                 }
@@ -223,8 +232,9 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         });
     }
 
+    // 本地备份同样限制游玩记录数量，避免备份文件过大
     public JSONObject exportSnapshotForLocalBackup() throws Exception {
-        return buildLocalSnapshot(-1);
+        return buildLocalSnapshot(LOCAL_BACKUP_PLAY_SESSION_LIMIT);
     }
 
     public void importSnapshotFromLocalBackup(JSONObject root) throws Exception {
@@ -375,6 +385,38 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         StringBuilder sb = new StringBuilder();
         for (byte b : bytes) sb.append(String.format("%02x", b));
         return sb.toString();
+    }
+
+    /**
+     * 将 JSON 文本 gzip 压缩为 byte[]，用于 WebDAV 上传和本地备份写入。
+     */
+    private static byte[] compressGzip(String text) throws Exception {
+        byte[] raw = (text == null ? "" : text).getBytes("UTF-8");
+        ByteArrayOutputStream bos = new ByteArrayOutputStream(Math.max(256, raw.length / 4));
+        try (GZIPOutputStream gzip = new GZIPOutputStream(bos)) {
+            gzip.write(raw);
+            gzip.finish();
+        }
+        return bos.toByteArray();
+    }
+
+    /**
+     * 读取 WebDAV / 本地备份的 byte[] 数据，自动检测 gzip 格式并解压。
+     * 兼容老的纯 JSON 云端文件：如果不是 gzip 格式（没有 0x1f 0x8b 魔数），直接当 UTF-8 文本返回。
+     */
+    private static String decompressIfGzip(byte[] data) throws Exception {
+        if (data == null || data.length == 0) return "";
+        // gzip 文件头: 0x1f 0x8b
+        if (data.length >= 2 && (data[0] & 0xff) == 0x1f && (data[1] & 0xff) == 0x8b) {
+            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(data)); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = gzip.read(buf)) != -1) bos.write(buf, 0, len);
+                return bos.toString("UTF-8");
+            }
+        }
+        // 不是 gzip，按纯 JSON 文本处理（兼容老格式）
+        return new String(data, "UTF-8");
     }
 
     public static class SyncConfig {

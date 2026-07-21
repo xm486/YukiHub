@@ -38,7 +38,7 @@ public class AuthActivity extends AppCompatActivity {
 
 
     private static final String PREFS_NAME = "yukihub_prefs";
-    private static final String AUTH_BASE_URL = "https://yukihub.kesug.com/api";
+    private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
     private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
     private static final String KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token";
     private static final String KEY_AUTH_USER_ID = "auth_user_id";
@@ -54,10 +54,13 @@ public class AuthActivity extends AppCompatActivity {
 private SharedPreferences prefs;
 
 private TextView tabLogin, tabRegister, tvFormTitle, tvFormHint, tvAuthStatus;
-private LinearLayout rowNickname, rowConfirmPassword;
-private EditText etNickname, etEmail, etPassword, etConfirmPassword;
-private Button btnSubmit;
+private LinearLayout rowNickname, rowConfirmPassword, rowVerifyCode;
+private EditText etNickname, etEmail, etPassword, etConfirmPassword, etVerifyCode;
+private Button btnSubmit, btnSendCode;
 private TextView tvContinueLocal;
+
+// 发送验证码倒计时
+private android.os.CountDownTimer sendCodeTimer;
 
     @Override
 protected void onCreate(Bundle savedInstanceState) {
@@ -85,6 +88,15 @@ protected void onCreate(Bundle savedInstanceState) {
     switchToLogin();
 }
 
+@Override
+protected void onDestroy() {
+    super.onDestroy();
+    if (sendCodeTimer != null) {
+        sendCodeTimer.cancel();
+        sendCodeTimer = null;
+    }
+}
+
     private void initViews() {
     tabLogin = findViewById(R.id.tabLogin);
     tabRegister = findViewById(R.id.tabRegister);
@@ -94,13 +106,16 @@ protected void onCreate(Bundle savedInstanceState) {
 
     rowNickname = findViewById(R.id.rowNickname);
     rowConfirmPassword = findViewById(R.id.rowConfirmPassword);
+    rowVerifyCode = findViewById(R.id.rowVerifyCode);
 
     etNickname = findViewById(R.id.etNickname);
     etEmail = findViewById(R.id.etEmail);
     etPassword = findViewById(R.id.etPassword);
     etConfirmPassword = findViewById(R.id.etConfirmPassword);
+    etVerifyCode = findViewById(R.id.etVerifyCode);
 
     btnSubmit = findViewById(R.id.btnSubmit);
+    btnSendCode = findViewById(R.id.btnSendCode);
     tvContinueLocal = findViewById(R.id.tvContinueLocal);
 }
 
@@ -109,6 +124,7 @@ protected void onCreate(Bundle savedInstanceState) {
     tabRegister.setOnClickListener(v -> switchToRegister());
 
     btnSubmit.setOnClickListener(v -> onSubmit());
+    btnSendCode.setOnClickListener(v -> onSendCode());
 
     // 长按标题测试API连接
     tvFormTitle.setOnLongClickListener(v -> {
@@ -134,6 +150,7 @@ protected void onCreate(Bundle savedInstanceState) {
 
     rowNickname.setVisibility(View.GONE);
     rowConfirmPassword.setVisibility(View.GONE);
+    rowVerifyCode.setVisibility(View.GONE);
 
     tvAuthStatus.setVisibility(View.GONE);
 }
@@ -153,44 +170,50 @@ private void switchToRegister() {
 
     rowNickname.setVisibility(View.VISIBLE);
     rowConfirmPassword.setVisibility(View.VISIBLE);
+    rowVerifyCode.setVisibility(View.VISIBLE);
 
     tvAuthStatus.setVisibility(View.GONE);
 }
 
     private void onSubmit() {
-String email = etEmail.getText() == null ? "" : etEmail.getText().toString().trim();
-String password = etPassword.getText() == null ? "" : etPassword.getText().toString();
-String nickname = etNickname.getText() == null ? "" : etNickname.getText().toString().trim();
-String confirmPassword = etConfirmPassword.getText() == null ? "" : etConfirmPassword.getText().toString();
+    String email = etEmail.getText() == null ? "" : etEmail.getText().toString().trim();
+    String password = etPassword.getText() == null ? "" : etPassword.getText().toString();
+    String nickname = etNickname.getText() == null ? "" : etNickname.getText().toString().trim();
+    String confirmPassword = etConfirmPassword.getText() == null ? "" : etConfirmPassword.getText().toString();
+    String verifyCode = etVerifyCode.getText() == null ? "" : etVerifyCode.getText().toString().trim();
 
-if (!isValidEmail(email)) {
-showStatus("请输入有效的邮箱地址", 0xFFFF9500);
-return;
-}
-if (password.length() < 6) {
-showStatus("密码至少需要6位", 0xFFFF9500);
-return;
-}
-if (registerMode) {
-if (nickname.length() < 2 || nickname.length() > 20) {
-showStatus("昵称需要2-20个字符", 0xFFFF9500);
-return;
-}
-if (nickname.matches(".*[<>{}\\[\\]\\\\/].*")) {
-showStatus("昵称不能包含特殊字符", 0xFFFF9500);
-return;
-}
-if (!password.equals(confirmPassword)) {
-showStatus("两次密码输入不一致", 0xFFFF9500);
-return;
-}
-}
+    if (!isValidEmail(email)) {
+        showStatus("请输入有效的邮箱地址", 0xFFFF9500);
+        return;
+    }
+    if (password.length() < 6) {
+        showStatus("密码至少需要6位", 0xFFFF9500);
+        return;
+    }
+    if (registerMode) {
+        if (nickname.length() < 2 || nickname.length() > 20) {
+            showStatus("昵称需要2-20个字符", 0xFFFF9500);
+            return;
+        }
+        if (nickname.matches(".*[<>{}\\[\\]\\\\/].*")) {
+            showStatus("昵称不能包含特殊字符", 0xFFFF9500);
+            return;
+        }
+        if (!password.equals(confirmPassword)) {
+            showStatus("两次密码输入不一致", 0xFFFF9500);
+            return;
+        }
+        if (verifyCode.isEmpty()) {
+            showStatus("请输入邮箱验证码", 0xFFFF9500);
+            return;
+        }
+    }
 
-btnSubmit.setEnabled(false);
-btnSubmit.setText(registerMode ? "注册中..." : "登录中...");
-showStatus("正在连接...", 0xFF8E9AB5);
+    btnSubmit.setEnabled(false);
+    btnSubmit.setText(registerMode ? "注册中..." : "登录中...");
+    showStatus("正在连接...", 0xFF8E9AB5);
 
-performAuth(email, password, nickname);
+    performAuth(email, password, nickname, verifyCode);
 }
 
 private boolean isValidEmail(String email) {
@@ -232,38 +255,117 @@ private void testApiConnection() {
     }).start();
 }
 
-    private void performAuth(String email, String password, String nickname) {
-        new Thread(() -> {
-            try {
-                JSONObject resp;
-                
-                // 注册和登录都用 GET 方式（绕过 InfinityFree 的 POST 拦截）
-                String endpoint = registerMode ? "/auth/register" : "/auth/login";
-                String params = "email=" + java.net.URLEncoder.encode(email, "UTF-8")
-                        + "&password=" + java.net.URLEncoder.encode(password, "UTF-8");
-                if (registerMode) {
-                    params += "&nickname=" + java.net.URLEncoder.encode(nickname, "UTF-8");
-                }
-                String url = AUTH_BASE_URL + endpoint + "?" + params;
-                resp = getJson(url);
-                
-                saveSession(resp, email, nickname);
-
-                runOnUiThread(() -> {
-                    Toast.makeText(this, registerMode ? "注册成功" : "登录成功", Toast.LENGTH_SHORT).show();
-                    setResult(RESULT_OK);
-                    finish();
-                });
-            } catch (Throwable t) {
-                Log.w("YukiHub", "Auth failed", t);
-                runOnUiThread(() -> {
-                    btnSubmit.setEnabled(true);
-                    btnSubmit.setText(registerMode ? "创建账户" : "登录");
-                    showStatus("连接失败：" + (t.getMessage() != null ? t.getMessage() : "请检查网络"), 0xFFFF3B30);
-                });
+    private void performAuth(String email, String password, String nickname, String verifyCode) {
+    new Thread(() -> {
+        try {
+            JSONObject resp;
+            
+            // 注册和登录都用 GET 方式
+            String endpoint = registerMode ? "/auth/register" : "/auth/login";
+            String params = "email=" + java.net.URLEncoder.encode(email, "UTF-8")
+                    + "&password=" + java.net.URLEncoder.encode(password, "UTF-8");
+            if (registerMode) {
+                params += "&nickname=" + java.net.URLEncoder.encode(nickname, "UTF-8");
+                params += "&code=" + java.net.URLEncoder.encode(verifyCode, "UTF-8");
             }
-        }).start();
+            String url = AUTH_BASE_URL + endpoint + "?" + params;
+            resp = getJson(url);
+            
+            saveSession(resp, email, nickname);
+
+            runOnUiThread(() -> {
+                Toast.makeText(this, registerMode ? "注册成功" : "登录成功", Toast.LENGTH_SHORT).show();
+                setResult(RESULT_OK);
+                finish();
+            });
+        } catch (Throwable t) {
+            Log.w("YukiHub", "Auth failed", t);
+            runOnUiThread(() -> {
+                btnSubmit.setEnabled(true);
+                btnSubmit.setText(registerMode ? "创建账户" : "登录");
+                // 尝试从异常消息中提取服务器错误
+                String msg = t.getMessage() != null ? t.getMessage() : "请检查网络";
+                if (msg.startsWith("HTTP ")) {
+                    // 尝试解析 JSON 错误
+                    int colonIdx = msg.indexOf(": ");
+                    if (colonIdx > 0) {
+                        String jsonPart = msg.substring(colonIdx + 2);
+                        try {
+                            JSONObject errJson = new JSONObject(jsonPart);
+                            String errMsg = errJson.optString("error", jsonPart);
+                            msg = errMsg;
+                        } catch (Exception ignored) { }
+                    }
+                }
+                showStatus(msg, 0xFFFF3B30);
+            });
+        }
+    }).start();
+}
+
+/**
+ * 发送邮箱验证码
+ */
+private void onSendCode() {
+    String email = etEmail.getText() == null ? "" : etEmail.getText().toString().trim();
+
+    if (!isValidEmail(email)) {
+        showStatus("请先输入有效的邮箱地址", 0xFFFF9500);
+        return;
     }
+
+    btnSendCode.setEnabled(false);
+    showStatus("正在发送邮箱验证码...", 0xFF8E9AB5);
+
+    new Thread(() -> {
+        try {
+            String url = AUTH_BASE_URL + "/auth/send_code?email="
+                    + java.net.URLEncoder.encode(email, "UTF-8");
+            JSONObject resp = getJson(url);
+
+            runOnUiThread(() -> {
+                showStatus("验证码已发送至邮箱，请查收", 0xFF34D158);
+                startSendCodeCountdown();
+            });
+        } catch (Throwable t) {
+            Log.w("YukiHub", "Send code failed", t);
+            runOnUiThread(() -> {
+                btnSendCode.setEnabled(true);
+                btnSendCode.setText("发送验证码");
+                String msg = t.getMessage() != null ? t.getMessage() : "请检查网络";
+                if (msg.startsWith("HTTP ")) {
+                    int colonIdx = msg.indexOf(": ");
+                    if (colonIdx > 0) {
+                        String jsonPart = msg.substring(colonIdx + 2);
+                        try {
+                            JSONObject errJson = new JSONObject(jsonPart);
+                            msg = errJson.optString("error", jsonPart);
+                        } catch (Exception ignored) { }
+                    }
+                }
+                showStatus(msg, 0xFFFF3B30);
+            });
+        }
+    }).start();
+}
+
+/**
+ * 发送验证码按钮倒计时（60秒）
+ */
+private void startSendCodeCountdown() {
+    if (sendCodeTimer != null) sendCodeTimer.cancel();
+    sendCodeTimer = new android.os.CountDownTimer(60000, 1000) {
+        @Override
+        public void onTick(long millisUntilFinished) {
+            btnSendCode.setText((millisUntilFinished / 1000) + "s");
+        }
+        @Override
+        public void onFinish() {
+            btnSendCode.setEnabled(true);
+            btnSendCode.setText("发送验证码");
+        }
+    }.start();
+}
 
     private JSONObject getJson(String urlStr) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
@@ -274,7 +376,7 @@ private void testApiConnection() {
         c.setRequestProperty("Accept", "application/json,text/plain,*/*");
         c.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
         c.setRequestProperty("User-Agent", BROWSER_UA);
-        c.setRequestProperty("Referer", "https://yukihub.kesug.com/");
+        c.setRequestProperty("Referer", "https://yukihub.zh.kg/");
         int code = c.getResponseCode();
         String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
         if (text != null && text.trim().startsWith("<")) {
@@ -373,6 +475,8 @@ private void testApiConnection() {
         etPassword.setHintTextColor(hintColor);
         etConfirmPassword.setTextColor(textColor);
         etConfirmPassword.setHintTextColor(hintColor);
+        etVerifyCode.setTextColor(textColor);
+        etVerifyCode.setHintTextColor(hintColor);
         btnSubmit.setTextColor(0xFFFFFFFF);
         tvContinueLocal.setTextColor(mutedColor);
         // Tint backgrounds
@@ -381,6 +485,8 @@ private void testApiConnection() {
         etEmail.setBackground(tintAuthInput(colors));
         etPassword.setBackground(tintAuthInput(colors));
         etConfirmPassword.setBackground(tintAuthInput(colors));
+        etVerifyCode.setBackground(tintAuthInput(colors));
+        btnSendCode.setBackground(tintAuthInput(colors));
         // Dialog background
         View root = findViewById(android.R.id.content);
         if (root != null) {
