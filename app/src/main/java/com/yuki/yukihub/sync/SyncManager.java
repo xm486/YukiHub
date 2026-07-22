@@ -2,6 +2,9 @@ package com.yuki.yukihub.sync;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.util.Log;
 
 import com.yuki.yukihub.data.GameRepository;
@@ -13,6 +16,7 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -35,6 +39,9 @@ public class SyncManager {
     private static final String KEY_PROFILE_NAME = "profile_name";
     private static final String KEY_PROFILE_SIGNATURE = "profile_signature";
     private static final String KEY_PROFILE_AVATAR = "profile_avatar";
+    private static final String KEY_AUTH_AVATAR = "auth_avatar";
+    private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
+    private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
     private static final String KEY_METADATA_SOURCE = "metadata_source";
     private static final String SOURCE_VNDB = "vndb";
     private static final String SOURCE_BANGUMI = "bangumi";
@@ -134,6 +141,9 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                 if (c == null) throw new Exception("WebDAV 客户端初始化失败");
                 // 坚果云根目录通常不可直接创建同步文件夹；要求用户先在坚果云创建 YukiHub 文件夹。
 
+                // 同步前：如果用户已登录且有本地头像（file:// 开头），先上传到服务器
+                tryUploadLocalAvatar();
+
                 JSONObject local = buildLocalSnapshot();
                 String localText = local.toString();
                 String localHash = sha256(localText);
@@ -154,6 +164,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
                 SyncResult result = new SyncResult();
                 result.localBytes = localText.getBytes("UTF-8").length;
                 result.remoteBytes = remoteText == null ? 0 : remoteText.getBytes("UTF-8").length;
+                result.compressedBytes = compressGzip(localText).length;
 
                 if (!remoteExists) {
                     c.writeFile(REMOTE_FILE, compressGzip(localText));
@@ -258,8 +269,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         JSONObject profile = new JSONObject();
         profile.put("name", appPrefs.getString(KEY_PROFILE_NAME, "Yuki"));
         profile.put("signature", appPrefs.getString(KEY_PROFILE_SIGNATURE, ""));
-        String avatarUri = appPrefs.getString(KEY_PROFILE_AVATAR, "");
-        // 只同步网络头像地址；本地 file/content 路径跨设备无效，也可能暴露本机目录。
+        // 同步时使用 auth_avatar（服务器 URL），profile_avatar 是本地 file:// 路径不跨设备
+        String avatarUri = appPrefs.getString(KEY_AUTH_AVATAR, "");
         if (avatarUri != null && (avatarUri.startsWith("http://") || avatarUri.startsWith("https://"))) {
             profile.put("avatar_uri", avatarUri);
         } else {
@@ -315,11 +326,14 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         if (profile != null) {
             String incomingAvatar = profile.optString("avatar_uri", "");
             if (incomingAvatar == null || !(incomingAvatar.startsWith("http://") || incomingAvatar.startsWith("https://"))) incomingAvatar = "";
-            appPrefs.edit()
+            SharedPreferences.Editor ed = appPrefs.edit()
                     .putString(KEY_PROFILE_NAME, profile.optString("name", appPrefs.getString(KEY_PROFILE_NAME, "Yuki")))
-                    .putString(KEY_PROFILE_SIGNATURE, profile.optString("signature", appPrefs.getString(KEY_PROFILE_SIGNATURE, "")))
-                    .putString(KEY_PROFILE_AVATAR, incomingAvatar)
-                    .apply();
+                    .putString(KEY_PROFILE_SIGNATURE, profile.optString("signature", appPrefs.getString(KEY_PROFILE_SIGNATURE, "")));
+            // 服务器头像 URL 只存 auth_avatar，不覆盖 profile_avatar（本地路径用于 ImageView 显示）
+            if (!incomingAvatar.isEmpty()) {
+                ed.putString(KEY_AUTH_AVATAR, incomingAvatar);
+            }
+            ed.apply();
         }
         JSONObject settings = root.optJSONObject("settings");
         if (settings != null) {
@@ -387,6 +401,303 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         return sb.toString();
     }
 
+    // ========== 服务器云同步 ==========
+
+    private static final int SYNC_COOLDOWN_MS = 60 * 1000;  // 手动同步冷却 60 秒
+    private static volatile long lastServerSyncTime = 0;   // 上次手动同步时间（内存级，防止频繁调用）
+
+    /**
+     * 云同步到 yukihub.zh.kg 服务器。
+     * 流程：
+     * 1. 检查登录状态
+     * 2. 冷却检查（60秒）
+     * 3. 上传本地头像（如果有）
+     * 4. 构建本地快照 → gzip 压缩 → 上传到服务器
+     * 5. 如果服务器已有数据，下载并合并
+     * 6. 上传合并后的数据
+     */
+    public void syncToServer(SyncListener listener) {
+        // 冷却检查
+        if (System.currentTimeMillis() - lastServerSyncTime < SYNC_COOLDOWN_MS) {
+            if (listener != null) listener.onError("同步冷却中，请稍后再试（60秒内仅限一次）");
+            return;
+        }
+
+        String accessToken = appPrefs.getString(KEY_AUTH_ACCESS_TOKEN, "");
+        if (accessToken == null || accessToken.trim().isEmpty()) {
+            if (listener != null) listener.onError("未登录，无法同步");
+            return;
+        }
+
+        AppExecutors.runOnSingle(() -> {
+            try {
+                if (listener != null) listener.onSyncStart();
+
+                // 先上传头像
+                tryUploadLocalAvatar();
+
+                // 构建本地快照
+                JSONObject local = buildLocalSnapshot(LOCAL_BACKUP_PLAY_SESSION_LIMIT);
+                String localText = local.toString();
+                String localHash = sha256(localText);
+
+                // 上传到服务器
+                if (listener != null) listener.onProgress("上传同步数据", true);
+                byte[] compressed = compressGzip(localText);
+                String uploadResp = httpPostBinary(AUTH_BASE_URL + "/sync/upload", accessToken, compressed);
+                JSONObject uploadJson = new JSONObject(uploadResp);
+                if (!uploadJson.optBoolean("success", false)) {
+                    throw new Exception("服务器上传失败: " + uploadJson.optString("error", "未知错误"));
+                }
+
+                // 下载云端数据并合并
+                try {
+                    byte[] remoteBytes = httpGetBinary(AUTH_BASE_URL + "/sync/download", accessToken);
+                    String remoteText = decompressIfGzip(remoteBytes);
+                    JSONObject remote = new JSONObject(remoteText);
+                    if ("YukiHub".equals(remote.optString("app", ""))) {
+                        String remoteHash = sha256(remoteText);
+                        if (!localHash.equals(remoteHash)) {
+                            // 合并
+                            if (listener != null) listener.onProgress("合并云端数据", true);
+                            JSONObject merged = mergeSnapshots(local, remote);
+                            String mergedText = merged.toString();
+                            importSnapshot(new JSONObject(mergedText));
+                            // 上传合并后的数据
+                            byte[] mergedCompressed = compressGzip(mergedText);
+                            httpPostBinary(AUTH_BASE_URL + "/sync/upload", accessToken, mergedCompressed);
+                        } else {
+                            if (listener != null) listener.onProgress("数据已是最新", false);
+                        }
+                    }
+                } catch (Exception downloadEx) {
+                    // 404 = 首次上传，没有云端数据，正常
+                    if (listener != null) listener.onProgress("首次上传完成", true);
+                }
+
+                lastServerSyncTime = System.currentTimeMillis();
+                // 持久化最后同步时间
+                prefs_setLastSyncAt();
+
+                SyncResult result = new SyncResult();
+                result.uploaded = true;
+                result.localBytes = localText.getBytes("UTF-8").length;
+                result.compressedBytes = compressed.length;
+                if (listener != null) listener.onSyncComplete(result);
+
+            } catch (Throwable t) {
+                Log.e(TAG, "syncToServer failed", t);
+                if (listener != null) listener.onError(t.getMessage() == null ? "同步失败" : t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 自动同步到服务器（App 启动时调用）。
+     * 条件：已登录 + 自动同步开关打开 + 距上次同步超过 10 分钟。
+     */
+    public void maybeAutoSyncToServer(SyncListener listener) {
+        String accessToken = appPrefs.getString(KEY_AUTH_ACCESS_TOKEN, "");
+        if (accessToken == null || accessToken.trim().isEmpty()) return;
+
+        boolean autoSync = appPrefs.getBoolean(KEY_CLOUD_SYNC_ENABLED, false);
+        if (!autoSync) return;
+
+        long last = prefs_getLastSyncAt();
+        if (last > 0 && System.currentTimeMillis() - last < 10L * 60L * 1000L) return;
+
+        // 冷却检查也要过
+        if (System.currentTimeMillis() - lastServerSyncTime < SYNC_COOLDOWN_MS) return;
+
+        syncToServer(listener);
+    }
+
+    private static final String KEY_LAST_SYNC_AT = "last_sync_at";
+
+    private long prefs_getLastSyncAt() {
+        return appPrefs.getLong(KEY_LAST_SYNC_AT, 0);
+    }
+
+    private void prefs_setLastSyncAt() {
+        appPrefs.edit().putLong(KEY_LAST_SYNC_AT, System.currentTimeMillis()).apply();
+    }
+
+    /**
+     * HTTP POST 发送二进制数据，返回响应文本。
+     */
+    private String httpPostBinary(String urlStr, String accessToken, byte[] data) throws Exception {
+        java.net.URL url = new java.net.URL(urlStr);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+        conn.setRequestProperty("Content-Type", "application/octet-stream");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(60000);
+        try (java.io.OutputStream os = conn.getOutputStream()) {
+            os.write(data);
+            os.flush();
+        }
+        int code = conn.getResponseCode();
+        InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+        String response;
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[4096];
+            int len;
+            while (is != null && (len = is.read(buf)) != -1) bos.write(buf, 0, len);
+            response = bos.toString("UTF-8");
+        }
+        if (code < 200 || code >= 300) {
+            throw new Exception("HTTP " + code + ": " + response);
+        }
+        return response;
+    }
+
+    /**
+     * HTTP GET 下载二进制数据。
+     */
+    private byte[] httpGetBinary(String urlStr, String accessToken) throws Exception {
+        java.net.URL url = new java.net.URL(urlStr);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(60000);
+        int code = conn.getResponseCode();
+        if (code == 404) {
+            throw new Exception("No sync data");
+        }
+        if (code < 200 || code >= 300) {
+            String err = "";
+            try (InputStream is = conn.getErrorStream(); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                if (is != null) {
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = is.read(buf)) != -1) bos.write(buf, 0, len);
+                    err = bos.toString("UTF-8");
+                }
+            } catch (Exception ignored) { }
+            throw new Exception("HTTP " + code + ": " + err);
+        }
+        try (InputStream is = conn.getInputStream(); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = is.read(buf)) != -1) bos.write(buf, 0, len);
+            return bos.toByteArray();
+        }
+    }
+
+    // ========== 头像上传 ==========
+
+    private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
+    private static final int AVATAR_MAX_PIXELS = 384;   // 压缩到 384px
+    private static final int AVATAR_QUALITY = 85;       // JPEG 85%
+    private static final int AVATAR_MAX_BYTES = 200 * 1024; // 服务端限制 200KB
+
+    /**
+     * 同步前检测：如果用户已登录且本地头像是 file:// 路径（尚未上传），
+     * 则压缩后上传到服务器，成功后把本地路径替换为服务器 URL。
+     * 失败不影响后续同步流程。
+     */
+    private void tryUploadLocalAvatar() {
+        try {
+            String accessToken = appPrefs.getString(KEY_AUTH_ACCESS_TOKEN, "");
+            if (accessToken == null || accessToken.trim().isEmpty()) return;
+
+            String avatarUri = appPrefs.getString(KEY_PROFILE_AVATAR, "");
+            if (avatarUri == null || avatarUri.trim().isEmpty()) return;
+
+            // 只处理本地 file:// 路径的头像；http(s):// 已是服务器地址，跳过
+            if (!avatarUri.startsWith("file://")) return;
+
+            // 已上传过（auth_avatar 有值）则跳过
+            String existingAuth = appPrefs.getString(KEY_AUTH_AVATAR, "");
+            if (existingAuth != null && !existingAuth.isEmpty()) return;
+
+            Uri uri = Uri.parse(avatarUri);
+            // 读取图片文件
+            java.io.File avatarFile = new java.io.File(uri.getPath());
+            if (!avatarFile.exists()) return;
+
+            // 读取 + 压缩
+            byte[] compressed = compressAvatar(avatarFile);
+            if (compressed == null || compressed.length == 0) return;
+
+            if (compressed.length > AVATAR_MAX_BYTES) {
+                Log.w(TAG, "Avatar still too large after compression: " + compressed.length + " bytes");
+                return;
+            }
+
+            // 上传
+            String urlStr = AUTH_BASE_URL + "/upload_avatar";
+            java.net.URL url = new java.net.URL(urlStr);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+            conn.setRequestProperty("Content-Type", "image/jpeg");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            try (java.io.OutputStream os = conn.getOutputStream()) {
+                os.write(compressed);
+                os.flush();
+            }
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                Log.w(TAG, "Avatar upload failed: HTTP " + code);
+                return;
+            }
+            // 读取响应
+            String response;
+            try (InputStream is = conn.getInputStream(); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                byte[] buf = new byte[4096];
+                int len;
+                while ((len = is.read(buf)) != -1) bos.write(buf, 0, len);
+                response = bos.toString("UTF-8");
+            }
+            JSONObject resp = new JSONObject(response);
+            String avatarUrl = resp.optString("avatarUrl", "");
+            if (avatarUrl.isEmpty()) {
+                Log.w(TAG, "Avatar upload: server did not return avatarUrl");
+                return;
+            }
+            // 成功：只标记 auth_avatar（服务器 URL），profile_avatar 保留本地路径用于显示
+            appPrefs.edit().putString(KEY_AUTH_AVATAR, avatarUrl).apply();
+            Log.i(TAG, "Avatar uploaded: " + avatarUrl + " (" + compressed.length + " bytes)");
+        } catch (Throwable t) {
+            Log.w(TAG, "tryUploadLocalAvatar failed (non-fatal)", t);
+        }
+    }
+
+    /**
+     * 读取本地图片文件，缩放到 AVATAR_MAX_PIXELS，JPEG 压缩为 byte[]。
+     */
+    private byte[] compressAvatar(java.io.File file) {
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+            Bitmap bitmap = BitmapFactory.decodeStream(fis);
+            if (bitmap == null) return null;
+            // 缩放
+            int w = bitmap.getWidth();
+            int h = bitmap.getHeight();
+            if (w > AVATAR_MAX_PIXELS || h > AVATAR_MAX_PIXELS) {
+                float scale = Math.min(AVATAR_MAX_PIXELS / (float) w, AVATAR_MAX_PIXELS / (float) h);
+                Bitmap scaled = Bitmap.createScaledBitmap(bitmap,
+                        Math.max(1, (int) (w * scale)),
+                        Math.max(1, (int) (h * scale)), true);
+                bitmap.recycle();
+                bitmap = scaled;
+            }
+            // JPEG 压缩
+            ByteArrayOutputStream bos = new ByteArrayOutputStream(32 * 1024);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, AVATAR_QUALITY, bos);
+            bitmap.recycle();
+            return bos.toByteArray();
+        } catch (Throwable t) {
+            Log.w(TAG, "compressAvatar failed", t);
+            return null;
+        }
+    }
+
     /**
      * 将 JSON 文本 gzip 压缩为 byte[]，用于 WebDAV 上传和本地备份写入。
      */
@@ -438,7 +749,7 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
 
     public static class SyncResult {
         public boolean uploaded, downloaded, merged, noChanges, cancelled;
-        public int localBytes, remoteBytes;
+        public int localBytes, remoteBytes, compressedBytes;
         public boolean hasChanges() { return uploaded || downloaded || merged; }
     }
 

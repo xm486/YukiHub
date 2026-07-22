@@ -533,17 +533,12 @@ public class HomeActivity extends AppCompatActivity {
 
     private void loadProfileAvatar() {
         if (homeAvatar == null) return;
-        String value = "";
-        if (prefs != null && isLoggedIn()) value = prefs.getString(KEY_AUTH_AVATAR, "");
-        if (value == null || value.trim().isEmpty()) value = prefs == null ? "" : prefs.getString(KEY_PROFILE_AVATAR, "");
+        // 始终使用 profile_avatar（本地 file:// 路径），与 MainActivity 保持一致
+        String value = prefs == null ? "" : prefs.getString(KEY_PROFILE_AVATAR, "");
         value = value == null ? "" : value.trim();
         avatarImageRequest = value;
         homeAvatar.setVisibility(View.GONE);
         if (value.isEmpty()) return;
-        if (value.startsWith("http://") || value.startsWith("https://")) {
-            loadRemoteProfileAvatar(value);
-            return;
-        }
         try {
             Uri uri = value.contains("://") ? Uri.parse(value) : Uri.fromFile(new File(value));
             homeAvatar.setImageURI(uri);

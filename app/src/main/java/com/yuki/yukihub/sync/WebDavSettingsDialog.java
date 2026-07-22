@@ -278,12 +278,14 @@ public class WebDavSettingsDialog extends DialogFragment {
                         if (result.uploaded) msg.append(" 已上传");
                         if (result.downloaded) msg.append(" 已下载");
                         if (result.merged) msg.append(" 已合并");
-                        msg.append(" · 本地").append(result.localBytes / 1024).append("KB");
+                        int showBytes = result.compressedBytes > 0 ? result.compressedBytes : result.localBytes;
+                        msg.append(" · ").append(showBytes / 1024).append("KB");
                         showStatus(msg.toString(), 0xFF34D158);
                     } else if (result.cancelled) {
                         showStatus("已取消同步", 0xFFFF9500);
                     } else {
-                        showStatus("✓ 已是最新 · " + (result.localBytes / 1024) + "KB", 0xFF34D158);
+                        int showBytes = result.compressedBytes > 0 ? result.compressedBytes : result.localBytes;
+                        showStatus("✓ 已是最新 · " + (showBytes / 1024) + "KB", 0xFF34D158);
                     }
                     
                     // 更新最后同步时间

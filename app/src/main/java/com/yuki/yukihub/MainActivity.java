@@ -1924,7 +1924,13 @@ private void showProfileDialog() {
     syncBtn.setTextColor(isLoggedIn() ? primaryTextColor() : getColorCompat(R.color.yh_text_muted));
     syncBtn.setEnabled(isLoggedIn());
     loginBtn.setOnClickListener(v -> showAuthPlaceholderDialog());
-    syncBtn.setOnClickListener(v -> Toast.makeText(this, "登录后即可使用云同步", Toast.LENGTH_SHORT).show());
+    syncBtn.setOnClickListener(v -> {
+        if (!isLoggedIn()) {
+            Toast.makeText(this, "登录后即可使用云同步", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        doServerSync(false);
+    });
     accountRow.addView(loginBtn, new LinearLayout.LayoutParams(0, dp(40), 1));
     LinearLayout.LayoutParams syncLp = new LinearLayout.LayoutParams(0, dp(40), 1);
     syncLp.setMargins(dp(8), 0, 0, 0);
@@ -2251,12 +2257,12 @@ private void showAccountSettingsDialog() {
     String name = displayProfileName();
     boolean syncEnabled = prefs == null || prefs.getBoolean(KEY_CLOUD_SYNC_ENABLED, true);
     long lastSync = prefs == null ? 0 : prefs.getLong(KEY_LAST_SYNC_AT, 0);
-    info.setText("账号：" + name + "\n邮箱：" + emptyText(email, "-") + "\n状态：" + accountStatusLabelForDialog() + "\n云同步：" + (syncEnabled ? "开启" : "关闭") + "\n最后同步：" + (lastSync > 0 ? TimeFormatUtil.date(lastSync) : "尚未同步"));
+    info.setText("账号：" + name + "\n邮箱：" + emptyText(email, "-") + "\n状态：" + accountStatusLabelForDialog() + "\n自动同步：" + (syncEnabled ? "开启" : "关闭") + "\n最后同步：" + (lastSync > 0 ? TimeFormatUtil.date(lastSync) : "尚未同步"));
     info.setTextColor(getColorCompat(R.color.yh_text_muted));
     info.setTextSize(13);
     info.setLineSpacing(dp(2), 1.0f);
     root.addView(info);
-    CheckBox syncCheck = krCheckBox("开启云同步", syncEnabled);
+    CheckBox syncCheck = krCheckBox("开启自动同步（启动时自动云同步）", syncEnabled);
     syncCheck.setPadding(0, dp(10), 0, 0);
     root.addView(syncCheck);
     AlertDialog dialog = new AlertDialog.Builder(this)
@@ -2318,6 +2324,82 @@ private void maybeAutoWebDavSync() {
         }
         @Override public void onError(String error) {
             runOnUiThread(() -> webDavAutoSyncRunning = false);
+        }
+    });
+}
+
+// ========== 服务器云同步 ==========
+
+private boolean serverSyncRunning = false;
+
+/**
+ * 手动触发服务器云同步。
+ * @param silent true=自动同步（不弹Toast），false=手动点击（有UI反馈）
+ */
+private void doServerSync(boolean silent) {
+    if (serverSyncRunning) {
+        if (!silent) Toast.makeText(this, "正在同步中…", Toast.LENGTH_SHORT).show();
+        return;
+    }
+    serverSyncRunning = true;
+    com.yuki.yukihub.sync.SyncManager sm = new com.yuki.yukihub.sync.SyncManager(this);
+    if (!silent) Toast.makeText(this, "开始云同步…", Toast.LENGTH_SHORT).show();
+    sm.syncToServer(new com.yuki.yukihub.sync.SyncManager.SyncListener() {
+        @Override public void onSyncStart() { }
+        @Override public void onProgress(String item, boolean changed) { }
+        @Override public int onConflict(com.yuki.yukihub.sync.SyncManager.Conflict conflict) {
+            return com.yuki.yukihub.sync.SyncManager.RESOLVE_MERGE;
+        }
+        @Override public void onSyncComplete(com.yuki.yukihub.sync.SyncManager.SyncResult result) {
+            runOnUiThread(() -> {
+                serverSyncRunning = false;
+                if (result != null) {
+                    coverMaintenanceDone = false;
+                    loadGames();
+                    updateProfilePanel();
+                    if (!silent) {
+                        int showBytes = result.compressedBytes > 0 ? result.compressedBytes : result.localBytes;
+                        Toast.makeText(MainActivity.this,
+                            "云同步完成 · " + (showBytes / 1024) + "KB",
+                            Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+        }
+        @Override public void onError(String error) {
+            runOnUiThread(() -> {
+                serverSyncRunning = false;
+                if (!silent) Toast.makeText(MainActivity.this, "云同步失败：" + error, Toast.LENGTH_LONG).show();
+            });
+        }
+    });
+}
+
+/**
+ * App 启动时自动服务器同步（静默）。
+ */
+private void maybeAutoServerSync() {
+    if (serverSyncRunning) return;
+    if (!isLoggedIn()) return;
+    com.yuki.yukihub.sync.SyncManager sm = new com.yuki.yukihub.sync.SyncManager(this);
+    sm.maybeAutoSyncToServer(new com.yuki.yukihub.sync.SyncManager.SyncListener() {
+        @Override public void onSyncStart() { }
+        @Override public void onProgress(String item, boolean changed) { }
+        @Override public int onConflict(com.yuki.yukihub.sync.SyncManager.Conflict conflict) {
+            return com.yuki.yukihub.sync.SyncManager.RESOLVE_MERGE;
+        }
+        @Override public void onSyncComplete(com.yuki.yukihub.sync.SyncManager.SyncResult result) {
+            runOnUiThread(() -> {
+                serverSyncRunning = false;
+                if (result != null && result.hasChanges()) {
+                    coverMaintenanceDone = false;
+                    loadGames();
+                    updateProfilePanel();
+                }
+            });
+        }
+        @Override public void onError(String error) {
+            runOnUiThread(() -> serverSyncRunning = false);
         }
     });
 }
@@ -3527,10 +3609,10 @@ private String accountStatus() {
 }
 
 private void loadProfileAvatarInto(ImageView avatar, TextView initial) {
-if (avatar == null) return;
-String uri = "";
-if (prefs != null && isLoggedIn()) uri = prefs.getString(KEY_AUTH_AVATAR, "");
-if (uri == null || uri.isEmpty()) uri = prefs == null ? "" : prefs.getString(KEY_PROFILE_AVATAR, "");
+    if (avatar == null) return;
+    // 始终使用 profile_avatar 显示（本地 file:// 路径），
+    // auth_avatar 仅用于标记是否已上传到服务器，不用于显示
+    String uri = prefs == null ? "" : prefs.getString(KEY_PROFILE_AVATAR, "");
     if (uri == null || uri.isEmpty()) {
         avatar.setVisibility(View.GONE);
         if (initial != null) initial.setVisibility(View.VISIBLE);
@@ -8510,6 +8592,7 @@ return startActivitySafely(intent);
     
     updateProfilePanel();
     maybeAutoWebDavSync();
+    maybeAutoServerSync();
     startStatusBarUpdates();
 }
 
