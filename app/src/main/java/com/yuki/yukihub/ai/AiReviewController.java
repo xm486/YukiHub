@@ -53,6 +53,7 @@ import com.yuki.yukihub.data.GameRepository;
 import com.yuki.yukihub.data.GameRepository.PlayActivity;
 import com.yuki.yukihub.data.MetadataRepository;
 import com.yuki.yukihub.metadata.BangumiClient;
+import com.yuki.yukihub.metadata.HikarinagiClient;
 import com.yuki.yukihub.metadata.VndbClient;
 import com.yuki.yukihub.metadata.VnMetadata;
 import com.yuki.yukihub.metadata.YmgalClient;
@@ -105,6 +106,7 @@ public class AiReviewController {
         VnMetadata metadataForSource(long gameId, String source);
         VnMetadata anyCachedMetadata(long gameId);
         boolean usingYmgal();
+        boolean usingHikarinagi();
         boolean usingBangumi();
         boolean usingBangumiMirror();
         String bangumiToken();
@@ -607,6 +609,12 @@ private VnMetadata lookupAiReviewMetadataOnline(Game game) {
             VnMetadata chosen = chooseAiMetadataCandidate(game.title, list);
             if (chosen != null) chosen = YmgalClient.getGame(chosen.id, chosen);
             if (chosen != null) delegate.metadataRepository().saveYmgal(game.id, chosen);
+            return chosen;
+        } else if (delegate.usingHikarinagi()) {
+            List<VnMetadata> list = HikarinagiClient.searchCandidates(keyword, 3);
+            VnMetadata chosen = chooseAiMetadataCandidate(game.title, list);
+            if (chosen != null) chosen = HikarinagiClient.getGalgame(chosen.id, chosen);
+            if (chosen != null) delegate.metadataRepository().saveHikarinagi(game.id, chosen);
             return chosen;
         } else if (delegate.usingBangumi()) {
             String token = delegate.bangumiToken();

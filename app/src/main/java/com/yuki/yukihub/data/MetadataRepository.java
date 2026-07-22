@@ -199,4 +199,32 @@ public class MetadataRepository {
         SQLiteDatabase db = helper.getWritableDatabase();
         db.delete("metadata_cache", "game_id=? AND source='ymgal'", new String[]{String.valueOf(gameId)});
     }
+
+    public VnMetadata getHikarinagi(long gameId) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT json FROM metadata_cache WHERE game_id=? AND source='hikarinagi' LIMIT 1", new String[]{String.valueOf(gameId)});
+        try {
+            if (!c.moveToFirst()) return null;
+            return VnMetadata.fromJson(c.getString(0));
+        } finally {
+            c.close();
+        }
+    }
+
+    public void saveHikarinagi(long gameId, VnMetadata data) {
+        if (gameId <= 0 || data == null) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        ContentValues v = new ContentValues();
+        v.put("game_id", gameId);
+        v.put("source", "hikarinagi");
+        v.put("source_id", data.id);
+        v.put("json", data.toJson().toString());
+        v.put("updated_at", System.currentTimeMillis());
+        db.insertWithOnConflict("metadata_cache", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public void clearHikarinagi(long gameId) {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        db.delete("metadata_cache", "game_id=? AND source='hikarinagi'", new String[]{String.valueOf(gameId)});
+    }
 }

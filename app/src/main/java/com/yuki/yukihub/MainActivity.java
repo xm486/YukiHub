@@ -320,6 +320,7 @@ prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             @Override public VnMetadata metadataForSource(long gameId, String source) { return MainActivity.this.metadataForSource(gameId, source); }
             @Override public VnMetadata anyCachedMetadata(long gameId) { return MainActivity.this.anyCachedMetadata(gameId); }
             @Override public boolean usingYmgal() { return MainActivity.this.usingYmgal(); }
+            @Override public boolean usingHikarinagi() { return MainActivity.this.usingHikarinagi(); }
             @Override public boolean usingBangumi() { return MainActivity.this.usingBangumi(); }
             @Override public boolean usingBangumiMirror() { return MainActivity.this.usingBangumiMirror(); }
             @Override public String bangumiToken() { return MainActivity.this.bangumiToken(); }
@@ -4098,6 +4099,10 @@ private boolean usingYmgal() {
     return metadataController.usingYmgal();
 }
 
+private boolean usingHikarinagi() {
+    return metadataController.usingHikarinagi();
+}
+
 private String bangumiToken() {
     return metadataController.bangumiToken();
 }
@@ -4170,8 +4175,16 @@ private void fetchYmgalMetadata(Game game, boolean forceRefresh) {
     metadataController.fetchYmgalMetadata(game, forceRefresh);
 }
 
+private void fetchHikarinagiMetadata(Game game, boolean forceRefresh) {
+    metadataController.fetchHikarinagiMetadata(game, forceRefresh);
+}
+
 private void fetchAndApplyYmgalDetail(Game game, VnMetadata candidate) {
     metadataController.fetchAndApplyYmgalDetail(game, candidate);
+}
+
+private void fetchAndApplyHikarinagiDetail(Game game, VnMetadata candidate) {
+    metadataController.fetchAndApplyHikarinagiDetail(game, candidate);
 }
 
 private boolean downloadImageAllowVndbWarningPage(String imageUrl, File cacheFile, int depth) {
@@ -4534,12 +4547,20 @@ private void showCustomYmgalSearchDialog(Game game) {
     metadataController.showCustomYmgalSearchDialog(game);
 }
 
+private void showCustomHikarinagiSearchDialog(Game game) {
+    metadataController.showCustomHikarinagiSearchDialog(game);
+}
+
 private void searchBangumiWithKeyword(Game game, String keyword) {
     metadataController.searchBangumiWithKeyword(game, keyword);
 }
 
 private void searchYmgalWithKeyword(Game game, String keyword) {
     metadataController.searchYmgalWithKeyword(game, keyword);
+}
+
+private void searchHikarinagiWithKeyword(Game game, String keyword) {
+    metadataController.searchHikarinagiWithKeyword(game, keyword);
 }
 
 private void searchVndbWithKeyword(Game game, String keyword) {
@@ -5082,12 +5103,13 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(sourceTitle);
 
         Spinner sourceSpinner = new Spinner(this);
-        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）"});
+        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
         if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(1);
 else if (MetadataController.SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(2);
 else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
+else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(4);
 else sourceSpinner.setSelection(0);
         root.addView(sourceSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
@@ -5110,7 +5132,7 @@ else sourceSpinner.setSelection(0);
         root.addView(tokenInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         TextView warn = new TextView(this);
-        warn.setText("提醒：Bangumi API Token 建议使用注册超过三个月的账号申请。月幕 Gal 使用公开 API，无需 Token。切换资料源后，已有其它源缓存会继续显示；对当前游戏可点“重新匹配”刷新当前源资料。");
+        warn.setText("提醒：Bangumi API Token 建议使用注册超过三个月的账号申请。月幕 Gal 和 Hikarinagi 使用公开 API，无需 Token。切换资料源后，已有其它源缓存会继续显示；对当前游戏可点“重新匹配”刷新当前源资料。");
         warn.setTextColor(getColorCompat(R.color.yh_warning));
         warn.setTextSize(11);
         warn.setPadding(0, dp(8), 0, 0);
@@ -5344,7 +5366,8 @@ else sourceSpinner.setSelection(0);
             boolean bangumi = sourceSelection == 1;
             boolean bangumiMirror = sourceSelection == 2;
             boolean ymgal = sourceSelection == 3;
-            String selectedMetadataSource = ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB));
+            boolean hikarinagi = sourceSelection == 4;
+            String selectedMetadataSource = hikarinagi ? MetadataController.SOURCE_HIKARINAGI : (ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB)));
             String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
             if ((bangumi || bangumiMirror) && token.isEmpty()) {
                 Toast.makeText(MainActivity.this, "选择 Bangumi 时需要填写 Token", Toast.LENGTH_SHORT).show();
@@ -5385,7 +5408,7 @@ else sourceSpinner.setSelection(0);
                 dt.setCustomColorEnabled(customColorEnabled.isChecked());
                 dt.saveCustomColorSettings(this);
             applyCustomBackground();
-            Toast.makeText(MainActivity.this, "已保存资料源：" + (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已保存资料源：" + (hikarinagi ? "Hikarinagi" : (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB")))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
 recreate();
         });
