@@ -616,7 +616,7 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
                     Toast.makeText(MainActivity.this, "头像保存失败", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                prefs.edit().putString(KEY_PROFILE_AVATAR, avatar).apply();
+                prefs.edit().putString(KEY_PROFILE_AVATAR, avatar).remove(KEY_AUTH_AVATAR).apply();
                 updateProfilePanel();
                 showProfileDialog();
             }
@@ -2255,7 +2255,7 @@ private void showAccountSettingsDialog() {
     TextView info = new TextView(this);
     String email = prefs == null ? "" : prefs.getString(KEY_AUTH_EMAIL, "");
     String name = displayProfileName();
-    boolean syncEnabled = prefs == null || prefs.getBoolean(KEY_CLOUD_SYNC_ENABLED, true);
+    boolean syncEnabled = prefs != null && prefs.getBoolean(KEY_CLOUD_SYNC_ENABLED, false);
     long lastSync = prefs == null ? 0 : prefs.getLong(KEY_LAST_SYNC_AT, 0);
     info.setText("账号：" + name + "\n邮箱：" + emptyText(email, "-") + "\n状态：" + accountStatusLabelForDialog() + "\n自动同步：" + (syncEnabled ? "开启" : "关闭") + "\n最后同步：" + (lastSync > 0 ? TimeFormatUtil.date(lastSync) : "尚未同步"));
     info.setTextColor(getColorCompat(R.color.yh_text_muted));
@@ -2359,9 +2359,21 @@ private void doServerSync(boolean silent) {
                     updateProfilePanel();
                     if (!silent) {
                         int showBytes = result.compressedBytes > 0 ? result.compressedBytes : result.localBytes;
-                        Toast.makeText(MainActivity.this,
-                            "云同步完成 · " + (showBytes / 1024) + "KB",
-                            Toast.LENGTH_SHORT).show();
+                        String msg;
+                        if (result.merged) {
+                            msg = "云同步完成 · 智能合并 · " + (showBytes / 1024) + "KB";
+                        } else if (result.downloaded) {
+                            msg = "云同步完成 · 已下载云端数据 · " + (showBytes / 1024) + "KB";
+                        } else if (result.uploaded) {
+                            msg = "云同步完成 · 已上传本地数据 · " + (showBytes / 1024) + "KB";
+                        } else if (result.noChanges) {
+                            msg = "云同步完成 · 数据已是最新 · " + (showBytes / 1024) + "KB";
+                        } else if (result.cancelled) {
+                            msg = "云同步已取消";
+                        } else {
+                            msg = "云同步完成 · " + (showBytes / 1024) + "KB";
+                        }
+                        Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
                     }
                 }
             });
@@ -2381,8 +2393,9 @@ private void doServerSync(boolean silent) {
 private void maybeAutoServerSync() {
     if (serverSyncRunning) return;
     if (!isLoggedIn()) return;
+    serverSyncRunning = true;
     com.yuki.yukihub.sync.SyncManager sm = new com.yuki.yukihub.sync.SyncManager(this);
-    sm.maybeAutoSyncToServer(new com.yuki.yukihub.sync.SyncManager.SyncListener() {
+    boolean triggered = sm.maybeAutoSyncToServer(new com.yuki.yukihub.sync.SyncManager.SyncListener() {
         @Override public void onSyncStart() { }
         @Override public void onProgress(String item, boolean changed) { }
         @Override public int onConflict(com.yuki.yukihub.sync.SyncManager.Conflict conflict) {
@@ -2391,17 +2404,40 @@ private void maybeAutoServerSync() {
         @Override public void onSyncComplete(com.yuki.yukihub.sync.SyncManager.SyncResult result) {
             runOnUiThread(() -> {
                 serverSyncRunning = false;
-                if (result != null && result.hasChanges()) {
-                    coverMaintenanceDone = false;
-                    loadGames();
-                    updateProfilePanel();
+                if (result != null) {
+                    if (result.hasChanges()) {
+                        coverMaintenanceDone = false;
+                        loadGames();
+                        updateProfilePanel();
+                    }
+                    // 自动同步也弹窗，让用户知道发生了什么
+                    int showBytes = result.compressedBytes > 0 ? result.compressedBytes : result.localBytes;
+                    String msg;
+                    if (result.merged) {
+                        msg = "自动云同步 · 智能合并 · " + (showBytes / 1024) + "KB";
+                    } else if (result.downloaded) {
+                        msg = "自动云同步 · 已下载云端数据 · " + (showBytes / 1024) + "KB";
+                    } else if (result.uploaded) {
+                        msg = "自动云同步 · 已上传本地数据 · " + (showBytes / 1024) + "KB";
+                    } else if (result.noChanges) {
+                        msg = "自动云同步 · 数据已是最新";
+                    } else if (result.cancelled) {
+                        msg = "自动云同步已取消";
+                    } else {
+                        msg = "自动云同步完成 · " + (showBytes / 1024) + "KB";
+                    }
+                    Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
                 }
             });
         }
         @Override public void onError(String error) {
-            runOnUiThread(() -> serverSyncRunning = false);
+            runOnUiThread(() -> {
+                serverSyncRunning = false;
+                Toast.makeText(MainActivity.this, "自动云同步失败：" + error, Toast.LENGTH_LONG).show();
+            });
         }
     });
+    if (!triggered) serverSyncRunning = false;
 }
 
 private void logoutLocalOnly() {
@@ -2412,6 +2448,8 @@ private void logoutLocalOnly() {
             .remove(KEY_AUTH_NICKNAME)
             .remove(KEY_AUTH_AVATAR)
             .remove(KEY_AUTH_STATUS)
+            .remove("server_last_sync_hash")
+            .remove(KEY_LAST_SYNC_AT)
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
     updateProfilePanel();
@@ -2443,6 +2481,8 @@ private void performAuthRequest(boolean register, String email, String password,
                 updateProfilePanel();
                 Toast.makeText(this, register ? "注册并登录成功" : "登录成功", Toast.LENGTH_SHORT).show();
                 if (onSuccess != null) onSuccess.run();
+                // 登录成功后自动触发一次云同步（有弹窗反馈）
+                doServerSync(false);
             });
         } catch (Throwable t) {
             Log.w("YukiHub", "auth failed", t);
@@ -2591,7 +2631,7 @@ private void saveAuthSession(JSONObject resp, String emailFallback, String nickn
             .putString(KEY_AUTH_EMAIL, email == null ? "" : email)
             .putString(KEY_AUTH_AVATAR, avatar == null ? "" : avatar)
             .putString(KEY_AUTH_STATUS, AUTH_STATUS_ONLINE)
-            .putBoolean(KEY_CLOUD_SYNC_ENABLED, true)
+            .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
 }
 
