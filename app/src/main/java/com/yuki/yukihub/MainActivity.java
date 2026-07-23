@@ -166,6 +166,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
 
 public class MainActivity extends AppCompatActivity {
     @Override
@@ -251,6 +254,16 @@ private static final String KEY_AUTH_NICKNAME = "auth_nickname";
 private static final String KEY_AUTH_AVATAR = "auth_avatar";
 private static final String KEY_AUTH_EMAIL = "auth_email";
 private static final String KEY_AUTH_STATUS = "auth_status";
+private static final String KEY_KUN_BOUND = "kungal_bound";
+private static final String KEY_KUN_OAUTH_STATE = "kun_oauth_state";
+private static final String KEY_KUN_OAUTH_CODE_VERIFIER = "kun_oauth_code_verifier";
+private static final String KEY_KUN_OAUTH_STARTED_AT = "kun_oauth_started_at";
+private static final String KEY_KUN_OAUTH_MODE = "kun_oauth_mode";
+private static final String KUN_OAUTH_MODE_BIND = "bind";
+private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
+private static final String KUN_OAUTH_AUTHORIZE_URL = "https://oauth.kungal.com/api/v1/oauth/authorize";
+private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
+private static final String KUN_OAUTH_SCOPE = "openid profile email";
 private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
 private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
 private static final String KEY_LAST_SYNC_AT = "last_sync_at";
@@ -292,9 +305,10 @@ private ActivityResultLauncher<String> backgroundPickerLauncher;
 private ActivityResultLauncher<String> videoBackgroundPickerLauncher;
 private MediaPlayer backgroundMediaPlayer;
 private SoundPool uiSoundPool;
-private int uiClickSoundId;
-private int uiConfirmSoundId;
-private int uiSwitchSoundId;
+    private int uiClickSoundId;
+    private int uiConfirmSoundId;
+    private int uiSwitchSoundId;
+    private AlertDialog pendingProfileDialog;
 private long lastUiSoundAt;
 private Uri pendingBackgroundVideoUri;
 private ActivityResultLauncher<String> backupCreateLauncher;
@@ -425,8 +439,15 @@ if (!ensureDisclaimerAccepted()) {
         handleHomeTargetIntent(getIntent());
     }
 
-    private void handleHomeTargetIntent(Intent intent) {
+    private void refreshRuntimeAccountState() {
+        if (prefs == null) return;
+        updateProfilePanel();
+        try { if (adapter != null) adapter.notifyDataSetChanged(); } catch (Throwable ignored) { }
+    }
+
+private void handleHomeTargetIntent(Intent intent) {
         if (intent == null) return;
+        refreshRuntimeAccountState();
         String target = intent.getStringExtra(EXTRA_HOME_TARGET);
         if (target == null || target.trim().isEmpty()) return;
         long targetGameId = intent.getLongExtra(EXTRA_HOME_GAME_ID, -1L);
@@ -435,6 +456,7 @@ if (!ensureDisclaimerAccepted()) {
         getWindow().getDecorView().post(() -> {
             if (isFinishing() || (android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed())) return;
             if (HOME_TARGET_PROFILE.equals(target)) {
+                if (pendingProfileDialog != null && pendingProfileDialog.isShowing()) pendingProfileDialog.dismiss();
                 showProfileDialog();
             } else if (HOME_TARGET_SETTINGS.equals(target)) {
                 showSettingsDialog();
@@ -1938,6 +1960,32 @@ private void showProfileDialog() {
     accountRow.addView(syncBtn, syncLp);
     root.addView(accountRow);
 
+    LinearLayout kunRow = new LinearLayout(this);
+    kunRow.setOrientation(LinearLayout.HORIZONTAL);
+    kunRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    kunRow.setPadding(0, dp(8), 0, dp(4));
+    ImageView kunIcon = new ImageView(this);
+    kunIcon.setImageResource(R.drawable.ic_kungal_logo);
+    kunIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+    kunIcon.setAdjustViewBounds(true);
+    LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(22), dp(22));
+    iconLp.setMargins(0, 0, dp(6), 0);
+    kunRow.addView(kunIcon, iconLp);
+    TextView kunStatus = new TextView(this);
+    kunStatus.setText(kungalBound() ? "鲲 Galgame · 已绑定" : "鲲 Galgame · 未绑定");
+    kunStatus.setTextColor(kungalBound() ? 0xFFE8FFE9 : getColorCompat(R.color.yh_text_muted));
+    kunStatus.setTextSize(12);
+    kunStatus.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    kunRow.addView(kunStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+    Button kunBindBtn = krButton(kungalBound() ? "已绑定" : "绑定鲲账号");
+    kunBindBtn.setTextColor(kungalBound() ? getColorCompat(R.color.yh_text_muted) : primaryTextColor());
+    kunBindBtn.setEnabled(isLoggedIn() && !kungalBound());
+    kunBindBtn.setOnClickListener(v -> startKungalBindOAuth());
+    LinearLayout.LayoutParams kunBtnLp = new LinearLayout.LayoutParams(dp(118), dp(40));
+    kunBtnLp.setMargins(dp(8), 0, 0, 0);
+    kunRow.addView(kunBindBtn, kunBtnLp);
+    root.addView(kunRow);
+
     LinearLayout statCards = new LinearLayout(this);
     statCards.setOrientation(LinearLayout.HORIZONTAL);
     statCards.setPadding(0, dp(2), 0, dp(10));
@@ -2021,6 +2069,8 @@ private void showProfileDialog() {
             .setNegativeButton("关闭", null)
             .show();
     styleAlertDialogDark(dialog);
+    pendingProfileDialog = dialog;
+    dialog.setOnDismissListener(d -> { if (pendingProfileDialog == dialog) pendingProfileDialog = null; });
     if (dialog.getWindow() != null) {
         dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.62f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
     }
@@ -2080,6 +2130,52 @@ private int accountStatusTextColor() {
     if (AUTH_STATUS_SYNCING.equals(s)) return 0xFFEAF7FF;
     if ("local".equals(s)) return 0xFFDCEBFF;
     return 0xFFE3E8F2;
+}
+
+private boolean kungalBound() {
+    return prefs != null && prefs.getBoolean(KEY_KUN_BOUND, false);
+}
+
+private void startKungalBindOAuth() {
+    if (!isLoggedIn()) {
+        Toast.makeText(this, "请先登录 YukiHub 账号", Toast.LENGTH_SHORT).show();
+        return;
+    }
+    try {
+        String state = randomUrlSafe(32);
+        String verifier = randomUrlSafe(64);
+        String challenge = pkceS256(verifier);
+        prefs.edit()
+                .putString(KEY_KUN_OAUTH_STATE, state)
+                .putString(KEY_KUN_OAUTH_CODE_VERIFIER, verifier)
+                .putLong(KEY_KUN_OAUTH_STARTED_AT, System.currentTimeMillis())
+                .putString(KEY_KUN_OAUTH_MODE, KUN_OAUTH_MODE_BIND)
+                .apply();
+        Uri uri = Uri.parse(KUN_OAUTH_AUTHORIZE_URL).buildUpon()
+                .appendQueryParameter("client_id", KUN_ANDROID_CLIENT_ID)
+                .appendQueryParameter("redirect_uri", KUN_OAUTH_REDIRECT_URI)
+                .appendQueryParameter("response_type", "code")
+                .appendQueryParameter("state", state)
+                .appendQueryParameter("scope", KUN_OAUTH_SCOPE)
+                .appendQueryParameter("code_challenge", challenge)
+                .appendQueryParameter("code_challenge_method", "S256")
+                .build();
+        startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE));
+    } catch (Throwable t) {
+        Toast.makeText(this, "无法打开鲲站绑定页面：" + emptyText(t.getMessage(), "请检查浏览器"), Toast.LENGTH_LONG).show();
+    }
+}
+
+private String randomUrlSafe(int bytes) {
+    byte[] data = new byte[bytes];
+    new SecureRandom().nextBytes(data);
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
+}
+
+private String pkceS256(String verifier) throws Exception {
+    MessageDigest md = MessageDigest.getInstance("SHA-256");
+    byte[] digest = md.digest(verifier.getBytes(StandardCharsets.US_ASCII));
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
 }
 
 private void showAuthPlaceholderDialog() {
@@ -2290,6 +2386,11 @@ private void confirmLogout(AlertDialog parent) {
             .setPositiveButton("退出登录", (x, w) -> {
                 logoutLocalOnly();
                 if (parent != null) parent.dismiss();
+                refreshRuntimeAccountState();
+                if (pendingProfileDialog != null && pendingProfileDialog.isShowing()) pendingProfileDialog.dismiss();
+                getWindow().getDecorView().postDelayed(() -> {
+                    if (!isFinishing() && !(android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed())) showProfileDialog();
+                }, 150L);
             })
             .setNegativeButton("取消", null)
             .show();
@@ -2449,6 +2550,7 @@ private void logoutLocalOnly() {
             .remove(KEY_AUTH_NICKNAME)
             .remove(KEY_AUTH_AVATAR)
             .remove(KEY_AUTH_STATUS)
+            .remove(KEY_KUN_BOUND)
             .remove("server_last_sync_hash")
             .remove(KEY_LAST_SYNC_AT)
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
@@ -2570,6 +2672,7 @@ private boolean refreshAccessToken() {
             String avatar = firstJsonString(user, "avatarUrl", "avatar_url", "avatar");
             if (nickname != null && !nickname.isEmpty()) editor.putString(KEY_AUTH_NICKNAME, nickname);
             if (avatar != null && !avatar.isEmpty()) editor.putString(KEY_AUTH_AVATAR, avatar);
+            editor.putBoolean(KEY_KUN_BOUND, user.optBoolean("kungalBound", false));
         }
         editor.putString(KEY_AUTH_STATUS, AUTH_STATUS_ONLINE);
         editor.apply();
@@ -2632,6 +2735,7 @@ private void saveAuthSession(JSONObject resp, String emailFallback, String nickn
             .putString(KEY_AUTH_EMAIL, email == null ? "" : email)
             .putString(KEY_AUTH_AVATAR, avatar == null ? "" : avatar)
             .putString(KEY_AUTH_STATUS, AUTH_STATUS_ONLINE)
+            .putBoolean(KEY_KUN_BOUND, user != null && user.optBoolean("kungalBound", false))
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
 }
@@ -8648,12 +8752,12 @@ return startActivitySafely(intent);
     if (isLoggedIn()) {
         AppExecutors.runOnIo(() -> {
             if (refreshAccessToken()) {
-                runOnUiThread(() -> updateProfilePanel());
+                runOnUiThread(() -> refreshRuntimeAccountState());
             }
         });
     }
     
-    updateProfilePanel();
+    refreshRuntimeAccountState();
     maybeAutoWebDavSync();
     maybeAutoServerSync();
     startStatusBarUpdates();

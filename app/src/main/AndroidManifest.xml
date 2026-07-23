@@ -82,6 +82,22 @@
             android:configChanges="keyboardHidden|screenSize" />
 
         <activity
+            android:name=".KungalOAuthCallbackActivity"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="keyboardHidden|screenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="yukihub"
+                    android:host="oauth"
+                    android:path="/callback" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name="org.tvp.kirikiri2.KR2Activity"
             android:exported="false"
             android:process=":kirikiri2"

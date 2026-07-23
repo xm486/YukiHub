@@ -335,6 +335,23 @@
                 android:background="#1A2240" />
         </LinearLayout>
 
+        <!-- KUN quick login — 鲲站快捷登录 -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnKungalLogin"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginBottom="6dp"
+            android:text="鲲 Galgame 账号登录"
+            android:textColor="#EAF7FF"
+            android:textSize="14sp"
+            android:drawableStart="@drawable/ic_kungal_logo"
+            android:drawablePadding="10dp"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:background="@drawable/bg_kungal_card"
+            android:stateListAnimator="@null" />
+
         <!-- Continue as local -->
         <TextView
             android:id="@+id/tvContinueLocal"

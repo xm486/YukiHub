@@ -1,6 +1,8 @@
 package com.yuki.yukihub;
 
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -14,6 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -29,6 +32,9 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
 public class AuthActivity extends AppCompatActivity {
     @Override
     protected void attachBaseContext(android.content.Context newBase) {
@@ -50,13 +56,22 @@ public class AuthActivity extends AppCompatActivity {
     private static final String KEY_PROFILE_NAME = "profile_name";
     private static final String BROWSER_UA = "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36";
 
+    // KUN quick login. Fill KUN_ANDROID_CLIENT_ID after the OAuth app is issued.
+    private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
+    private static final String KUN_OAUTH_AUTHORIZE_URL = "https://oauth.kungal.com/api/v1/oauth/authorize";
+    private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
+    private static final String KUN_OAUTH_SCOPE = "openid profile email";
+    private static final String KEY_KUN_OAUTH_STATE = "kun_oauth_state";
+    private static final String KEY_KUN_OAUTH_CODE_VERIFIER = "kun_oauth_code_verifier";
+    private static final String KEY_KUN_OAUTH_STARTED_AT = "kun_oauth_started_at";
+
     private boolean registerMode = false;
 private SharedPreferences prefs;
 
 private TextView tabLogin, tabRegister, tvFormTitle, tvFormHint, tvAuthStatus;
 private LinearLayout rowNickname, rowConfirmPassword, rowVerifyCode;
 private EditText etNickname, etEmail, etPassword, etConfirmPassword, etVerifyCode;
-private Button btnSubmit, btnSendCode;
+private Button btnSubmit, btnSendCode, btnKungalLogin;
 private TextView tvContinueLocal;
 
 // 发送验证码倒计时
@@ -116,6 +131,16 @@ protected void onDestroy() {
 
     btnSubmit = findViewById(R.id.btnSubmit);
     btnSendCode = findViewById(R.id.btnSendCode);
+    btnKungalLogin = findViewById(R.id.btnKungalLogin);
+    // 限制鲲站图标尺寸，防止撑满按钮
+    if (btnKungalLogin != null) {
+        Drawable[] drawables = btnKungalLogin.getCompoundDrawablesRelative();
+        if (drawables[0] != null) {
+            int size = dp(28);
+            drawables[0].setBounds(0, 0, size, size);
+            btnKungalLogin.setCompoundDrawablesRelative(drawables[0], null, null, null);
+        }
+    }
     tvContinueLocal = findViewById(R.id.tvContinueLocal);
 }
 
@@ -125,6 +150,7 @@ protected void onDestroy() {
 
     btnSubmit.setOnClickListener(v -> onSubmit());
     btnSendCode.setOnClickListener(v -> onSendCode());
+    if (btnKungalLogin != null) btnKungalLogin.setOnClickListener(v -> startKungalQuickLogin());
 
     // 长按标题测试API连接
     tvFormTitle.setOnLongClickListener(v -> {
@@ -216,6 +242,54 @@ private void switchToRegister() {
     performAuth(email, password, nickname, verifyCode);
 }
 
+private void startKungalQuickLogin() {
+    if (KUN_ANDROID_CLIENT_ID.startsWith("TODO_")) {
+        showStatus("鲲站快捷登录还没有配置 client_id，稍后在 AuthActivity.java 中填写", 0xFFFF9500);
+        return;
+    }
+    try {
+        String state = randomUrlSafe(32);
+        String verifier = randomUrlSafe(64);
+        String challenge = pkceS256(verifier);
+
+        prefs.edit()
+                .putString(KEY_KUN_OAUTH_STATE, state)
+                .putString(KEY_KUN_OAUTH_CODE_VERIFIER, verifier)
+                .putLong(KEY_KUN_OAUTH_STARTED_AT, System.currentTimeMillis())
+                .apply();
+
+        Uri uri = Uri.parse(KUN_OAUTH_AUTHORIZE_URL).buildUpon()
+                .appendQueryParameter("client_id", KUN_ANDROID_CLIENT_ID)
+                .appendQueryParameter("redirect_uri", KUN_OAUTH_REDIRECT_URI)
+                .appendQueryParameter("response_type", "code")
+                .appendQueryParameter("state", state)
+                .appendQueryParameter("scope", KUN_OAUTH_SCOPE)
+                .appendQueryParameter("code_challenge", challenge)
+                .appendQueryParameter("code_challenge_method", "S256")
+                .build();
+
+        showStatus("正在打开鲲站授权页面...", 0xFF8E9AB5);
+        Intent i = new Intent(Intent.ACTION_VIEW, uri);
+        i.addCategory(Intent.CATEGORY_BROWSABLE);
+        startActivity(i);
+    } catch (Throwable t) {
+        Log.w("YukiHub", "start KUN quick login failed", t);
+        showStatus("无法打开鲲站快捷登录：" + (t.getMessage() == null ? "请检查浏览器" : t.getMessage()), 0xFFFF3B30);
+    }
+}
+
+private String randomUrlSafe(int bytes) {
+    byte[] data = new byte[bytes];
+    new SecureRandom().nextBytes(data);
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
+}
+
+private String pkceS256(String verifier) throws Exception {
+    MessageDigest md = MessageDigest.getInstance("SHA-256");
+    byte[] digest = md.digest(verifier.getBytes(StandardCharsets.US_ASCII));
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+}
+
 private boolean isValidEmail(String email) {
 if (email == null) return false;
 return android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches();
@@ -275,7 +349,10 @@ private void testApiConnection() {
 
             runOnUiThread(() -> {
                 Toast.makeText(this, registerMode ? "注册成功" : "登录成功", Toast.LENGTH_SHORT).show();
-                setResult(RESULT_OK);
+                Intent i = new Intent(this, MainActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                i.putExtra("home_target", "profile");
+                startActivity(i);
                 finish();
             });
         } catch (Throwable t) {
@@ -478,6 +555,7 @@ private void startSendCodeCountdown() {
         etVerifyCode.setTextColor(textColor);
         etVerifyCode.setHintTextColor(hintColor);
         btnSubmit.setTextColor(0xFFFFFFFF);
+        if (btnKungalLogin != null) btnKungalLogin.setBackground(tintAuthInput(colors));
         tvContinueLocal.setTextColor(mutedColor);
         // Tint backgrounds
         btnSubmit.setBackground(tintAuthButton(colors));
