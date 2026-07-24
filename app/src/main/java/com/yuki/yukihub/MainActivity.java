@@ -250,6 +250,7 @@ private static final String KEY_PROFILE_NAME = "profile_name";
 private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
 private static final String KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token";
 private static final String KEY_AUTH_USER_ID = "auth_user_id";
+private static final String KEY_AUTH_UID = "auth_uid";
 private static final String KEY_AUTH_NICKNAME = "auth_nickname";
 private static final String KEY_AUTH_AVATAR = "auth_avatar";
 private static final String KEY_AUTH_EMAIL = "auth_email";
@@ -309,6 +310,7 @@ private SoundPool uiSoundPool;
     private int uiConfirmSoundId;
     private int uiSwitchSoundId;
     private AlertDialog pendingProfileDialog;
+    private com.yuki.yukihub.social.PresenceManager presenceManager;
 private long lastUiSoundAt;
 private Uri pendingBackgroundVideoUri;
 private ActivityResultLauncher<String> backupCreateLauncher;
@@ -1913,7 +1915,9 @@ private void showProfileDialog() {
     nameView.setTextSize(20);
     nameView.setTypeface(null, android.graphics.Typeface.BOLD);
     TextView statsView = new TextView(this);
-    statsView.setText(allGames.size() + " Games · " + TimeFormatUtil.playTime(total) + "\n" + emptyText(currentSignature, "这个人还没有写签名"));
+    String uid = prefs == null ? "" : prefs.getString(KEY_AUTH_UID, "");
+    String uidStr = uid.isEmpty() ? "" : "UID: " + uid + "  ·  ";
+    statsView.setText(uidStr + allGames.size() + " Games · " + TimeFormatUtil.playTime(total) + "\n" + emptyText(currentSignature, "这个人还没有写签名"));
     statsView.setTextColor(getColorCompat(R.color.yh_text_muted));
     statsView.setTextSize(12);
     statsView.setPadding(0, dp(5), 0, 0);
@@ -2188,12 +2192,7 @@ private void showAuthPlaceholderDialog() {
 }
 
 private void showFriendsChatPlaceholder() {
-    AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle("好友 / 聊天")
-            .setMessage("好友与聊天功能即将上线，敬请期待。")
-            .setPositiveButton("知道了", null)
-            .show();
-    styleAlertDialogDark(dialog);
+    new com.yuki.yukihub.social.FriendsChatDialog(this).show();
 }
 
 private void showSortDialog() {
@@ -2268,6 +2267,7 @@ private void startStatusBarUpdates() {
         @Override
         public void run() {
             updateClock();
+            updateChatBadge();
             if (statusBarHandler != null) statusBarHandler.postDelayed(this, 5000L);
         }
     };
@@ -2322,6 +2322,26 @@ private void updateBatteryLevel() {
     } catch (Throwable ignored) { }
 }
 
+private void updateChatBadge() {
+    if (!isLoggedIn()) return;
+    TextView badge = findViewById(R.id.navChatBadge);
+    if (badge == null) return;
+    com.yuki.yukihub.util.AppExecutors.runOnIo(() -> {
+        try {
+            com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(this);
+            int unread = client.getTotalUnread();
+            runOnUiThread(() -> {
+                if (unread > 0) {
+                    badge.setText(String.valueOf(unread));
+                    badge.setVisibility(View.VISIBLE);
+                } else {
+                    badge.setVisibility(View.GONE);
+                }
+            });
+        } catch (Throwable ignored) { }
+    });
+}
+
 private void registerBatteryReceiver() {
     if (batteryReceiver != null) return;
     batteryReceiver = new android.content.BroadcastReceiver() {
@@ -2352,9 +2372,10 @@ private void showAccountSettingsDialog() {
     TextView info = new TextView(this);
     String email = prefs == null ? "" : prefs.getString(KEY_AUTH_EMAIL, "");
     String name = displayProfileName();
+    String uid = prefs == null ? "" : prefs.getString(KEY_AUTH_UID, "");
     boolean syncEnabled = prefs != null && prefs.getBoolean(KEY_CLOUD_SYNC_ENABLED, false);
     long lastSync = prefs == null ? 0 : prefs.getLong(KEY_LAST_SYNC_AT, 0);
-    info.setText("账号：" + name + "\n邮箱：" + emptyText(email, "-") + "\n状态：" + accountStatusLabelForDialog() + "\n自动同步：" + (syncEnabled ? "开启" : "关闭") + "\n最后同步：" + (lastSync > 0 ? TimeFormatUtil.date(lastSync) : "尚未同步"));
+    info.setText("账号：" + name + "\nUID：" + (uid.isEmpty() ? "-" : uid) + "\n邮箱：" + emptyText(email, "-") + "\n状态：" + accountStatusLabelForDialog() + "\n自动同步：" + (syncEnabled ? "开启" : "关闭") + "\n最后同步：" + (lastSync > 0 ? TimeFormatUtil.date(lastSync) : "尚未同步"));
     info.setTextColor(getColorCompat(R.color.yh_text_muted));
     info.setTextSize(13);
     info.setLineSpacing(dp(2), 1.0f);
@@ -2543,10 +2564,13 @@ private void maybeAutoServerSync() {
 }
 
 private void logoutLocalOnly() {
+    // 停止心跳，尽力标记离线
+    if (presenceManager != null) presenceManager.markOffline();
     if (prefs != null) prefs.edit()
             .remove(KEY_AUTH_ACCESS_TOKEN)
             .remove(KEY_AUTH_REFRESH_TOKEN)
             .remove(KEY_AUTH_USER_ID)
+            .remove(KEY_AUTH_UID)
             .remove(KEY_AUTH_NICKNAME)
             .remove(KEY_AUTH_AVATAR)
             .remove(KEY_AUTH_STATUS)
@@ -2670,8 +2694,10 @@ private boolean refreshAccessToken() {
         if (user != null) {
             String nickname = firstJsonString(user, "nickname", "name", "username");
             String avatar = firstJsonString(user, "avatarUrl", "avatar_url", "avatar");
+            String uid = user.optString("uid", "");
             if (nickname != null && !nickname.isEmpty()) editor.putString(KEY_AUTH_NICKNAME, nickname);
             if (avatar != null && !avatar.isEmpty()) editor.putString(KEY_AUTH_AVATAR, avatar);
+            if (!uid.isEmpty()) editor.putString(KEY_AUTH_UID, uid);
             editor.putBoolean(KEY_KUN_BOUND, user.optBoolean("kungalBound", false));
         }
         editor.putString(KEY_AUTH_STATUS, AUTH_STATUS_ONLINE);
@@ -2731,6 +2757,7 @@ private void saveAuthSession(JSONObject resp, String emailFallback, String nickn
             .putString(KEY_AUTH_ACCESS_TOKEN, access)
             .putString(KEY_AUTH_REFRESH_TOKEN, refresh == null ? "" : refresh)
             .putString(KEY_AUTH_USER_ID, userId == null ? "" : userId)
+            .putString(KEY_AUTH_UID, (user != null ? user.optString("uid", "") : ""))
             .putString(KEY_AUTH_NICKNAME, nickname == null ? "" : nickname)
             .putString(KEY_AUTH_EMAIL, email == null ? "" : email)
             .putString(KEY_AUTH_AVATAR, avatar == null ? "" : avatar)
@@ -8740,12 +8767,14 @@ return startActivitySafely(intent);
                 .show();
         styleAlertDialogDark(dialog);
     }
-
-    @Override protected void onResume() {
-    super.onResume();
-    clearLaunchLoadingOverlay();
-    enterImmersiveMode();
-    finishCurrentPlaySessionIfAny();
+@Override protected void onResume() {
+     super.onResume();
+     clearLaunchLoadingOverlay();
+     enterImmersiveMode();
+     // 启动在线心跳
+     if (presenceManager == null) presenceManager = new com.yuki.yukihub.social.PresenceManager(this);
+     presenceManager.startHeartbeat();
+     finishCurrentPlaySessionIfAny();
     resumeBackgroundVideoIfNeeded();
     
     // 自动刷新 Token（如果已登录但可能过期）
@@ -8764,10 +8793,12 @@ return startActivitySafely(intent);
 }
 
 @Override protected void onPause() {
-    pauseBackgroundVideoIfNeeded();
-    stopStatusBarUpdates();
-    super.onPause();
-}
+     pauseBackgroundVideoIfNeeded();
+     stopStatusBarUpdates();
+     // 停止心跳，标记 away
+     if (presenceManager != null) presenceManager.stopHeartbeat();
+     super.onPause();
+ }
 
 @Override protected void onStop() {
     clearLaunchLoadingOverlay();
@@ -8775,11 +8806,13 @@ return startActivitySafely(intent);
 }
 
 @Override protected void onDestroy() {
-releaseBackgroundMediaPlayer();
-releaseUiSoundPool();
-stopStatusBarUpdates();
-super.onDestroy();
-}
+ releaseBackgroundMediaPlayer();
+ releaseUiSoundPool();
+ stopStatusBarUpdates();
+ // 标记离线
+ if (presenceManager != null) presenceManager.markOffline();
+ super.onDestroy();
+ }
 
 private void resumeBackgroundVideoIfNeeded() {
     if (prefs == null || !"video".equals(prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image"))) return;

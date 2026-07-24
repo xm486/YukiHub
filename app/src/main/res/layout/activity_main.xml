@@ -126,20 +126,37 @@
                 <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="大屏" android:textColor="#E8FFFFFF" android:textSize="7sp" />
             </LinearLayout>
 
-            <LinearLayout
+            <FrameLayout
                 android:id="@+id/navChat"
                 android:layout_width="match_parent"
                 android:layout_height="36dp"
                 android:layout_marginTop="3dp"
                 android:clickable="true"
                 android:focusable="true"
-                android:gravity="center"
-                android:orientation="vertical"
                 android:background="@drawable/bg_sidebar_item"
                 android:foreground="?android:attr/selectableItemBackgroundBorderless">
-                <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="💬" android:textColor="#E8FFFFFF" android:textSize="12sp" />
-                <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="好友/聊天" android:textColor="#E8FFFFFF" android:textSize="7sp" />
-            </LinearLayout>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="💬" android:textColor="#E8FFFFFF" android:textSize="12sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="好友/聊天" android:textColor="#E8FFFFFF" android:textSize="7sp" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/navChatBadge"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="1dp"
+                    android:layout_marginEnd="1dp"
+                    android:gravity="center"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="8sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_unread_badge"
+                    android:visibility="gone" />
+            </FrameLayout>
         </LinearLayout>
 
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" />

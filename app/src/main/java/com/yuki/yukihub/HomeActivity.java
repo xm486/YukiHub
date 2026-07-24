@@ -58,6 +58,7 @@ public class HomeActivity extends AppCompatActivity {
 
     private GameRepository repository;
     private SharedPreferences prefs;
+    private com.yuki.yukihub.social.PresenceManager presenceManager;
     private LinearLayout quickGames;
     private LinearLayout heroDots;
     private ImageView homeAvatar;
@@ -108,17 +109,24 @@ public class HomeActivity extends AppCompatActivity {
             finishStalePlaySessionsIfAny();
             refreshHome();
         }
+        // 启动在线心跳
+        if (presenceManager == null) presenceManager = new com.yuki.yukihub.social.PresenceManager(this);
+        presenceManager.startHeartbeat();
     }
 
     @Override
     protected void onPause() {
         carouselHandler.removeCallbacks(carouselRunnable);
+        // 停止心跳，标记 away
+        if (presenceManager != null) presenceManager.stopHeartbeat();
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         carouselHandler.removeCallbacksAndMessages(null);
+        // 标记离线
+        if (presenceManager != null) presenceManager.markOffline();
         super.onDestroy();
     }
 
@@ -163,7 +171,7 @@ public class HomeActivity extends AppCompatActivity {
         });
         findViewById(R.id.homeNavChat).setOnClickListener(v -> {
             touch(v);
-            Toast.makeText(this, "好友/聊天功能正在开发中，敬请期待。", Toast.LENGTH_SHORT).show();
+            new com.yuki.yukihub.social.FriendsChatDialog(this).show();
         });
         findViewById(R.id.homeNavSettings).setOnClickListener(v -> {
             touch(v);
@@ -205,6 +213,21 @@ public class HomeActivity extends AppCompatActivity {
         nameInput.setBackgroundResource(R.drawable.bg_input);
         nameInput.setPadding(dp(10), 0, dp(10), 0);
         root.addView(nameInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+
+        TextView uidLabel = new TextView(this);
+        uidLabel.setText("UID");
+        uidLabel.setTextColor(0xFF9AA4BF);
+        uidLabel.setTextSize(12);
+        uidLabel.setPadding(0, dp(6), 0, dp(2));
+        root.addView(uidLabel);
+
+        TextView uidValue = new TextView(this);
+        String uid = prefs == null ? "" : prefs.getString("auth_uid", "");
+        uidValue.setText(uid.isEmpty() ? "-" : uid);
+        uidValue.setTextColor(0xFFFFFFFF);
+        uidValue.setTextSize(14);
+        uidValue.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(uidValue, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(36)));
 
         TextView signLabel = new TextView(this);
         signLabel.setText("个人签名");
@@ -486,6 +509,27 @@ public class HomeActivity extends AppCompatActivity {
                     : R.drawable.bg_profile_dot_local);
         }
         loadProfileAvatar();
+        updateChatBadge();
+    }
+
+    private void updateChatBadge() {
+        if (!isLoggedIn()) return;
+        TextView badge = findViewById(R.id.homeNavChatBadge);
+        if (badge == null) return;
+        com.yuki.yukihub.util.AppExecutors.runOnIo(() -> {
+            try {
+                com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(this);
+                int unread = client.getTotalUnread();
+                runOnUiThread(() -> {
+                    if (unread > 0) {
+                        badge.setText(String.valueOf(unread));
+                        badge.setVisibility(View.VISIBLE);
+                    } else {
+                        badge.setVisibility(View.GONE);
+                    }
+                });
+            } catch (Throwable ignored) { }
+        });
     }
 
     private boolean isLoggedIn() {

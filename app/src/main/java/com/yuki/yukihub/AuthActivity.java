@@ -48,6 +48,7 @@ public class AuthActivity extends AppCompatActivity {
     private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
     private static final String KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token";
     private static final String KEY_AUTH_USER_ID = "auth_user_id";
+    private static final String KEY_AUTH_UID = "auth_uid";
     private static final String KEY_AUTH_NICKNAME = "auth_nickname";
     private static final String KEY_AUTH_EMAIL = "auth_email";
     private static final String KEY_AUTH_AVATAR = "auth_avatar";
@@ -481,6 +482,7 @@ private void startSendCodeCountdown() {
                 .putString(KEY_AUTH_ACCESS_TOKEN, access)
                 .putString(KEY_AUTH_REFRESH_TOKEN, refresh != null ? refresh : "")
                 .putString(KEY_AUTH_USER_ID, userId != null ? userId : "")
+                .putString(KEY_AUTH_UID, user != null ? user.optString("uid", "") : "")
                 .putString(KEY_AUTH_NICKNAME, nickname)
                 .putString(KEY_AUTH_EMAIL, email)
                 .putString(KEY_AUTH_AVATAR, avatar != null ? avatar : "")
