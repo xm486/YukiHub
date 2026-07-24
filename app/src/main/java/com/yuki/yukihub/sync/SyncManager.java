@@ -828,6 +828,69 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
     }
 
     /**
+     * 立即上传本地头像到服务器（改头像后直接调用，不等同步）。
+     * 公开方法，比 tryUploadLocalAvatar 更宽松：不检查 auth_avatar 是否已有值。
+     */
+    public void uploadAvatarNow() {
+        try {
+            String accessToken = appPrefs.getString(KEY_AUTH_ACCESS_TOKEN, "");
+            if (accessToken == null || accessToken.trim().isEmpty()) return;
+
+            String avatarUri = appPrefs.getString(KEY_PROFILE_AVATAR, "");
+            if (avatarUri == null || avatarUri.trim().isEmpty()) return;
+
+            if (!avatarUri.startsWith("file://")) return;
+
+            Uri uri = Uri.parse(avatarUri);
+            java.io.File avatarFile = new java.io.File(uri.getPath());
+            if (!avatarFile.exists()) return;
+
+            byte[] compressed = compressAvatar(avatarFile);
+            if (compressed == null || compressed.length == 0) return;
+            if (compressed.length > AVATAR_MAX_BYTES) {
+                Log.w(TAG, "Avatar still too large after compression: " + compressed.length + " bytes");
+                return;
+            }
+
+            String urlStr = AUTH_BASE_URL + "/upload_avatar";
+            java.net.URL url = new java.net.URL(urlStr);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+            conn.setRequestProperty("Content-Type", "image/jpeg");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            try (java.io.OutputStream os = conn.getOutputStream()) {
+                os.write(compressed);
+                os.flush();
+            }
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                Log.w(TAG, "uploadAvatarNow failed: HTTP " + code);
+                return;
+            }
+            String response;
+            try (InputStream is = conn.getInputStream(); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                byte[] buf = new byte[4096];
+                int len;
+                while ((len = is.read(buf)) != -1) bos.write(buf, 0, len);
+                response = bos.toString("UTF-8");
+            }
+            JSONObject resp = new JSONObject(response);
+            String avatarUrl = resp.optString("avatarUrl", "");
+            if (avatarUrl.isEmpty()) {
+                Log.w(TAG, "uploadAvatarNow: server did not return avatarUrl");
+                return;
+            }
+            appPrefs.edit().putString(KEY_AUTH_AVATAR, avatarUrl).apply();
+            Log.i(TAG, "Avatar uploaded immediately: " + avatarUrl + " (" + compressed.length + " bytes)");
+        } catch (Throwable t) {
+            Log.w(TAG, "uploadAvatarNow failed (non-fatal)", t);
+        }
+    }
+
+    /**
      * 读取本地图片文件，缩放到 AVATAR_MAX_PIXELS，JPEG 压缩为 byte[]。
      */
     private byte[] compressAvatar(java.io.File file) {

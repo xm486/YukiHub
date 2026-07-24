@@ -644,6 +644,13 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
                 prefs.edit().putString(KEY_PROFILE_AVATAR, avatar).remove(KEY_AUTH_AVATAR).apply();
                 updateProfilePanel();
                 showProfileDialog();
+                // 立即上传新头像到服务器
+                AppExecutors.runOnIo(() -> {
+                    try {
+                        com.yuki.yukihub.sync.SyncManager syncMgr = new com.yuki.yukihub.sync.SyncManager(MainActivity.this);
+                        syncMgr.uploadAvatarNow();
+                    } catch (Throwable ignored) {}
+                });
             }
         });
         backgroundPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
