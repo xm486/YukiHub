@@ -50,6 +50,7 @@ public class FriendsChatDialog {
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private Dialog dialog;
+    private LinearLayout contentHost;
     private LinearLayout contentContainer;
     private TextView titleBar;
     private TextView backButton;
@@ -110,10 +111,12 @@ public class FriendsChatDialog {
 
         root.addView(header);
 
-        contentContainer = new LinearLayout(activity);
-        contentContainer.setOrientation(LinearLayout.VERTICAL);
-        contentContainer.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(contentContainer);
+        // 内容宿主：列表页可滚动，聊天页自行布局
+        contentHost = new LinearLayout(activity);
+        contentHost.setOrientation(LinearLayout.VERTICAL);
+        contentHost.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(contentHost);
+        resetContent(true);
 
         dialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         dialog.setContentView(root);
@@ -133,12 +136,35 @@ public class FriendsChatDialog {
         showFriendList();
     }
 
+    /**
+     * 重建内容区。
+     * @param scrollable true=包一层 ScrollView（好友列表/搜索/请求/资料）；false=聊天页自管滚动
+     */
+    private void resetContent(boolean scrollable) {
+        if (contentHost == null) return;
+        contentHost.removeAllViews();
+        contentContainer = new LinearLayout(activity);
+        contentContainer.setOrientation(LinearLayout.VERTICAL);
+        if (scrollable) {
+            ScrollView scrollView = new ScrollView(activity);
+            scrollView.setFillViewport(true);
+            scrollView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+            scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, -1));
+            contentContainer.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+            scrollView.addView(contentContainer);
+            contentHost.addView(scrollView);
+        } else {
+            contentContainer.setLayoutParams(new LinearLayout.LayoutParams(-1, -1));
+            contentHost.addView(contentContainer);
+        }
+    }
+
     // ==================== 好友列表 ====================
 
     private void showFriendList() {
         titleBar.setText("好友 / 聊天");
         backButton.setVisibility(View.GONE);
-        contentContainer.removeAllViews();
+        resetContent(true);
         stopAllPolling();
         contentContainer.addView(loadingLabel("正在加载好友列表..."));
 
@@ -155,7 +181,7 @@ public class FriendsChatDialog {
 
     private void renderFriendList(List<FriendInfo> loaded, int pendingCount) {
         friends = loaded;
-        contentContainer.removeAllViews();
+        resetContent(true);
 
         // 操作栏
         LinearLayout bar = new LinearLayout(activity);
@@ -179,11 +205,23 @@ public class FriendsChatDialog {
         if (friends.isEmpty()) {
             contentContainer.addView(emptyLabel("还没有好友\n点击上方「添加好友」搜索其他用户"));
         } else {
+            List<FriendInfo> playing = new ArrayList<>();
             List<FriendInfo> online = new ArrayList<>();
             List<FriendInfo> offline = new ArrayList<>();
             for (FriendInfo f : friends) {
-                if (f.isOffline() || f.isAway()) offline.add(f);
-                else online.add(f);
+                if (f.isOffline() || f.isAway()) {
+                    offline.add(f);
+                } else if (f.isOnline() && f.activity != null && !f.activity.trim().isEmpty()) {
+                    playing.add(f);
+                } else {
+                    online.add(f);
+                }
+            }
+            // Steam 风格：正在玩游戏的排在最前
+            if (!playing.isEmpty()) {
+                contentContainer.addView(sectionLabel("正在游戏 — " + playing.size()));
+                for (FriendInfo f : playing) contentContainer.addView(buildFriendItem(f));
+                contentContainer.addView(divider());
             }
             if (!online.isEmpty()) {
                 contentContainer.addView(sectionLabel("在线 — " + online.size()));
@@ -254,15 +292,25 @@ public class FriendsChatDialog {
         nameRow.addView(dot, dl);
         col.addView(nameRow);
 
-        String sub = "";
-        if (friend.activity != null && !friend.activity.isEmpty()) sub = friend.activity;
-        else if (friend.signature != null && !friend.signature.isEmpty()) sub = friend.signature;
-        if (!sub.isEmpty()) {
+        // Steam 风格：仅 online + 有 activity 时显示绿色「正在玩」
+        boolean showPlaying = friend.isOnline()
+                && friend.activity != null
+                && !friend.activity.trim().isEmpty();
+        if (showPlaying) {
             TextView st = new TextView(activity);
-            st.setText(sub);
+            st.setText(friend.activity.trim());
+            st.setTextColor(0xFF90BA3C); // Steam 在玩绿
+            st.setTextSize(11);
+            st.setMaxLines(1);
+            st.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(st);
+        } else if (friend.signature != null && !friend.signature.isEmpty()) {
+            TextView st = new TextView(activity);
+            st.setText(friend.signature);
             st.setTextColor(0xFF9AA4BF);
             st.setTextSize(11);
             st.setMaxLines(1);
+            st.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(st);
         }
         row.addView(col);
@@ -300,7 +348,8 @@ public class FriendsChatDialog {
 
         titleBar.setText(friend.nickname);
         backButton.setVisibility(View.VISIBLE);
-        contentContainer.removeAllViews();
+        // 聊天页：固定布局（消息区自带 ScrollView + 底部输入栏）
+        resetContent(false);
 
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
@@ -491,7 +540,7 @@ public class FriendsChatDialog {
     private void showAddFriendView() {
         titleBar.setText("添加好友");
         backButton.setVisibility(View.VISIBLE);
-        contentContainer.removeAllViews();
+        resetContent(true);
         stopAllPolling();
 
         TextView hint = new TextView(activity);
@@ -519,7 +568,7 @@ public class FriendsChatDialog {
     }
 
     private void doSearch(String query) {
-        contentContainer.removeAllViews();
+        resetContent(true);
         contentContainer.addView(loadingLabel("正在搜索..."));
         AppExecutors.runOnIo(() -> {
             try {
@@ -532,7 +581,7 @@ public class FriendsChatDialog {
     }
 
     private void renderSearchResults(JSONArray results) {
-        contentContainer.removeAllViews();
+        resetContent(true);
         if (results == null || results.length() == 0) {
             contentContainer.addView(emptyLabel("未找到匹配的用户"));
             return;
@@ -646,7 +695,7 @@ public class FriendsChatDialog {
     private void showUserProfile(int uid) {
         titleBar.setText("用户资料");
         backButton.setVisibility(View.VISIBLE);
-        contentContainer.removeAllViews();
+        resetContent(true);
         stopAllPolling();
         contentContainer.addView(loadingLabel("正在加载..."));
         AppExecutors.runOnIo(() -> {
@@ -660,7 +709,7 @@ public class FriendsChatDialog {
     }
 
     private void renderUserProfile(JSONObject profile) {
-        contentContainer.removeAllViews();
+        resetContent(true);
         String nickname = profile.optString("nickname", "");
         int uid = profile.optInt("uid", 0);
         String signature = profile.optString("signature", "");
@@ -728,12 +777,13 @@ public class FriendsChatDialog {
         // 分割线
         contentContainer.addView(divider());
 
-        // 活动
-        if (!currentAct.isEmpty()) {
+        // 活动（Steam 风格：在线时绿色显示）
+        if (!currentAct.isEmpty() && "online".equals(status)) {
             TextView actView = new TextView(activity);
             actView.setText(currentAct);
-            actView.setTextColor(0xFF8AB4FF);
+            actView.setTextColor(0xFF90BA3C);
             actView.setTextSize(13);
+            actView.setGravity(Gravity.CENTER);
             actView.setPadding(0, dp(8), 0, dp(4));
             contentContainer.addView(actView);
         }
@@ -815,7 +865,7 @@ public class FriendsChatDialog {
     private void showRequestsView() {
         titleBar.setText("好友请求");
         backButton.setVisibility(View.VISIBLE);
-        contentContainer.removeAllViews();
+        resetContent(true);
         stopAllPolling();
         contentContainer.addView(loadingLabel("正在加载..."));
         AppExecutors.runOnIo(() -> {
@@ -831,7 +881,7 @@ public class FriendsChatDialog {
     }
 
     private void renderRequests() {
-        contentContainer.removeAllViews();
+        resetContent(true);
         contentContainer.addView(sectionLabel("收到的请求"));
         if (incomingRequests != null && incomingRequests.length() > 0) {
             for (int i = 0; i < incomingRequests.length(); i++) {
@@ -1079,7 +1129,7 @@ public class FriendsChatDialog {
     }
 
     private void showError(String msg, Runnable retry) {
-        contentContainer.removeAllViews();
+        resetContent(true);
         contentContainer.addView(errorLabel(msg));
         contentContainer.addView(retryButton(retry));
     }

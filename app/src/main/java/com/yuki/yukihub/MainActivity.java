@@ -267,6 +267,8 @@ private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
 private static final String KUN_OAUTH_SCOPE = "openid profile email";
 private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
 private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
+private static final String KEY_SHARE_PLAYING = "share_playing_status";
+private static final String KEY_FRIEND_PLAY_NOTIFY = "friend_play_notify";
 private static final String KEY_LAST_SYNC_AT = "last_sync_at";
 private static final String AUTH_STATUS_ONLINE = "online";
     private static final String BROWSER_UA = "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36";
@@ -280,6 +282,7 @@ private static final String EXTRA_HOME_GAME_ID = "home_game_id";
 private static final String HOME_TARGET_PROFILE = "profile";
 private static final String HOME_TARGET_SETTINGS = "settings";
 private static final String HOME_TARGET_LAUNCH_GAME = "launch_game";
+private static final String HOME_TARGET_FRIENDS = "friends";
 private static final String KEY_CUSTOM_BACKGROUND = "custom_background";
 private static final String KEY_CUSTOM_BACKGROUND_TYPE = "custom_background_type";
 private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled";
@@ -311,6 +314,7 @@ private SoundPool uiSoundPool;
     private int uiSwitchSoundId;
     private AlertDialog pendingProfileDialog;
     private com.yuki.yukihub.social.PresenceManager presenceManager;
+private boolean activityHeartbeatHeld = false;
 private long lastUiSoundAt;
 private Uri pendingBackgroundVideoUri;
 private ActivityResultLauncher<String> backupCreateLauncher;
@@ -464,6 +468,8 @@ private void handleHomeTargetIntent(Intent intent) {
                 showSettingsDialog();
             } else if (HOME_TARGET_LAUNCH_GAME.equals(target)) {
                 launchGameFromHome(targetGameId);
+            } else if (HOME_TARGET_FRIENDS.equals(target)) {
+                showFriendsChatPlaceholder();
             }
         });
     }
@@ -2381,6 +2387,8 @@ private void showAccountSettingsDialog() {
     String name = displayProfileName();
     String uid = prefs == null ? "" : prefs.getString(KEY_AUTH_UID, "");
     boolean syncEnabled = prefs != null && prefs.getBoolean(KEY_CLOUD_SYNC_ENABLED, false);
+    boolean sharePlaying = prefs == null || prefs.getBoolean(KEY_SHARE_PLAYING, true);
+    boolean friendNotify = prefs == null || prefs.getBoolean(KEY_FRIEND_PLAY_NOTIFY, true);
     long lastSync = prefs == null ? 0 : prefs.getLong(KEY_LAST_SYNC_AT, 0);
     info.setText("账号：" + name + "\nUID：" + (uid.isEmpty() ? "-" : uid) + "\n邮箱：" + emptyText(email, "-") + "\n状态：" + accountStatusLabelForDialog() + "\n自动同步：" + (syncEnabled ? "开启" : "关闭") + "\n最后同步：" + (lastSync > 0 ? TimeFormatUtil.date(lastSync) : "尚未同步"));
     info.setTextColor(getColorCompat(R.color.yh_text_muted));
@@ -2390,22 +2398,155 @@ private void showAccountSettingsDialog() {
     CheckBox syncCheck = krCheckBox("开启自动同步（启动时自动云同步）", syncEnabled);
     syncCheck.setPadding(0, dp(10), 0, 0);
     root.addView(syncCheck);
+    CheckBox sharePlayingCheck = krCheckBox("向好友展示正在玩的游戏", sharePlaying);
+    sharePlayingCheck.setPadding(0, dp(8), 0, 0);
+    root.addView(sharePlayingCheck);
+    CheckBox friendNotifyCheck = krCheckBox("好友开始玩游戏时通知（后台保活）", friendNotify);
+    friendNotifyCheck.setPadding(0, dp(8), 0, 0);
+    root.addView(friendNotifyCheck);
+    TextView notifyHint = new TextView(this);
+    notifyHint.setText("开启后会显示一条低调的常驻通知，用于保持在线并监听好友开玩。");
+    notifyHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+    notifyHint.setTextSize(11);
+    notifyHint.setPadding(0, dp(4), 0, 0);
+    root.addView(notifyHint);
+    // 通知通道设置入口：允许用户手动调整横幅/铃声/锁屏
+    TextView channelSettingsBtn = new TextView(this);
+    channelSettingsBtn.setText("⚙ 通知样式设置（横幅 · 铃声 · 锁屏）");
+    channelSettingsBtn.setTextColor(getColorCompat(R.color.yh_primary));
+    channelSettingsBtn.setTextSize(12);
+    channelSettingsBtn.setPadding(0, dp(8), 0, 0);
+    channelSettingsBtn.setOnClickListener(v -> {
+        ensureNotificationPermission();
+        // 如果权限已授予，直接打开通道设置；否则等权限回调自动引导
+        if (Build.VERSION.SDK_INT < 33 ||
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            openChannelSettings();
+        }
+    });
+    root.addView(channelSettingsBtn);
+
+    // 包一层 ScrollView，防止小屏设备内容被遮挡
+    ScrollView scrollView = new ScrollView(this);
+    scrollView.addView(root, new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
     AlertDialog dialog = new AlertDialog.Builder(this)
             .setTitle("账号设置")
-            .setView(root)
+            .setView(scrollView)
             .setPositiveButton("保存", null)
             .setNeutralButton("退出登录", null)
             .setNegativeButton("关闭", null)
             .show();
     styleAlertDialogDark(dialog);
     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-        prefs.edit().putBoolean(KEY_CLOUD_SYNC_ENABLED, syncCheck.isChecked()).apply();
+        boolean enableNotify = friendNotifyCheck.isChecked();
+        prefs.edit()
+                .putBoolean(KEY_CLOUD_SYNC_ENABLED, syncCheck.isChecked())
+                .putBoolean(KEY_SHARE_PLAYING, sharePlayingCheck.isChecked())
+                .putBoolean(KEY_FRIEND_PLAY_NOTIFY, enableNotify)
+                .apply();
+        if (enableNotify) ensureNotificationPermission();
+        com.yuki.yukihub.social.PresenceService.sync(MainActivity.this);
         updateProfilePanel();
         Toast.makeText(MainActivity.this, "账号设置已保存", Toast.LENGTH_SHORT).show();
         dialog.dismiss();
     });
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> confirmLogout(dialog));
 }
+
+private void ensureNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
+        try {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+            // 先弹解释弹窗，再请求权限（QQ 做法）
+            new AlertDialog.Builder(this)
+                    .setTitle("需要通知权限")
+                    .setMessage("YukiHub 需要通知权限才能在你玩游戏时提醒你「好友开始玩什么游戏」。\n\n点击「允许」后，系统会弹出权限请求。")
+                    .setPositiveButton("继续", (d, w) -> {
+                        d.dismiss();
+                        requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 9910);
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable ignored) {}
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 9910) {
+            boolean granted = grantResults.length > 0
+                    && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if (granted) {
+                // 权限已授予，引导用户打开通道详情页（横幅/铃声/锁屏可能默认关闭）
+                showNotificationChannelGuide();
+            } else {
+                // 用户拒绝：引导去系统设置手动开启
+                showNotificationDeniedGuide();
+            }
+        }
+    }
+
+    /** 通知权限被拒绝后，引导用户去系统设置手动开启 */
+    private void showNotificationDeniedGuide() {
+        try {
+            new AlertDialog.Builder(this)
+                    .setTitle("通知权限未开启")
+                    .setMessage("你拒绝了通知权限，好友开玩时将无法收到提醒。\n\n你可以随时去系统设置手动开启。")
+                    .setPositiveButton("去设置", (d, w) -> {
+                        d.dismiss();
+                        openAppNotificationSettings();
+                    })
+                    .setNegativeButton("稍后", null)
+                    .show();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 通知权限已授予后，引导用户确认通知通道设置（横幅/铃声/振动/锁屏） */
+    private void showNotificationChannelGuide() {
+        try {
+            new AlertDialog.Builder(this)
+                    .setTitle("通知已开启")
+                    .setMessage("你可以进一步调整通知样式：是否弹出横幅、是否响铃、是否在锁屏显示。\n\n点击下方按钮进入通知通道设置。")
+                    .setPositiveButton("去设置", (d, w) -> {
+                        d.dismiss();
+                        openChannelSettings();
+                    })
+                    .setNegativeButton("保持默认", null)
+                    .show();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 打开 App 通知设置页 */
+    private void openAppNotificationSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            startActivity(intent);
+        } catch (Throwable e) {
+            // 降级：打开全部通知设置
+            try {
+                startActivity(new Intent("android.settings.NOTIFICATION_SETTINGS"));
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    /** 直接打开 friend_play_v2 通知通道详情页（横幅/铃声/锁屏开关） */
+    private void openChannelSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent intent = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                intent.putExtra(Settings.EXTRA_CHANNEL_ID,
+                        com.yuki.yukihub.social.FriendNotifier.CHANNEL_FRIEND_PLAY);
+                startActivity(intent);
+            }
+        } catch (Throwable e) {
+            openAppNotificationSettings();
+        }
+    }
 
 private void confirmLogout(AlertDialog parent) {
     AlertDialog d = new AlertDialog.Builder(this)
@@ -2581,7 +2722,8 @@ private void maybeAutoServerSync() {
 }
 
 private void logoutLocalOnly() {
-    // 停止心跳，尽力标记离线
+    // 停止心跳与后台服务，尽力标记离线
+    try { com.yuki.yukihub.social.PresenceService.stop(this); } catch (Throwable ignored) {}
     if (presenceManager != null) presenceManager.markOffline();
     if (prefs != null) prefs.edit()
             .remove(KEY_AUTH_ACCESS_TOKEN)
@@ -2595,6 +2737,7 @@ private void logoutLocalOnly() {
             .remove("server_last_sync_hash")
             .remove(KEY_LAST_SYNC_AT)
             .remove("needs_initial_sync")
+            .remove("current_playing_activity")
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
     updateProfilePanel();
@@ -8296,6 +8439,13 @@ try {
         String launchType = resolveLaunchType(emulatorPackage);
         runningSessionId = repository.startPlaySession(game.id, sessionStart, launchType);
         launchedExternal = true;
+        // 标记正在玩（Steam 风格），并确保后台心跳继续
+        try {
+            if (presenceManager == null) presenceManager = com.yuki.yukihub.social.PresenceManager.get(this);
+            presenceManager.setPlayingGame(game.title);
+            com.yuki.yukihub.social.PresenceService.sync(this);
+            com.yuki.yukihub.social.PresenceService.refresh(this);
+        } catch (Throwable ignored) {}
         if (!launchGameInternal(game, emulatorPackage, launchTarget)) {
             clearLaunchLoadingOverlay();
             repository.cancelPlaySession(runningSessionId);
@@ -8303,6 +8453,12 @@ try {
             runningGameId = -1;
             runningSessionId = -1;
             sessionStart = 0;
+            try {
+                if (presenceManager != null) {
+                    presenceManager.clearPlayingGame();
+                    com.yuki.yukihub.social.PresenceService.refresh(this);
+                }
+            } catch (Throwable ignored) {}
             Toast.makeText(this, "启动失败：未找到该模拟器，或该模拟器不接受当前启动目标", Toast.LENGTH_LONG).show();
         }
     }
@@ -8749,6 +8905,12 @@ return startActivitySafely(intent);
             runningGameId = -1;
             runningSessionId = -1;
             sessionStart = 0;
+            // 结束游玩状态
+            try {
+                if (presenceManager == null) presenceManager = com.yuki.yukihub.social.PresenceManager.get(this);
+                presenceManager.clearPlayingGame();
+                com.yuki.yukihub.social.PresenceService.refresh(this);
+            } catch (Throwable ignored) {}
             loadGames();
         }
     }
@@ -8785,13 +8947,24 @@ return startActivitySafely(intent);
                 .show();
         styleAlertDialogDark(dialog);
     }
+
 @Override protected void onResume() {
      super.onResume();
      clearLaunchLoadingOverlay();
      enterImmersiveMode();
-     // 启动在线心跳
-     if (presenceManager == null) presenceManager = new com.yuki.yukihub.social.PresenceManager(this);
-     presenceManager.startHeartbeat();
+     // 启动在线心跳（引用计数 retain，避免重复 acquire）
+     if (presenceManager == null) presenceManager = com.yuki.yukihub.social.PresenceManager.get(this);
+     if (!activityHeartbeatHeld) {
+         presenceManager.retainHeartbeat();
+         activityHeartbeatHeld = true;
+     }
+     // 按开关同步前台保活服务
+     try {
+         if (isLoggedIn() && (prefs == null || prefs.getBoolean(KEY_FRIEND_PLAY_NOTIFY, true))) {
+             ensureNotificationPermission();
+         }
+         com.yuki.yukihub.social.PresenceService.sync(this);
+     } catch (Throwable ignored) {}
      finishCurrentPlaySessionIfAny();
     resumeBackgroundVideoIfNeeded();
     
@@ -8813,8 +8986,12 @@ return startActivitySafely(intent);
 @Override protected void onPause() {
      pauseBackgroundVideoIfNeeded();
      stopStatusBarUpdates();
-     // 停止心跳，标记 away
-     if (presenceManager != null) presenceManager.stopHeartbeat();
+     // 游戏运行中不释放心跳：后台仍需保持「正在玩」
+     // 前台服务若开启也会继续 retain；这里仅在非游玩时 release
+     if (presenceManager != null && !launchedExternal && activityHeartbeatHeld) {
+         presenceManager.releaseHeartbeat();
+         activityHeartbeatHeld = false;
+     }
      super.onPause();
  }
 
@@ -8827,10 +9004,14 @@ return startActivitySafely(intent);
  releaseBackgroundMediaPlayer();
  releaseUiSoundPool();
  stopStatusBarUpdates();
- // 标记离线
- if (presenceManager != null) presenceManager.markOffline();
- super.onDestroy();
+ // 释放本 Activity 持有的心跳；真正离线由 logout / 服务端超时判定
+ // 若仍在游玩且前台服务活着，服务会继续 retain
+ if (presenceManager != null && activityHeartbeatHeld) {
+     try { presenceManager.releaseHeartbeat(); } catch (Throwable ignored) {}
+     activityHeartbeatHeld = false;
  }
+ super.onDestroy();
+}
 
 private void resumeBackgroundVideoIfNeeded() {
     if (prefs == null || !"video".equals(prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image"))) return;

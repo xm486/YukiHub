@@ -59,6 +59,7 @@ public class HomeActivity extends AppCompatActivity {
     private GameRepository repository;
     private SharedPreferences prefs;
     private com.yuki.yukihub.social.PresenceManager presenceManager;
+    private boolean homeHeartbeatHeld = false;
     private LinearLayout quickGames;
     private LinearLayout heroDots;
     private ImageView homeAvatar;
@@ -98,6 +99,27 @@ public class HomeActivity extends AppCompatActivity {
         bindViews();
         bindActions();
         refreshHome();
+        handleFriendsTargetIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleFriendsTargetIntent(intent);
+    }
+
+    private void handleFriendsTargetIntent(Intent intent) {
+        if (intent == null) return;
+        String target = intent.getStringExtra("home_target");
+        if (!"friends".equals(target)) return;
+        intent.removeExtra("home_target");
+        getWindow().getDecorView().post(() -> {
+            if (isFinishing()) return;
+            try {
+                new com.yuki.yukihub.social.FriendsChatDialog(this).show();
+            } catch (Throwable ignored) {}
+        });
     }
 
     @Override
@@ -110,23 +132,32 @@ public class HomeActivity extends AppCompatActivity {
             refreshHome();
         }
         // 启动在线心跳
-        if (presenceManager == null) presenceManager = new com.yuki.yukihub.social.PresenceManager(this);
-        presenceManager.startHeartbeat();
+        if (presenceManager == null) presenceManager = com.yuki.yukihub.social.PresenceManager.get(this);
+        if (!homeHeartbeatHeld) {
+            presenceManager.retainHeartbeat();
+            homeHeartbeatHeld = true;
+        }
+        try { com.yuki.yukihub.social.PresenceService.sync(this); } catch (Throwable ignored) {}
     }
 
     @Override
     protected void onPause() {
         carouselHandler.removeCallbacks(carouselRunnable);
-        // 停止心跳，标记 away
-        if (presenceManager != null) presenceManager.stopHeartbeat();
+        // 释放本页心跳持有；前台服务若在跑会继续保活
+        if (presenceManager != null && homeHeartbeatHeld) {
+            presenceManager.releaseHeartbeat();
+            homeHeartbeatHeld = false;
+        }
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         carouselHandler.removeCallbacksAndMessages(null);
-        // 标记离线
-        if (presenceManager != null) presenceManager.markOffline();
+        if (presenceManager != null && homeHeartbeatHeld) {
+            presenceManager.releaseHeartbeat();
+            homeHeartbeatHeld = false;
+        }
         super.onDestroy();
     }
 
