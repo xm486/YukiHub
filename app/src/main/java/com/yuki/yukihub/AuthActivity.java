@@ -487,7 +487,8 @@ private void startSendCodeCountdown() {
                 .putString(KEY_AUTH_EMAIL, email)
                 .putString(KEY_AUTH_AVATAR, avatar != null ? avatar : "")
                 .putString(KEY_AUTH_STATUS, "online")
-                .putBoolean(KEY_CLOUD_SYNC_ENABLED, true)
+                .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
+                .putBoolean("needs_initial_sync", true)  // 登录后触发首次同步
                 .apply();
     }
 

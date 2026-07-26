@@ -191,6 +191,7 @@ public class KungalOAuthCallbackActivity extends AppCompatActivity {
                 .putString(KEY_AUTH_STATUS, "online")
                 .putBoolean(KEY_KUN_BOUND, user == null || user.optBoolean("kungalBound", true))
                 .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
+                .putBoolean("needs_initial_sync", true)  // 登录后触发首次同步
                 .apply();
     }
 

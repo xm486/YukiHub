@@ -2519,10 +2519,20 @@ private void doServerSync(boolean silent) {
 
 /**
  * App 启动时自动服务器同步（静默）。
+ * 1. 如果是登录后首次（needs_initial_sync=true），无视开关状态直接同步一次
+ * 2. 否则检查自动同步开关，按常规逻辑走
  */
 private void maybeAutoServerSync() {
     if (serverSyncRunning) return;
     if (!isLoggedIn()) return;
+
+    // ===== 登录后首次同步（独立于自动同步开关）=====
+    if (prefs != null && prefs.getBoolean("needs_initial_sync", false)) {
+        prefs.edit().putBoolean("needs_initial_sync", false).apply();
+        doServerSync(true);  // 静默同步
+        return;
+    }
+
     serverSyncRunning = true;
     com.yuki.yukihub.sync.SyncManager sm = new com.yuki.yukihub.sync.SyncManager(this);
     boolean triggered = sm.maybeAutoSyncToServer(new com.yuki.yukihub.sync.SyncManager.SyncListener() {
@@ -2584,6 +2594,7 @@ private void logoutLocalOnly() {
             .remove(KEY_KUN_BOUND)
             .remove("server_last_sync_hash")
             .remove(KEY_LAST_SYNC_AT)
+            .remove("needs_initial_sync")
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
     updateProfilePanel();
