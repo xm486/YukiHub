@@ -18,17 +18,21 @@ import com.yuki.yukihub.util.TimeFormatUtil;
 
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
     public interface OnGameClickListener { void onGameClick(Game game); void onGameDoubleClick(Game game); void onGameLongClick(Game game); void onStatusClick(Game game); }
     public interface OnUiFeedbackListener { void onUiFeedback(int type); }
+    public interface OnSelectionChangedListener { void onSelectionChanged(int count); }
     public static final int FEEDBACK_CLICK = 0;
     public static final int FEEDBACK_CONFIRM = 1;
     public static final int FEEDBACK_SWITCH = 2;
     private final List<Game> games = new ArrayList<>();
     private OnGameClickListener listener;
     private OnUiFeedbackListener feedbackListener;
+    private OnSelectionChangedListener selectionChangedListener;
     private long selectedGameId = -1;
     private long lastClickTime = 0L;
     private long lastClickGameId = -1L;
@@ -38,13 +42,68 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
     private int themeCard2Color = 0xFF222B49;
     private int themeBgColor = 0xFF0B1020;
     private boolean themeActive = false;
+    // 多选模式
+    private boolean multiSelectMode = false;
+    private final Set<Long> checkedIds = new HashSet<>();
 
     public void setOnGameClickListener(OnGameClickListener listener) { this.listener = listener; }
-public void setOnUiFeedbackListener(OnUiFeedbackListener listener) { this.feedbackListener = listener; }
-private void emitFeedback(int type) { if (feedbackListener != null) feedbackListener.onUiFeedback(type); }
-public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChanged(); }
-    public void submit(List<Game> newGames) { games.clear(); games.addAll(newGames); notifyDataSetChanged(); }
+    public void setOnUiFeedbackListener(OnUiFeedbackListener listener) { this.feedbackListener = listener; }
+    public void setOnSelectionChangedListener(OnSelectionChangedListener listener) { this.selectionChangedListener = listener; }
+    private void emitFeedback(int type) { if (feedbackListener != null) feedbackListener.onUiFeedback(type); }
+    public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChanged(); }
+    public void submit(List<Game> newGames) {
+        games.clear();
+        games.addAll(newGames);
+        // 清理已不存在的勾选
+        if (!checkedIds.isEmpty()) {
+            Set<Long> valid = new HashSet<>();
+            for (Game g : games) if (g != null) valid.add(g.id);
+            checkedIds.retainAll(valid);
+            notifySelectionChanged();
+        }
+        notifyDataSetChanged();
+    }
     public void setThemeColors(int primary, int secondary) { themePrimaryColor = primary; themeSecondaryColor = secondary; }
+
+    public boolean isMultiSelectMode() { return multiSelectMode; }
+
+    public void setMultiSelectMode(boolean enabled) {
+        if (multiSelectMode == enabled) return;
+        multiSelectMode = enabled;
+        if (!enabled) checkedIds.clear();
+        notifySelectionChanged();
+        notifyDataSetChanged();
+    }
+
+    public void toggleChecked(long gameId) {
+        if (checkedIds.contains(gameId)) checkedIds.remove(gameId);
+        else checkedIds.add(gameId);
+        notifySelectionChanged();
+        notifyDataSetChanged();
+    }
+
+    public void selectAllVisible() {
+        checkedIds.clear();
+        for (Game g : games) if (g != null) checkedIds.add(g.id);
+        notifySelectionChanged();
+        notifyDataSetChanged();
+    }
+
+    public void clearSelection() {
+        checkedIds.clear();
+        notifySelectionChanged();
+        notifyDataSetChanged();
+    }
+
+    public Set<Long> getCheckedIds() { return new HashSet<>(checkedIds); }
+
+    public int getCheckedCount() { return checkedIds.size(); }
+
+    private void notifySelectionChanged() {
+        if (selectionChangedListener != null) selectionChangedListener.onSelectionChanged(checkedIds.size());
+    }
+
+    public boolean isChecked(long gameId) { return checkedIds.contains(gameId); }
 
     /** Set full theme colors from dynamic extraction. Pass null to reset to defaults. */
     public void setFullThemeColors(ThemeColorExtractor.ThemeColors colors) {
@@ -198,7 +257,54 @@ public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChang
         try { h.itemView.setSoundEffectsEnabled(false); } catch (Throwable ignored) { }
         try { h.statusBadge.setSoundEffectsEnabled(false); } catch (Throwable ignored) { }
         applyCardFeedback(h.itemView);
+
+        // 多选勾选标记
+        boolean checked = multiSelectMode && checkedIds.contains(g.id);
+        if (h.selectCheck != null) {
+            if (multiSelectMode) {
+                h.selectCheck.setVisibility(View.VISIBLE);
+                h.selectCheck.setText(checked ? "✓" : "○");
+                GradientDrawable checkBg = new GradientDrawable();
+                checkBg.setShape(GradientDrawable.OVAL);
+                if (checked) {
+                    checkBg.setColor(0xE034C759);
+                    h.selectCheck.setTextColor(0xFFFFFFFF);
+                } else {
+                    checkBg.setColor(0x88000000);
+                    checkBg.setStroke((int) dp(h.itemView, 1.5f), 0xCCFFFFFF);
+                    h.selectCheck.setTextColor(0xEAF0FF);
+                }
+                h.selectCheck.setBackground(checkBg);
+            } else {
+                h.selectCheck.setVisibility(View.GONE);
+            }
+        }
+        // 多选时隐藏状态徽章，避免和勾选标记叠在一起
+        if (h.statusBadge != null) {
+            h.statusBadge.setVisibility(multiSelectMode ? View.GONE : View.VISIBLE);
+        }
+
+        // 勾选时卡片描边加强
+        if (multiSelectMode && checked) {
+            GradientDrawable checkedBg = new GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{
+                            (0xEA << 24) | (themeCardColor & 0x00FFFFFF),
+                            (0xE0 << 24) | (themeCardColor & 0x00FFFFFF),
+                            (0xDC << 24) | (themeCard2Color & 0x00FFFFFF)
+                    });
+            checkedBg.setCornerRadius((int) dp(h.itemView, 10));
+            checkedBg.setStroke((int) dp(h.itemView, 2.5f), 0xE034C759);
+            h.itemView.setBackground(checkedBg);
+        }
+
         h.statusBadge.setOnClickListener(v -> {
+            if (multiSelectMode) {
+                // 多选模式下点状态徽章也切换勾选
+                emitFeedback(FEEDBACK_CLICK);
+                toggleChecked(g.id);
+                return;
+            }
             emitFeedback(FEEDBACK_SWITCH);
             try { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); } catch (Throwable ignored) { }
             selectedGameId = g.id;
@@ -207,6 +313,12 @@ public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChang
         });
         h.itemView.setOnClickListener(v -> {
             try { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); } catch (Throwable ignored) { }
+            if (multiSelectMode) {
+                // 多选模式：单击切换勾选
+                emitFeedback(FEEDBACK_CLICK);
+                toggleChecked(g.id);
+                return;
+            }
             long now = System.currentTimeMillis();
             boolean isDouble = lastClickGameId == g.id && (now - lastClickTime) <= 350L;
             emitFeedback(isDouble ? FEEDBACK_CONFIRM : FEEDBACK_CLICK);
@@ -222,6 +334,11 @@ public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChang
         h.itemView.setOnLongClickListener(v -> {
             emitFeedback(FEEDBACK_CONFIRM);
             try { v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); } catch (Throwable ignored) { }
+            // 多选模式下长按也切换勾选，不打开编辑
+            if (multiSelectMode) {
+                toggleChecked(g.id);
+                return true;
+            }
             if (listener != null) listener.onGameLongClick(g);
             return true;
         });
@@ -312,7 +429,7 @@ public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChang
     static class Holder extends RecyclerView.ViewHolder {
         ImageView cover;
         View coverFrame;
-        TextView placeholder, title, favoriteBadge, engineCover, engineTitle, playTime, statusBadge;
+        TextView placeholder, title, favoriteBadge, engineCover, engineTitle, playTime, statusBadge, selectCheck;
         CardGlowView cardGlow;
         Holder(@NonNull View itemView) {
             super(itemView);
@@ -329,6 +446,7 @@ public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChang
             engineTitle = itemView.findViewById(R.id.tvEngineTitle);
             playTime = itemView.findViewById(R.id.tvPlayTime);
             statusBadge = itemView.findViewById(R.id.tvStatusBadge);
+            selectCheck = itemView.findViewById(R.id.tvSelectCheck);
         }
     }
 }

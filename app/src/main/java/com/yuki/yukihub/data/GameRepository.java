@@ -105,7 +105,49 @@ public class GameRepository {
 
     public int delete(long id) {
         SQLiteDatabase db = helper.getWritableDatabase();
+        // 同步清理该游戏的游玩会话，避免残留脏数据
+        db.delete("play_sessions", "game_id=?", new String[]{String.valueOf(id)});
         return db.delete("games", "id=?", new String[]{String.valueOf(id)});
+    }
+
+    /** 批量删除游戏（含对应 play_sessions），返回实际删除的游戏数。 */
+    public int deleteBatch(java.util.Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        int deleted = 0;
+        db.beginTransaction();
+        try {
+            for (Long id : ids) {
+                if (id == null || id <= 0) continue;
+                db.delete("play_sessions", "game_id=?", new String[]{String.valueOf(id)});
+                deleted += db.delete("games", "id=?", new String[]{String.valueOf(id)});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return deleted;
+    }
+
+    /** 一键清空全部游戏库（含 play_sessions），返回删除的游戏数。不删本体文件。 */
+    public int deleteAll() {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        int count = 0;
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM games", null);
+        try {
+            if (c.moveToFirst()) count = c.getInt(0);
+        } finally {
+            c.close();
+        }
+        db.beginTransaction();
+        try {
+            db.delete("play_sessions", null, null);
+            db.delete("games", null, null);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return count;
     }
 
     public long startPlaySession(long gameId, long start, String launchType) {

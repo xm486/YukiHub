@@ -185,6 +185,9 @@ public class MainActivity extends AppCompatActivity {
     private String filter = "ALL";
 private String query = "";
 private String developerFilter = "";
+    // 多选删除栏
+    private LinearLayout multiSelectBar;
+    private TextView multiSelectCount;
     private TextView tvEmpty, tvStats, tvProfileName, tvProfileInitial;
 private ImageView ivProfileAvatar;
 private View profileStatusDot;
@@ -1741,10 +1744,12 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
             @Override public void onGameLongClick(Game game) { showEditDialog(game); }
             @Override public void onStatusClick(Game game) { updateSideDetail(game); showPlayStatusDialog(game, null); }
         });
+        adapter.setOnSelectionChangedListener(count -> updateMultiSelectBar(count));
         int columns = prefs == null ? DEFAULT_GAME_COLUMNS : prefs.getInt(KEY_GAME_COLUMNS, DEFAULT_GAME_COLUMNS);
         columns = Math.max(2, Math.min(10, columns));
         recycler.setLayoutManager(new GridLayoutManager(this, columns));
         recycler.setAdapter(adapter);
+        ensureMultiSelectBar();
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
         ivScanLoading = findViewById(R.id.ivScanLoading);
@@ -4917,8 +4922,8 @@ String rematchItem = "重新匹配" + sourceLabel;
         String playTimeItem = "修改游玩时长";
         String favoriteItem = game.favorite ? "取消收藏" : "收藏游戏";
         String[] items = (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS)
-                ? new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "引擎设置", "详细信息", "删除游戏"}
-                : new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "详细信息", "删除游戏"};
+                ? new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "引擎设置", "详细信息", "删除游戏", "多选删除…"}
+                : new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "详细信息", "删除游戏", "多选删除…"};
         LinearLayout listRoot = new LinearLayout(this);
         listRoot.setOrientation(LinearLayout.VERTICAL);
         listRoot.setBackgroundResource(R.drawable.bg_dialog);
@@ -4929,7 +4934,8 @@ String rematchItem = "重新匹配" + sourceLabel;
         for (String item : items) {
             TextView row = new TextView(this);
             row.setText(item);
-            row.setTextColor(getColorCompat("删除游戏".equals(item) ? R.color.yh_secondary : R.color.yh_text));
+            row.setTextColor(getColorCompat(
+                    ("删除游戏".equals(item) || "多选删除…".equals(item)) ? R.color.yh_secondary : R.color.yh_text));
             row.setTextSize(15);
             row.setGravity(android.view.Gravity.CENTER_VERTICAL);
             row.setPadding(hp, 0, hp, 0);
@@ -4959,6 +4965,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game); }
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
                 else if ("删除游戏".equals(chosen)) confirmDeleteGame(game);
+                else if ("多选删除…".equals(chosen)) enterMultiSelectMode(game);
             });
         }
         ScrollView optionScroll = new ScrollView(this);
@@ -4983,6 +4990,162 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 .setTitle("删除游戏")
                 .setMessage("确定删除 “" + game.title + "”？不会删除本体文件。")
                 .setPositiveButton("删除", (x,w)->{ repository.delete(game.id); selectedGame = null; loadGames(); })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 多选删除 ====================
+
+    /** 进入多选模式，并预勾选当前游戏。 */
+    private void enterMultiSelectMode(Game seed) {
+        if (adapter == null) return;
+        adapter.setMultiSelectMode(true);
+        if (seed != null) adapter.toggleChecked(seed.id);
+        ensureMultiSelectBar();
+        if (multiSelectBar != null) multiSelectBar.setVisibility(View.VISIBLE);
+        updateMultiSelectBar(adapter.getCheckedCount());
+        Toast.makeText(this, "已进入多选模式，点选游戏后可批量删除", Toast.LENGTH_SHORT).show();
+    }
+
+    private void exitMultiSelectMode() {
+        if (adapter != null) adapter.setMultiSelectMode(false);
+        if (multiSelectBar != null) multiSelectBar.setVisibility(View.GONE);
+    }
+
+    private void updateMultiSelectBar(int count) {
+        if (multiSelectCount != null) {
+            multiSelectCount.setText("已选 " + count + " 个");
+        }
+        if (multiSelectBar != null) {
+            multiSelectBar.setVisibility(adapter != null && adapter.isMultiSelectMode() ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /** 在主内容区顶部动态挂载多选操作栏。 */
+    private void ensureMultiSelectBar() {
+        if (multiSelectBar != null) return;
+        ViewGroup contentRoot = findViewById(android.R.id.content);
+        if (contentRoot == null) return;
+        // 挂到 activity 根 FrameLayout 上，绝对定位在底部
+        View root = contentRoot.getChildCount() > 0 ? contentRoot.getChildAt(0) : contentRoot;
+        if (!(root instanceof ViewGroup)) return;
+
+        multiSelectBar = new LinearLayout(this);
+        multiSelectBar.setOrientation(LinearLayout.HORIZONTAL);
+        multiSelectBar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        multiSelectBar.setPadding(dp(12), dp(8), dp(12), dp(8));
+        GradientDrawable barBg = new GradientDrawable();
+        barBg.setColor(0xF0121A2E);
+        barBg.setCornerRadius(dp(12));
+        barBg.setStroke(dp(1), 0x5534C759);
+        multiSelectBar.setBackground(barBg);
+        multiSelectBar.setElevation(dp(8));
+        multiSelectBar.setVisibility(View.GONE);
+
+        multiSelectCount = new TextView(this);
+        multiSelectCount.setText("已选 0 个");
+        multiSelectCount.setTextColor(getColorCompat(R.color.yh_text));
+        multiSelectCount.setTextSize(13);
+        multiSelectCount.setTypeface(null, android.graphics.Typeface.BOLD);
+        multiSelectBar.addView(multiSelectCount, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView selectAllBtn = makeMultiSelectAction("全选", getColorCompat(R.color.yh_primary));
+        selectAllBtn.setOnClickListener(v -> {
+            if (adapter != null) adapter.selectAllVisible();
+        });
+        multiSelectBar.addView(selectAllBtn, multiSelectBtnLp());
+
+        TextView deleteBtn = makeMultiSelectAction("删除", getColorCompat(R.color.yh_secondary));
+        deleteBtn.setOnClickListener(v -> confirmBatchDelete());
+        multiSelectBar.addView(deleteBtn, multiSelectBtnLp());
+
+        TextView cancelBtn = makeMultiSelectAction("取消", getColorCompat(R.color.yh_text_muted));
+        cancelBtn.setOnClickListener(v -> exitMultiSelectMode());
+        multiSelectBar.addView(cancelBtn, multiSelectBtnLp());
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = android.view.Gravity.BOTTOM;
+        lp.setMargins(dp(12), 0, dp(12), dp(14));
+        if (root instanceof FrameLayout) {
+            ((FrameLayout) root).addView(multiSelectBar, lp);
+        } else {
+            // 兜底：包一层
+            ((ViewGroup) root).addView(multiSelectBar, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    private TextView makeMultiSelectAction(String text, int color) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(color);
+        tv.setTextSize(13);
+        tv.setTypeface(null, android.graphics.Typeface.BOLD);
+        tv.setGravity(android.view.Gravity.CENTER);
+        tv.setPadding(dp(10), dp(6), dp(10), dp(6));
+        tv.setBackgroundResource(R.drawable.bg_input);
+        return tv;
+    }
+
+    private LinearLayout.LayoutParams multiSelectBtnLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(dp(6), 0, 0, 0);
+        return lp;
+    }
+
+    private void confirmBatchDelete() {
+        if (adapter == null) return;
+        java.util.Set<Long> ids = adapter.getCheckedIds();
+        if (ids.isEmpty()) {
+            Toast.makeText(this, "请先勾选要删除的游戏", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int count = ids.size();
+        new AlertDialog.Builder(this)
+                .setTitle("批量删除")
+                .setMessage("确定删除选中的 " + count + " 个游戏？\n不会删除本体文件，仅从游戏库移除。")
+                .setPositiveButton("删除 " + count + " 个", (d, w) -> {
+                    int deleted = repository.deleteBatch(ids);
+                    selectedGame = null;
+                    exitMultiSelectMode();
+                    loadGames();
+                    Toast.makeText(MainActivity.this, "已删除 " + deleted + " 个游戏", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 一键清空游戏库（二次确认）。 */
+    private void confirmClearAllGames() {
+        int total = allGames == null ? 0 : allGames.size();
+        if (total <= 0) {
+            Toast.makeText(this, "游戏库已经是空的", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("清空游戏库")
+                .setMessage("即将删除全部 " + total + " 个游戏记录。\n\n"
+                        + "· 不会删除本体文件\n"
+                        + "· 游玩时长记录会一并清除\n"
+                        + "· 此操作不可撤销\n\n"
+                        + "确定继续？")
+                .setPositiveButton("全部清空", (d, w) -> {
+                    // 再确认一次，防止误触
+                    new AlertDialog.Builder(this)
+                            .setTitle("最后确认")
+                            .setMessage("真的要清空全部 " + total + " 个游戏吗？")
+                            .setPositiveButton("确定清空", (d2, w2) -> {
+                                int deleted = repository.deleteAll();
+                                selectedGame = null;
+                                exitMultiSelectMode();
+                                loadGames();
+                                Toast.makeText(MainActivity.this, "已清空 " + deleted + " 个游戏", Toast.LENGTH_SHORT).show();
+                            })
+                            .setNegativeButton("取消", null)
+                            .show();
+                })
                 .setNegativeButton("取消", null)
                 .show();
     }
@@ -5329,6 +5492,26 @@ LinearLayout accountActions = new LinearLayout(this);
         externalImportBtn.setTextColor(primaryTextColor());
         externalImportBtn.setOnClickListener(v -> showExternalImportDialog());
         root.addView(externalImportBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+
+        // ===== 危险操作 =====
+        TextView dangerTitle = new TextView(this);
+        dangerTitle.setText("\n危险操作");
+        dangerTitle.setTextColor(getColorCompat(R.color.yh_secondary));
+        dangerTitle.setTextSize(14);
+        dangerTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(dangerTitle);
+
+        TextView dangerInfo = new TextView(this);
+        dangerInfo.setText("清空游戏库只会删除游戏记录和游玩时长，不会删除本体文件。操作不可撤销。");
+        dangerInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        dangerInfo.setTextSize(11);
+        dangerInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(dangerInfo);
+
+        Button clearAllBtn = krButton("清空游戏库");
+        clearAllBtn.setTextColor(getColorCompat(R.color.yh_secondary));
+        clearAllBtn.setOnClickListener(v -> confirmClearAllGames());
+        root.addView(clearAllBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
 
         TextView disclaimerTitle = new TextView(this);
         disclaimerTitle.setText("\n使用说明与免责声明");
@@ -8981,6 +9164,16 @@ return startActivitySafely(intent);
     maybeAutoWebDavSync();
     maybeAutoServerSync();
     startStatusBarUpdates();
+}
+
+@Override
+public void onBackPressed() {
+    // 多选模式下返回键先退出多选
+    if (adapter != null && adapter.isMultiSelectMode()) {
+        exitMultiSelectMode();
+        return;
+    }
+    super.onBackPressed();
 }
 
 @Override protected void onPause() {
