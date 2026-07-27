@@ -190,6 +190,15 @@ public class SocialApiClient {
         return root.optBoolean("success", false);
     }
 
+    /** 通过 UID 接受好友请求（资料页用） */
+    public boolean acceptFriendRequestByUid(int uid) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("uid", uid);
+        String resp = doPost("/friends/accept", body);
+        JSONObject root = new JSONObject(resp);
+        return root.optBoolean("success", false);
+    }
+
     /** 拒绝好友请求 */
     public boolean rejectFriendRequest(int friendshipId) throws Exception {
         JSONObject body = new JSONObject();
@@ -293,6 +302,121 @@ public class SocialApiClient {
         msg.content = obj.optString("content", "");
         msg.msgType = obj.optString("msgType", "text");
         msg.createdAt = obj.optString("createdAt", "");
+        msg.isMine = obj.optBoolean("isMine", false);
+        return msg;
+    }
+
+    // ==================== 群组 API ====================
+
+    /** 获取群组列表 */
+    public List<GroupInfo> getGroupsList() throws Exception {
+        String resp = doGet("/groups/list", null);
+        JSONObject root = new JSONObject(resp);
+        JSONArray arr = root.optJSONArray("groups");
+        List<GroupInfo> groups = new ArrayList<>();
+        if (arr == null) return groups;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject g = arr.getJSONObject(i);
+            GroupInfo info = new GroupInfo();
+            info.id = g.optInt("id", 0);
+            info.name = g.optString("name", "");
+            info.icon = g.optString("icon", "🏛");
+            info.type = g.optString("type", "chat");
+            info.description = g.optString("description", "");
+            info.memberRole = g.optString("memberRole", "member");
+            info.unreadCount = g.optInt("unreadCount", 0);
+            info.lastMessage = g.optString("lastMessage", "");
+            info.lastMessageTime = g.optString("lastMessageTime", "");
+            groups.add(info);
+        }
+        return groups;
+    }
+
+    /** 获取群组聊天历史 */
+    public GroupHistoryResult getGroupMessages(int groupId, int offset, int limit) throws Exception {
+        String params = "groupId=" + groupId + "&offset=" + offset + "&limit=" + limit;
+        String resp = doGet("/groups/messages", params);
+        JSONObject root = new JSONObject(resp);
+        JSONArray arr = root.optJSONArray("messages");
+        int onlineCount = root.optInt("onlineCount", 0);
+        List<GroupMessage> messages = new ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                messages.add(parseGroupMessage(arr.getJSONObject(i)));
+            }
+        }
+        return new GroupHistoryResult(messages, onlineCount);
+    }
+
+    /** 群组历史结果（消息 + 在线人数） */
+    public static class GroupHistoryResult {
+        public final List<GroupMessage> messages;
+        public final int onlineCount;
+        public GroupHistoryResult(List<GroupMessage> messages, int onlineCount) {
+            this.messages = messages;
+            this.onlineCount = onlineCount;
+        }
+    }
+
+    /** 发送群组消息 */
+    public GroupMessage sendGroupMessage(int groupId, String content) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("groupId", groupId);
+        body.put("content", content);
+        body.put("msgType", "text");
+        String resp = doPost("/groups/send", body);
+        JSONObject root = new JSONObject(resp);
+        JSONObject msg = root.optJSONObject("message");
+        if (msg == null) throw new RuntimeException("发送消息失败");
+        return parseGroupMessage(msg);
+    }
+
+    /** 轮询群组新消息 */
+    public GroupPollResult pollGroupMessages(int groupId, int afterId) throws Exception {
+        String params = "groupId=" + groupId + "&afterId=" + afterId;
+        String resp = doGet("/groups/poll", params);
+        JSONObject root = new JSONObject(resp);
+        JSONArray arr = root.optJSONArray("messages");
+        List<GroupMessage> messages = new ArrayList<>();
+        if (arr == null) return new GroupPollResult(messages, root.optInt("onlineCount", 0));
+        for (int i = 0; i < arr.length(); i++) {
+            messages.add(parseGroupMessage(arr.getJSONObject(i)));
+        }
+        return new GroupPollResult(messages, root.optInt("onlineCount", 0));
+    }
+
+    /** 群组轮询结果（消息 + 在线人数） */
+    public static class GroupPollResult {
+        public final List<GroupMessage> messages;
+        public final int onlineCount;
+        public GroupPollResult(List<GroupMessage> messages, int onlineCount) {
+            this.messages = messages;
+            this.onlineCount = onlineCount;
+        }
+    }
+
+    /** 管理群组消息（撤回/删除） */
+    public boolean manageGroupMessage(int messageId, String action) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("messageId", messageId);
+        body.put("action", action);
+        String resp = doPost("/groups/manage", body);
+        JSONObject root = new JSONObject(resp);
+        return root.optBoolean("success", false);
+    }
+
+    private GroupMessage parseGroupMessage(JSONObject obj) {
+        GroupMessage msg = new GroupMessage();
+        msg.id = obj.optInt("id", 0);
+        msg.senderId = obj.optString("senderId", "");
+        msg.senderNickname = obj.optString("senderNickname", "");
+        msg.senderAvatar = obj.optString("senderAvatar", "");
+        msg.senderUid = obj.optInt("senderUid", 0);
+        msg.senderIsAdmin = obj.optBoolean("senderIsAdmin", false);
+        msg.content = obj.optString("content", "");
+        msg.msgType = obj.optString("msgType", "text");
+        msg.createdAt = obj.optString("createdAt", "");
+        msg.recalled = obj.optBoolean("recalled", false);
         msg.isMine = obj.optBoolean("isMine", false);
         return msg;
     }

@@ -38,6 +38,9 @@ public class FriendsChatDialog {
     private static final long POLL_INTERVAL_MS = 10_000;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
+    private static final String KEY_AUTH_NICKNAME = "auth_nickname";
+    private static final String KEY_AUTH_AVATAR = "auth_avatar";
+    private static final String KEY_AUTH_UID = "auth_uid";
 
     // 头像缓存（避免重复加载）
     private static final int AVATAR_CACHE_SIZE = 64;
@@ -68,9 +71,29 @@ public class FriendsChatDialog {
     private boolean hasMoreHistory = true;
     private int historyOffset = 0;
 
+    // 群组状态
+    private List<GroupInfo> groupList = new ArrayList<>();
+    private GroupInfo chatGroup;
+    private int groupMaxMessageId = 0;
+    private LinearLayout groupMessageList;
+    private EditText groupChatInput;
+    private ScheduledFuture<?> groupPollFuture;
+    private boolean groupHasMoreHistory = true;
+    private int groupHistoryOffset = 0;
+
     // 请求列表
     private JSONArray incomingRequests = new JSONArray();
     private JSONArray outgoingRequests = new JSONArray();
+
+    // 返回栈：当前所在页面
+    private static final int VIEW_FRIEND_LIST = 0;
+    private static final int VIEW_CHAT = 1;
+    private static final int VIEW_GROUP_CHAT = 2;
+    private static final int VIEW_PROFILE = 3;
+    private static final int VIEW_ADD_FRIEND = 4;
+    private static final int VIEW_REQUESTS = 5;
+    private int currentView = VIEW_FRIEND_LIST;
+    private int viewBeforeProfile = VIEW_FRIEND_LIST;
 
     public FriendsChatDialog(Activity activity) {
         this.activity = activity;
@@ -99,7 +122,29 @@ public class FriendsChatDialog {
         backButton.setTextColor(0xFF8AB4FF);
         backButton.setTextSize(14);
         backButton.setVisibility(View.GONE);
-        backButton.setOnClickListener(v -> showFriendList());
+        backButton.setOnClickListener(v -> {
+            switch (currentView) {
+                case VIEW_PROFILE:
+                    // 从资料页返回到进入资料页之前的页面
+                    if (viewBeforeProfile == VIEW_CHAT && chatFriend != null) {
+                        showChatView(chatFriend);
+                    } else if (viewBeforeProfile == VIEW_GROUP_CHAT && chatGroup != null) {
+                        showGroupChatView(chatGroup);
+                    } else {
+                        showFriendList();
+                    }
+                    break;
+                case VIEW_CHAT:
+                case VIEW_GROUP_CHAT:
+                case VIEW_ADD_FRIEND:
+                case VIEW_REQUESTS:
+                    showFriendList();
+                    break;
+                default:
+                    showFriendList();
+                    break;
+            }
+        });
         header.addView(backButton);
 
         titleBar = new TextView(activity);
@@ -165,23 +210,28 @@ public class FriendsChatDialog {
     private void showFriendList() {
         titleBar.setText("好友 / 聊天");
         backButton.setVisibility(View.GONE);
+        chatFriend = null;
+        chatGroup = null;
+        currentView = VIEW_FRIEND_LIST;
         resetContent(true);
         stopAllPolling();
-        contentContainer.addView(loadingLabel("正在加载好友列表..."));
+        contentContainer.addView(loadingLabel("正在加载..."));
 
         AppExecutors.runOnIo(() -> {
             try {
                 List<FriendInfo> loaded = apiClient.getFriendsList();
                 int pendingCount = apiClient.getPendingRequestsCount();
-                uiHandler.post(() -> renderFriendList(loaded, pendingCount));
+                List<GroupInfo> groups = apiClient.getGroupsList();
+                uiHandler.post(() -> renderFriendList(loaded, pendingCount, groups));
             } catch (Throwable t) {
                 uiHandler.post(() -> showError("加载失败：" + t.getMessage(), () -> showFriendList()));
             }
         });
     }
 
-    private void renderFriendList(List<FriendInfo> loaded, int pendingCount) {
+    private void renderFriendList(List<FriendInfo> loaded, int pendingCount, List<GroupInfo> groups) {
         friends = loaded;
+        groupList = groups;
         resetContent(true);
 
         // 操作栏
@@ -203,6 +253,16 @@ public class FriendsChatDialog {
 
         contentContainer.addView(divider());
 
+        // ====== 群组分区 ======
+        if (groupList != null && !groupList.isEmpty()) {
+            contentContainer.addView(sectionLabel("群组 — " + groupList.size()));
+            for (GroupInfo g : groupList) {
+                contentContainer.addView(buildGroupItem(g));
+            }
+            contentContainer.addView(divider());
+        }
+
+        // ====== 好友分区 ======
         if (friends.isEmpty()) {
             contentContainer.addView(emptyLabel("还没有好友\n点击上方「添加好友」搜索其他用户"));
         } else {
@@ -368,14 +428,91 @@ public class FriendsChatDialog {
         return row;
     }
 
+    /** 构建群组列表项（风格与好友项一致） */
+    private View buildGroupItem(GroupInfo group) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(6), dp(8), dp(6));
+        row.setBackgroundResource(R.drawable.bg_friend_item);
+        row.setClickable(true);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+        rlp.setMargins(0, dp(2), 0, dp(2));
+        row.setLayoutParams(rlp);
+
+        // 图标（emoji 代替头像，不用 bg_input 避免挤压）
+        TextView iconView = new TextView(activity);
+        iconView.setText(group.icon != null && !group.icon.isEmpty() ? group.icon : "🏛");
+        iconView.setTextSize(26);  // 大号 emoji
+        iconView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams ilv = new LinearLayout.LayoutParams(dp(38), dp(38));
+        ilv.setMargins(0, 0, dp(8), 0);
+        row.addView(iconView, ilv);
+
+        // 信息列
+        LinearLayout col = new LinearLayout(activity);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView name = new TextView(activity);
+        name.setText(group.name);
+        name.setTextColor(0xFFF5F7FF);
+        name.setTextSize(14);
+        name.setTypeface(null, android.graphics.Typeface.BOLD);
+        col.addView(name);
+
+        // 类型/描述行
+        String desc = group.description != null && !group.description.isEmpty()
+                ? group.description : (group.isNotice() ? "仅管理员可发言" : "公开聊天室");
+        TextView descView = new TextView(activity);
+        descView.setText(desc);
+        descView.setTextColor(group.isAdmin() ? 0xFF90BA3C : 0xFF9AA4BF);
+        descView.setTextSize(11);
+        descView.setMaxLines(1);
+        descView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(descView);
+
+        row.addView(col);
+
+        // 公告版小标签
+        if (group.isNotice()) {
+            TextView badge = new TextView(activity);
+            badge.setText("公告");
+            badge.setTextColor(0xFFFF9500);
+            badge.setTextSize(10);
+            badge.setPadding(dp(5), dp(2), dp(5), dp(2));
+            badge.setBackgroundResource(R.drawable.bg_social_button);
+            row.addView(badge);
+        }
+
+        // 未读红点
+        if (group.unreadCount > 0) {
+            TextView unreadBadge = new TextView(activity);
+            unreadBadge.setText(String.valueOf(group.unreadCount));
+            unreadBadge.setTextColor(0xFFFFFFFF);
+            unreadBadge.setTextSize(10);
+            unreadBadge.setGravity(Gravity.CENTER);
+            unreadBadge.setBackgroundResource(R.drawable.bg_unread_badge);
+            int bs = group.unreadCount > 9 ? dp(20) : dp(18);
+            unreadBadge.setLayoutParams(new LinearLayout.LayoutParams(bs, bs));
+            row.addView(unreadBadge);
+        }
+
+        row.setOnClickListener(v -> showGroupChatView(group));
+        return row;
+    }
+
     // ==================== 聊天界面 ====================
 
     private void showChatView(FriendInfo friend) {
         chatFriend = friend;
+        chatGroup = null;
+        currentView = VIEW_CHAT;
         maxMessageId = 0;
         historyOffset = 0;
         hasMoreHistory = true;
         stopChatPolling();
+        stopGroupPolling();
 
         titleBar.setText(friend.nickname);
         backButton.setVisibility(View.VISIBLE);
@@ -566,9 +703,539 @@ public class FriendsChatDialog {
         if (chatPollFuture != null) { chatPollFuture.cancel(false); chatPollFuture = null; }
     }
 
+    // ==================== 群组聊天界面 ====================
+
+    private void showGroupChatView(GroupInfo group) {
+        chatGroup = group;
+        chatFriend = null;
+        currentView = VIEW_GROUP_CHAT;
+        groupMaxMessageId = 0;
+        groupHistoryOffset = 0;
+        groupHasMoreHistory = true;
+        stopChatPolling();
+        stopGroupPolling();
+
+        String titleIcon = group.icon != null && !group.icon.isEmpty() ? group.icon + " " : "";
+        titleBar.setText(titleIcon + group.name);
+        backButton.setVisibility(View.VISIBLE);
+        resetContent(false);
+
+        ScrollView scrollView = new ScrollView(activity);
+        scrollView.setFillViewport(true);
+        scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+
+        groupMessageList = new LinearLayout(activity);
+        groupMessageList.setOrientation(LinearLayout.VERTICAL);
+        groupMessageList.setPadding(dp(4), dp(6), dp(4), dp(6));
+        scrollView.addView(groupMessageList);
+
+        scrollView.getViewTreeObserver().addOnScrollChangedListener(() -> {
+            if (scrollView.getScrollY() == 0 && groupHasMoreHistory && groupMessagesCount() >= 20) {
+                loadMoreGroupHistory();
+            }
+        });
+        contentContainer.addView(scrollView);
+
+        // 输入栏
+        LinearLayout inputRow = new LinearLayout(activity);
+        inputRow.setOrientation(LinearLayout.HORIZONTAL);
+        inputRow.setGravity(Gravity.CENTER_VERTICAL);
+        inputRow.setPadding(0, dp(4), 0, 0);
+
+        // 表情按钮（预留，暂时禁用）
+        TextView emojiBtn = new TextView(activity);
+        emojiBtn.setText("😀");
+        emojiBtn.setTextSize(18);
+        emojiBtn.setGravity(Gravity.CENTER);
+        emojiBtn.setPadding(dp(6), dp(4), dp(6), dp(4));
+        emojiBtn.setAlpha(0.4f);
+        emojiBtn.setOnClickListener(v ->
+                Toast.makeText(activity, "表情包功能即将上线~", Toast.LENGTH_SHORT).show());
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(36), dp(38));
+        elp.setMargins(0, 0, dp(4), 0);
+        inputRow.addView(emojiBtn, elp);
+
+        groupChatInput = new EditText(activity);
+        groupChatInput.setTextColor(0xFFF5F7FF);
+        groupChatInput.setHintTextColor(0x889AA4BF);
+        groupChatInput.setBackgroundResource(R.drawable.bg_chat_input);
+        groupChatInput.setMaxLines(4);
+        groupChatInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        groupChatInput.setHorizontallyScrolling(false);
+
+        boolean canSpeak = group.canSpeak();
+        if (canSpeak) {
+            groupChatInput.setHint("输入消息...");
+            groupChatInput.setEnabled(true);
+            groupChatInput.setOnEditorActionListener((v, actionId, event) -> {
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                        || (event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER
+                            && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                            && !event.isShiftPressed())) {
+                    sendGroupMessage();
+                    return true;
+                }
+                return false;
+            });
+        } else {
+            groupChatInput.setHint("仅管理员可发言");
+            groupChatInput.setEnabled(false);
+            groupChatInput.setAlpha(0.5f);
+        }
+
+        LinearLayout.LayoutParams il = new LinearLayout.LayoutParams(0, -2, 1);
+        il.setMargins(0, 0, dp(6), 0);
+        inputRow.addView(groupChatInput, il);
+
+        Button sendBtn = socialButton("发送", v -> {
+            if (canSpeak) sendGroupMessage();
+            else Toast.makeText(activity, "公告版仅管理员可发言", Toast.LENGTH_SHORT).show();
+        });
+        sendBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(38)));
+        if (!canSpeak) {
+            sendBtn.setEnabled(false);
+            sendBtn.setAlpha(0.5f);
+        }
+        inputRow.addView(sendBtn);
+        contentContainer.addView(inputRow);
+
+        loadGroupHistory(0);
+    }
+
+    private int groupMessagesCount() {
+        return groupMessageList == null ? 0 : groupMessageList.getChildCount();
+    }
+
+    private void loadGroupHistory(int offset) {
+        if (chatGroup == null) return;
+        AppExecutors.runOnIo(() -> {
+            try {
+                SocialApiClient.GroupHistoryResult result = apiClient.getGroupMessages(chatGroup.id, offset, 50);
+                uiHandler.post(() -> {
+                    renderGroupHistory(result.messages, offset);
+                    updateOnlineCount(result.onlineCount);
+                });
+            } catch (Throwable t) {
+                if (offset == 0) {
+                    String err = t.getMessage() != null ? t.getMessage() : "未知错误";
+                    uiHandler.post(() -> showError("加载消息失败：" + err, () -> loadGroupHistory(0)));
+                }
+            }
+        });
+    }
+
+    private void updateOnlineCount(int count) {
+        if (chatGroup == null) return;
+        String titleIcon = chatGroup.icon != null && !chatGroup.icon.isEmpty() ? chatGroup.icon + " " : "";
+        titleBar.setText(titleIcon + chatGroup.name + "  ·  🟢" + count + "在线");
+    }
+
+    private void loadMoreGroupHistory() {
+        if (chatGroup == null || !groupHasMoreHistory) return;
+        groupHasMoreHistory = false;
+        int offset = groupHistoryOffset;
+        AppExecutors.runOnIo(() -> {
+            try {
+                SocialApiClient.GroupHistoryResult result = apiClient.getGroupMessages(chatGroup.id, offset, 50);
+                List<GroupMessage> older = result.messages;
+                uiHandler.post(() -> {
+                    for (int i = older.size() - 1; i >= 0; i--) {
+                        groupMessageList.addView(buildGroupMessageBubble(older.get(i)), 0);
+                    }
+                    groupHistoryOffset = offset + 50;
+                    groupHasMoreHistory = older.size() >= 50;
+                    updateOnlineCount(result.onlineCount);
+                });
+            } catch (Throwable t) {
+                groupHasMoreHistory = true;
+            }
+        });
+    }
+
+    private void renderGroupHistory(List<GroupMessage> msgs, int offset) {
+        if (offset == 0) {
+            groupMessageList.removeAllViews();
+            if (msgs.isEmpty()) groupMessageList.addView(emptyLabel("还没有消息，来说点什么吧"));
+        }
+        for (GroupMessage msg : msgs) {
+            groupMessageList.addView(buildGroupMessageBubble(msg));
+            if (msg.id > groupMaxMessageId) groupMaxMessageId = msg.id;
+        }
+        groupHistoryOffset = offset + msgs.size();
+        if (msgs.size() < 50) groupHasMoreHistory = false;
+        if (offset == 0) {
+            scrollGroupToBottom();
+            startGroupPolling();
+        }
+    }
+
+    /** 递归查找 wrapper 中带 "group_bubble" tag 的 TextView 并绑定长按事件 */
+    private void bindLongClickToBubble(View container, GroupMessage msg) {
+        if (container instanceof TextView) {
+            Object tag = container.getTag();
+            if ("group_bubble".equals(tag)) {
+                container.setOnLongClickListener(v -> {
+                    showGroupMsgManageOptions(msg);
+                    return true;
+                });
+            }
+        }
+        if (container instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) container;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                bindLongClickToBubble(group.getChildAt(i), msg);
+            }
+        }
+    }
+
+    /** 构建管理员标识小标签 */
+    private TextView buildAdminBadge() {
+        TextView badge = new TextView(activity);
+        badge.setText("管理");
+        badge.setTextColor(0xFFF5A623);
+        badge.setTextSize(8);
+        badge.setTypeface(null, android.graphics.Typeface.BOLD);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(4), dp(1), dp(4), dp(1));
+        badge.setBackgroundResource(R.drawable.bg_input);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(dp(4), 0, 0, 0);
+        badge.setLayoutParams(lp);
+        return badge;
+    }
+
+    private View buildGroupMessageBubble(GroupMessage msg) {
+        LinearLayout wrapper = new LinearLayout(activity);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
+        wrapper.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        // 撤回消息
+        if (msg.recalled) {
+            TextView recalled = new TextView(activity);
+            recalled.setText("管理员撤回了一条消息");
+            recalled.setTextColor(0x889AA4BF);
+            recalled.setTextSize(11);
+            recalled.setGravity(Gravity.CENTER);
+            recalled.setPadding(dp(8), dp(4), dp(8), dp(4));
+            wrapper.addView(recalled);
+            return wrapper;
+        }
+
+        if (msg.isMine) {
+            // 自己的消息：右侧布局（头像在最右，类似 QQ）
+            LinearLayout row = new LinearLayout(activity);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.TOP);
+
+            // 左侧：昵称 + 气泡（右对齐）
+            LinearLayout leftCol = new LinearLayout(activity);
+            leftCol.setOrientation(LinearLayout.VERTICAL);
+            leftCol.setGravity(Gravity.END);
+            leftCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+
+            String myNick = msg.senderNickname != null && !msg.senderNickname.isEmpty()
+                    ? msg.senderNickname : getMyNickname();
+            if (myNick == null || myNick.isEmpty()) myNick = "我";
+
+            // 昵称行（昵称 + 管理员标识）
+            LinearLayout myNickRow = new LinearLayout(activity);
+            myNickRow.setOrientation(LinearLayout.HORIZONTAL);
+            myNickRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams nrLp = new LinearLayout.LayoutParams(-2, -2);
+            nrLp.setMargins(0, 0, 0, dp(2));
+            myNickRow.setLayoutParams(nrLp);
+
+            TextView nickView = new TextView(activity);
+            nickView.setText(myNick);
+            nickView.setTextColor(0xFF8AB4FF);
+            nickView.setTextSize(11);
+            myNickRow.addView(nickView);
+
+            if (msg.senderIsAdmin) {
+                myNickRow.addView(buildAdminBadge());
+            }
+            leftCol.addView(myNickRow);
+
+            TextView bubble = new TextView(activity);
+            bubble.setText(msg.content);
+            bubble.setTextColor(0xFFF5F7FF);
+            bubble.setTextSize(13);
+            bubble.setLineSpacing(dp(2), 1.0f);
+            bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+            bubble.setBackgroundResource(R.drawable.bg_chat_bubble_self);
+            LinearLayout.LayoutParams bubbleLp = new LinearLayout.LayoutParams(-2, -2);
+            bubbleLp.gravity = Gravity.END;
+            bubble.setTag("group_bubble");
+            leftCol.addView(bubble, bubbleLp);
+
+            TextView time = new TextView(activity);
+            time.setText(formatTime(msg.createdAt));
+            time.setTextColor(0x889AA4BF);
+            time.setTextSize(9);
+            time.setPadding(0, dp(1), dp(2), 0);
+            LinearLayout.LayoutParams timeLp = new LinearLayout.LayoutParams(-2, -2);
+            timeLp.gravity = Gravity.END;
+            leftCol.addView(time, timeLp);
+
+            row.addView(leftCol);
+
+            // 右侧：头像
+            String myAvatar = msg.senderAvatar != null ? msg.senderAvatar : getMyAvatar();
+            TextView avatarText = new TextView(activity);
+            avatarText.setText(myNick.isEmpty() ? "?" : myNick.substring(0, 1).toUpperCase());
+            avatarText.setTextColor(0xFFF5F7FF);
+            avatarText.setTextSize(12);
+            avatarText.setGravity(Gravity.CENTER);
+            avatarText.setBackgroundResource(R.drawable.bg_input);
+            LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+            abLp.setMargins(dp(8), 0, 0, 0);
+            row.addView(avatarText, abLp);
+
+            // 点击自己的头像也查看资料
+            if (msg.senderUid > 0) {
+                final int sUid = msg.senderUid;
+                avatarText.setOnClickListener(v -> showUserProfile(sUid));
+            }
+
+            if (myAvatar != null && !myAvatar.isEmpty()) {
+                ImageView avatarImg = new ImageView(activity);
+                avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                avatarImg.setVisibility(View.GONE);
+                row.addView(avatarImg, row.indexOfChild(avatarText), abLp);
+                // 头像 ImageView 也绑点击
+                if (msg.senderUid > 0) {
+                    final int sUid = msg.senderUid;
+                    avatarImg.setOnClickListener(v -> showUserProfile(sUid));
+                }
+                loadAvatarInto(myAvatar, avatarImg, avatarText);
+            }
+
+            wrapper.addView(row);
+        } else {
+            // 他人消息：头像 + 昵称 + 气泡
+            LinearLayout row = new LinearLayout(activity);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.TOP);
+
+            // 头像（从左到右排列在 LinearLayout 中）
+            TextView avatarText = new TextView(activity);
+            String nick = msg.senderNickname != null ? msg.senderNickname : "?";
+            avatarText.setText(nick.isEmpty() ? "?" : nick.substring(0, 1).toUpperCase());
+            avatarText.setTextColor(0xFFF5F7FF);
+            avatarText.setTextSize(12);
+            avatarText.setGravity(Gravity.CENTER);
+            avatarText.setBackgroundResource(R.drawable.bg_input);
+            LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+            abLp.setMargins(0, 0, dp(8), 0);
+            row.addView(avatarText, abLp);
+
+            if (msg.senderAvatar != null && !msg.senderAvatar.isEmpty()) {
+                ImageView avatarImg = new ImageView(activity);
+                avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                avatarImg.setVisibility(View.GONE);
+                LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+                imLp.setMargins(0, 0, dp(8), 0);
+                row.addView(avatarImg, 0, imLp); // 插到最前面覆盖文字
+                // 头像 ImageView 也绑点击
+                if (msg.senderUid > 0) {
+                    final int sUid = msg.senderUid;
+                    avatarImg.setOnClickListener(v -> showUserProfile(sUid));
+                }
+                loadAvatarInto(msg.senderAvatar, avatarImg, avatarText);
+            }
+            // 点击头像查看资料（文字头像兜底）
+            if (msg.senderUid > 0) {
+                final int sUid = msg.senderUid;
+                avatarText.setOnClickListener(v -> showUserProfile(sUid));
+            }
+
+            // 右侧：昵称 + 气泡
+            LinearLayout rightCol = new LinearLayout(activity);
+            rightCol.setOrientation(LinearLayout.VERTICAL);
+            rightCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+
+            // 昵称行（昵称 + 管理员标识）
+            LinearLayout nickRow = new LinearLayout(activity);
+            nickRow.setOrientation(LinearLayout.HORIZONTAL);
+            nickRow.setGravity(Gravity.CENTER_VERTICAL);
+            nickRow.setPadding(dp(2), 0, 0, dp(2));
+
+            TextView nickView = new TextView(activity);
+            nickView.setText(nick);
+            nickView.setTextColor(0xFF8AB4FF);
+            nickView.setTextSize(11);
+            nickRow.addView(nickView);
+
+            if (msg.senderIsAdmin) {
+                nickRow.addView(buildAdminBadge());
+            }
+            rightCol.addView(nickRow);
+
+            TextView bubble = new TextView(activity);
+            bubble.setText(msg.content);
+            bubble.setTextColor(0xFFF5F7FF);
+            bubble.setTextSize(13);
+            bubble.setLineSpacing(dp(2), 1.0f);
+            bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+            bubble.setBackgroundResource(R.drawable.bg_chat_bubble_friend);
+            LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
+            bubble.setTag("group_bubble");
+            rightCol.addView(bubble, bl);
+
+            TextView time = new TextView(activity);
+            time.setText(formatTime(msg.createdAt));
+            time.setTextColor(0x889AA4BF);
+            time.setTextSize(9);
+            time.setPadding(dp(2), dp(1), 0, 0);
+            rightCol.addView(time);
+
+            row.addView(rightCol);
+            wrapper.addView(row);
+        }
+
+        // 管理员长按：撤回/删除（绑定到气泡而非整个 wrapper，避免和头像点击冲突）
+        if (chatGroup != null && chatGroup.isAdmin() && msg.id > 0 && !msg.recalled) {
+            final GroupMessage fMsg = msg;
+            // 找到 wrapper 内的 bubble 并绑定长按
+            bindLongClickToBubble(wrapper, fMsg);
+        }
+
+        // 管理员模式下让气泡可长按
+        if (chatGroup != null && chatGroup.isAdmin()) {
+            wrapper.setLongClickable(false); // wrapper 本身不拦截长按
+        }
+
+        return wrapper;
+    }
+
+    private void showGroupMsgManageOptions(GroupMessage msg) {
+        LinearLayout menuRoot = new LinearLayout(activity);
+        menuRoot.setOrientation(LinearLayout.VERTICAL);
+        menuRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        Button recallBtn = menuButton("撤回消息", v -> {
+            dismissOptionDialog();
+            doManageGroupMessage(msg, "recall");
+        });
+        menuRoot.addView(recallBtn);
+
+        Button deleteBtn = new Button(activity);
+        deleteBtn.setText("删除消息");
+        deleteBtn.setTextColor(0xFFFF6B6B);
+        deleteBtn.setTextSize(13);
+        deleteBtn.setBackgroundResource(R.drawable.bg_input);
+        deleteBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
+        deleteBtn.setOnClickListener(v -> {
+            dismissOptionDialog();
+            doManageGroupMessage(msg, "delete");
+        });
+        menuRoot.addView(deleteBtn);
+
+        showOptionDialog("消息管理", menuRoot);
+    }
+
+    private void doManageGroupMessage(GroupMessage msg, String action) {
+        AppExecutors.runOnIo(() -> {
+            try {
+                boolean ok = apiClient.manageGroupMessage(msg.id, action);
+                uiHandler.post(() -> {
+                    if (ok) {
+                        Toast.makeText(activity,
+                                "recall".equals(action) ? "已撤回" : "已删除",
+                                Toast.LENGTH_SHORT).show();
+                        // 重新加载当前群聊
+                        if (chatGroup != null) showGroupChatView(chatGroup);
+                    } else {
+                        Toast.makeText(activity, "操作失败", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() ->
+                        Toast.makeText(activity, "操作失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    private void sendGroupMessage() {
+        if (chatGroup == null || groupChatInput == null) return;
+        String content = groupChatInput.getText().toString().trim();
+        if (content.isEmpty()) return;
+        groupChatInput.setText("");
+        final String msgContent = content;
+
+        // 乐观 UI
+        GroupMessage local = new GroupMessage();
+        local.content = msgContent;
+        local.isMine = true;
+        local.senderNickname = getMyNickname();
+        local.senderAvatar = getMyAvatar();
+        local.senderUid = getMyUid();
+        local.senderIsAdmin = chatGroup != null && chatGroup.isAdmin();
+        local.createdAt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
+        groupMessageList.addView(buildGroupMessageBubble(local));
+        scrollGroupToBottom();
+
+        AppExecutors.runOnIo(() -> {
+            try {
+                GroupMessage sent = apiClient.sendGroupMessage(chatGroup.id, msgContent);
+                uiHandler.post(() -> {
+                    if (sent.id > groupMaxMessageId) groupMaxMessageId = sent.id;
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() ->
+                        Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    private void startGroupPolling() {
+        stopGroupPolling();
+        groupPollFuture = AppExecutors.scheduled().scheduleAtFixedRate(() -> {
+            if (chatGroup == null || dialog == null || !dialog.isShowing()) {
+                stopGroupPolling();
+                return;
+            }
+            try {
+                SocialApiClient.GroupPollResult result = apiClient.pollGroupMessages(chatGroup.id, groupMaxMessageId);
+                List<GroupMessage> newMsgs = result.messages;
+                uiHandler.post(() -> {
+                    if (!newMsgs.isEmpty()) {
+                        for (GroupMessage msg : newMsgs) {
+                            if (msg.id > groupMaxMessageId) {
+                                // 跳过自己发的（乐观 UI 已展示）
+                                if (!msg.isMine) {
+                                    groupMessageList.addView(buildGroupMessageBubble(msg));
+                                }
+                                groupMaxMessageId = msg.id;
+                            }
+                        }
+                        scrollGroupToBottom();
+                    }
+                    // 更新在线人数
+                    updateOnlineCount(result.onlineCount);
+                });
+            } catch (Throwable ignored) {}
+        }, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void stopGroupPolling() {
+        if (groupPollFuture != null) { groupPollFuture.cancel(false); groupPollFuture = null; }
+    }
+
+    private void scrollGroupToBottom() {
+        if (groupMessageList == null) return;
+        groupMessageList.post(() -> {
+            View parent = (View) groupMessageList.getParent();
+            if (parent != null) parent.scrollTo(0, groupMessageList.getHeight());
+        });
+    }
+
     // ==================== 添加好友 ====================
 
     private void showAddFriendView() {
+        currentView = VIEW_ADD_FRIEND;
         titleBar.setText("添加好友");
         backButton.setVisibility(View.VISIBLE);
         resetContent(true);
@@ -859,6 +1526,8 @@ public class FriendsChatDialog {
     // ==================== 用户资料 ====================
 
     private void showUserProfile(int uid) {
+        viewBeforeProfile = currentView;
+        currentView = VIEW_PROFILE;
         titleBar.setText("用户资料");
         backButton.setVisibility(View.VISIBLE);
         resetContent(true);
@@ -1086,6 +1755,113 @@ public class FriendsChatDialog {
                     contentContainer.addView(buildRecentGameItem(title, playTime, lastPlayedAt, i));
                 } catch (Throwable ignored) {}
             }
+        }
+
+        // ====== 好友操作按钮（如果查看的不是自己） ======
+        int myUid = getMyUid();
+        if (uid != myUid || (myUid == 0)) {
+            String friendStatus = profile.optString("friendStatus", "none");
+            String friendDirection = profile.optString("friendDirection", "");
+
+            LinearLayout actionBar = new LinearLayout(activity);
+            actionBar.setOrientation(LinearLayout.HORIZONTAL);
+            actionBar.setGravity(Gravity.CENTER);
+            actionBar.setPadding(dp(4), dp(8), dp(4), dp(4));
+            LinearLayout.LayoutParams actLp = new LinearLayout.LayoutParams(-1, -2);
+            actLp.setMargins(0, dp(8), 0, 0);
+            actionBar.setLayoutParams(actLp);
+
+            if ("accepted".equals(friendStatus)) {
+                TextView doneLabel = new TextView(activity);
+                doneLabel.setText("✓ 已是好友");
+                doneLabel.setTextColor(0xFF34C759);
+                doneLabel.setTextSize(13);
+                doneLabel.setGravity(Gravity.CENTER);
+                doneLabel.setPadding(dp(16), dp(10), dp(16), dp(10));
+                doneLabel.setBackgroundResource(R.drawable.bg_input);
+                actionBar.addView(doneLabel, new LinearLayout.LayoutParams(-2, -2));
+            } else if ("pending".equals(friendStatus)) {
+                if ("received".equals(friendDirection)) {
+                    // 对方发来的请求，可以接受
+                    Button acceptBtn = new Button(activity);
+                    acceptBtn.setText("接受好友请求");
+                    acceptBtn.setTextColor(0xFFFFFFFF);
+                    acceptBtn.setTextSize(13);
+                    acceptBtn.setBackgroundResource(R.drawable.bg_social_button);
+                    acceptBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
+                    acceptBtn.setOnClickListener(v -> {
+                        v.setEnabled(false);
+                        ((Button) v).setText("处理中...");
+                        AppExecutors.runOnIo(() -> {
+                            try {
+                                boolean ok = apiClient.acceptFriendRequestByUid(uid);
+                                uiHandler.post(() -> {
+                                    if (ok) {
+                                        Toast.makeText(activity, "已添加好友", Toast.LENGTH_SHORT).show();
+                                        showUserProfile(uid); // 刷新
+                                    } else {
+                                        Toast.makeText(activity, "操作失败", Toast.LENGTH_SHORT).show();
+                                        v.setEnabled(true);
+                                        ((Button) v).setText("接受好友请求");
+                                    }
+                                });
+                            } catch (Throwable t) {
+                                uiHandler.post(() -> {
+                                    Toast.makeText(activity, "操作失败: " + t.getMessage(), Toast.LENGTH_SHORT).show();
+                                    v.setEnabled(true);
+                                    ((Button) v).setText("接受好友请求");
+                                });
+                            }
+                        });
+                    });
+                    actionBar.addView(acceptBtn, new LinearLayout.LayoutParams(-2, -2));
+                } else {
+                    // 自己发的请求，等待中
+                    TextView pendingLabel = new TextView(activity);
+                    pendingLabel.setText("⏳ 等待对方确认");
+                    pendingLabel.setTextColor(0xFF9AA4BF);
+                    pendingLabel.setTextSize(13);
+                    pendingLabel.setGravity(Gravity.CENTER);
+                    pendingLabel.setPadding(dp(16), dp(10), dp(16), dp(10));
+                    pendingLabel.setBackgroundResource(R.drawable.bg_input);
+                    actionBar.addView(pendingLabel, new LinearLayout.LayoutParams(-2, -2));
+                }
+            } else {
+                // 陌生人，显示添加好友按钮
+                Button addBtn = new Button(activity);
+                addBtn.setText("＋ 添加好友");
+                addBtn.setTextColor(0xFFFFFFFF);
+                addBtn.setTextSize(13);
+                addBtn.setBackgroundResource(R.drawable.bg_social_button);
+                addBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
+                addBtn.setOnClickListener(v -> {
+                    v.setEnabled(false);
+                    ((Button) v).setText("发送中...");
+                    AppExecutors.runOnIo(() -> {
+                        try {
+                            boolean ok = apiClient.sendFriendRequest(String.valueOf(uid));
+                            uiHandler.post(() -> {
+                                if (ok) {
+                                    Toast.makeText(activity, "好友请求已发送", Toast.LENGTH_SHORT).show();
+                                    showUserProfile(uid); // 刷新
+                                } else {
+                                    Toast.makeText(activity, "发送失败", Toast.LENGTH_SHORT).show();
+                                    v.setEnabled(true);
+                                    ((Button) v).setText("＋ 添加好友");
+                                }
+                            });
+                        } catch (Throwable t) {
+                            uiHandler.post(() -> {
+                                Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show();
+                                v.setEnabled(true);
+                                ((Button) v).setText("＋ 添加好友");
+                            });
+                        }
+                    });
+                });
+                actionBar.addView(addBtn, new LinearLayout.LayoutParams(-2, -2));
+            }
+            contentContainer.addView(actionBar);
         }
 
         // 底部留白
@@ -1352,6 +2128,7 @@ public class FriendsChatDialog {
     }
 
     private void showRequestsView() {
+        currentView = VIEW_REQUESTS;
         titleBar.setText("好友请求");
         backButton.setVisibility(View.VISIBLE);
         resetContent(true);
@@ -1526,6 +2303,7 @@ public class FriendsChatDialog {
     private void stopAllPolling() {
         stopPolling();
         stopChatPolling();
+        stopGroupPolling();
     }
 
     // ==================== 工具方法 ====================
@@ -1534,6 +2312,28 @@ public class FriendsChatDialog {
         SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         String t = p.getString(KEY_AUTH_ACCESS_TOKEN, "");
         return t != null && !t.trim().isEmpty();
+    }
+
+    /** 获取当前登录用户的昵称 */
+    private String getMyNickname() {
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return p.getString(KEY_AUTH_NICKNAME, "");
+    }
+
+    /** 获取当前登录用户的头像 URL */
+    private String getMyAvatar() {
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return p.getString(KEY_AUTH_AVATAR, "");
+    }
+
+    /** 获取当前登录用户的 UID */
+    private int getMyUid() {
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        try {
+            return Integer.parseInt(p.getString(KEY_AUTH_UID, "0"));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private int dp(int value) {
