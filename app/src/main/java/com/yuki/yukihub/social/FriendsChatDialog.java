@@ -50,6 +50,7 @@ public class FriendsChatDialog {
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private Dialog dialog;
+    private Dialog optionDialog;
     private LinearLayout contentHost;
     private LinearLayout contentContainer;
     private TextView titleBar;
@@ -278,11 +279,20 @@ public class FriendsChatDialog {
         nameRow.setOrientation(LinearLayout.HORIZONTAL);
         nameRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView name = new TextView(activity);
-        name.setText(friend.nickname);
+        name.setText(friend.displayName());
         name.setTextColor(0xFFF5F7FF);
         name.setTextSize(14);
         name.setTypeface(null, android.graphics.Typeface.BOLD);
         nameRow.addView(name);
+
+        // 如果有备注，在昵称后面显示小字原名
+        if (friend.note != null && !friend.note.trim().isEmpty()) {
+            TextView origName = new TextView(activity);
+            origName.setText(" (" + friend.nickname + ")");
+            origName.setTextColor(0xFF7A8599);
+            origName.setTextSize(11);
+            nameRow.addView(origName);
+        }
 
         View dot = new View(activity);
         int d = dp(7);
@@ -349,9 +359,9 @@ public class FriendsChatDialog {
         }
 
         row.setOnClickListener(v -> showChatView(friend));
-        // 长按查看用户资料
+        // 长按弹出选项菜单（查看资料/备注/删除）
         row.setOnLongClickListener(v -> {
-            showUserProfile(friend.uid);
+            showFriendOptions(friend);
             return true;
         });
         return row;
@@ -706,6 +716,141 @@ public class FriendsChatDialog {
                     Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show(); });
             }
         });
+    }
+
+    // ==================== 好友操作菜单 ====================
+
+    private void showFriendOptions(FriendInfo friend) {
+        LinearLayout menuRoot = new LinearLayout(activity);
+        menuRoot.setOrientation(LinearLayout.VERTICAL);
+        menuRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        Button profileBtn = menuButton("查看资料", v -> {
+            dismissOptionDialog();
+            showUserProfile(friend.uid);
+        });
+        menuRoot.addView(profileBtn);
+
+        Button noteBtn = menuButton("设置备注", v -> {
+            dismissOptionDialog();
+            showNoteDialog(friend);
+        });
+        menuRoot.addView(noteBtn);
+
+        Button deleteBtn = new Button(activity);
+        deleteBtn.setText("删除好友");
+        deleteBtn.setTextColor(0xFFFF6B6B);
+        deleteBtn.setTextSize(13);
+        deleteBtn.setBackgroundResource(R.drawable.bg_input);
+        deleteBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
+        deleteBtn.setOnClickListener(v -> {
+            dismissOptionDialog();
+            confirmDeleteFriend(friend);
+        });
+        menuRoot.addView(deleteBtn);
+
+        showOptionDialog("好友操作", menuRoot);
+    }
+
+    private void showNoteDialog(FriendInfo friend) {
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(4), dp(6), dp(4), dp(4));
+
+        TextView hint = new TextView(activity);
+        hint.setText("为 " + friend.nickname + " 设置备注（最多50字）");
+        hint.setTextColor(0xFF9AA4BF);
+        hint.setTextSize(12);
+        hint.setPadding(0, 0, 0, dp(6));
+        root.addView(hint);
+
+        EditText input = new EditText(activity);
+        input.setText(friend.note != null ? friend.note : "");
+        input.setHint("输入备注名");
+        input.setTextColor(0xFFF5F7FF);
+        input.setHintTextColor(0x889AA4BF);
+        input.setBackgroundResource(R.drawable.bg_input);
+        input.setPadding(dp(10), dp(6), dp(10), dp(6));
+        root.addView(input, new LinearLayout.LayoutParams(-1, dp(42)));
+
+        Button saveBtn = socialButton("保存", v -> {
+            String note = input.getText() == null ? "" : input.getText().toString().trim();
+            dismissOptionDialog();
+            AppExecutors.runOnIo(() -> {
+                try {
+                    boolean ok = apiClient.setFriendNote(friend.id, note);
+                    uiHandler.post(() -> {
+                        if (ok) {
+                            friend.note = note;
+                            showFriendList();
+                            Toast.makeText(activity, "备注已保存", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(activity, "保存失败", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Throwable t) {
+                    uiHandler.post(() -> Toast.makeText(activity, "保存失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            });
+        });
+        root.addView(saveBtn, new LinearLayout.LayoutParams(-1, dp(38)));
+
+        showOptionDialog("设置备注", root);
+    }
+
+    private void confirmDeleteFriend(FriendInfo friend) {
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(4), dp(6), dp(4), dp(4));
+
+        TextView msg = new TextView(activity);
+        msg.setText("确定要删除好友「" + friend.displayName() + "」吗？\n删除后聊天记录不会丢失，但好友关系将永久解除。");
+        msg.setTextColor(0xFFF5F7FF);
+        msg.setTextSize(13);
+        msg.setLineSpacing(dp(3), 1.0f);
+        msg.setPadding(0, 0, 0, dp(8));
+        root.addView(msg);
+
+        LinearLayout btnRow = new LinearLayout(activity);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button cancelBtn = socialButton("取消", v -> dismissOptionDialog());
+        cancelBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dp(38), 1));
+        btnRow.addView(cancelBtn);
+
+        View sp = new View(activity);
+        sp.setLayoutParams(new LinearLayout.LayoutParams(dp(8), 0));
+        btnRow.addView(sp);
+
+        Button confirmBtn = new Button(activity);
+        confirmBtn.setText("确认删除");
+        confirmBtn.setTextColor(0xFFFF6B6B);
+        confirmBtn.setTextSize(12);
+        confirmBtn.setBackgroundResource(R.drawable.bg_input);
+        confirmBtn.setPadding(dp(6), 0, dp(6), 0);
+        confirmBtn.setOnClickListener(v -> {
+            dismissOptionDialog();
+            AppExecutors.runOnIo(() -> {
+                try {
+                    boolean ok = apiClient.removeFriend(friend.id);
+                    uiHandler.post(() -> {
+                        if (ok) {
+                            Toast.makeText(activity, "已删除好友", Toast.LENGTH_SHORT).show();
+                            showFriendList();
+                        } else {
+                            Toast.makeText(activity, "删除失败", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Throwable t) {
+                    uiHandler.post(() -> Toast.makeText(activity, "删除失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            });
+        });
+        confirmBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dp(38), 1));
+        btnRow.addView(confirmBtn);
+
+        root.addView(btnRow);
+        showOptionDialog("删除好友", root);
     }
 
     // ==================== 好友请求 ====================
@@ -1429,6 +1574,60 @@ public class FriendsChatDialog {
         btn.setPadding(dp(6), 0, dp(6), 0);
         btn.setOnClickListener(listener);
         return btn;
+    }
+
+    /** 菜单按钮（带深色背景，用于选项弹窗） */
+    private Button menuButton(String text, View.OnClickListener listener) {
+        Button btn = new Button(activity);
+        btn.setText(text);
+        btn.setTextColor(0xFFF5F7FF);
+        btn.setTextSize(13);
+        btn.setBackgroundResource(R.drawable.bg_input);
+        btn.setPadding(dp(10), dp(8), dp(10), dp(8));
+        btn.setOnClickListener(listener);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(0, 0, 0, dp(4));
+        btn.setLayoutParams(lp);
+        return btn;
+    }
+
+    /** 显示选项弹窗 */
+    private void showOptionDialog(String title, View content) {
+        dismissOptionDialog();
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.bg_social_panel);
+        root.setPadding(dp(10), dp(8), dp(10), dp(8));
+        root.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+
+        TextView titleView = new TextView(activity);
+        titleView.setText(title);
+        titleView.setTextColor(0xFFF5F7FF);
+        titleView.setTextSize(15);
+        titleView.setTypeface(null, android.graphics.Typeface.BOLD);
+        titleView.setPadding(0, 0, 0, dp(6));
+        root.addView(titleView);
+
+        root.addView(content);
+
+        optionDialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        optionDialog.setContentView(root);
+        optionDialog.setCancelable(true);
+        if (optionDialog.getWindow() != null) {
+            optionDialog.getWindow().setBackgroundDrawableResource(R.drawable.bg_social_panel);
+            optionDialog.getWindow().setLayout(
+                    (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.65f),
+                    -2);
+        }
+        optionDialog.show();
+    }
+
+    /** 关闭选项弹窗 */
+    private void dismissOptionDialog() {
+        if (optionDialog != null && optionDialog.isShowing()) {
+            try { optionDialog.dismiss(); } catch (Throwable ignored) {}
+            optionDialog = null;
+        }
     }
 
     private void showError(String msg, Runnable retry) {

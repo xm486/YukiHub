@@ -154,6 +154,7 @@ public class SocialApiClient {
             info.activity = f.optString("activity", "");
             info.unreadCount = f.optInt("unreadCount", 0);
             info.lastHeartbeat = f.optString("lastHeartbeat", "");
+            info.note = f.optString("note", "");
             friends.add(info);
         }
         return friends;
@@ -202,6 +203,16 @@ public class SocialApiClient {
         JSONObject body = new JSONObject();
         body.put("friendId", friendId);
         String resp = doPost("/friends/remove", body);
+        JSONObject root = new JSONObject(resp);
+        return root.optBoolean("success", false);
+    }
+
+    /** 设置好友备注 */
+    public boolean setFriendNote(String friendId, String note) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("friendId", friendId);
+        body.put("note", note == null ? "" : note);
+        String resp = doPost("/friends/note", body);
         JSONObject root = new JSONObject(resp);
         return root.optBoolean("success", false);
     }
