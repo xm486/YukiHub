@@ -154,6 +154,7 @@ public class SocialApiClient {
             info.activity = f.optString("activity", "");
             info.unreadCount = f.optInt("unreadCount", 0);
             info.lastHeartbeat = f.optString("lastHeartbeat", "");
+            info.friendSince = f.optString("friendSince", "");
             info.note = f.optString("note", "");
             friends.add(info);
         }

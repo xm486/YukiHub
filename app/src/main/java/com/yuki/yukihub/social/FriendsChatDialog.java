@@ -343,6 +343,7 @@ public class FriendsChatDialog {
             st.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(st);
         }
+
         row.addView(col);
 
         // 未读红点
@@ -956,6 +957,19 @@ public class FriendsChatDialog {
         statusText.setTextSize(12);
         statusRow.addView(statusText);
         infoCol.addView(statusRow);
+
+        // 成为好友时间（Steam 风格）
+        String friendSince = profile.optString("friendSince", "");
+        if (friendSince != null && !friendSince.isEmpty()) {
+            TextView sinceView = new TextView(activity);
+            String sinceStr = formatFriendSince(friendSince);
+            sinceView.setText("成为好友 · " + sinceStr);
+            sinceView.setTextColor(0xFF6A7485);
+            sinceView.setTextSize(11);
+            sinceView.setPadding(0, dp(2), 0, 0);
+            infoCol.addView(sinceView);
+        }
+
         headerRow.addView(infoCol);
         contentContainer.addView(headerRow);
 
@@ -1257,6 +1271,33 @@ public class FriendsChatDialog {
             java.util.Date date = fmt.parse(heartbeat);
             if (date == null) return "";
             return formatRelativeTime(date.getTime());
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 将好友添加时间（YYYY-MM-DD HH:MM:SS）转为友好显示 */
+    private String formatFriendSince(String since) {
+        if (since == null || since.trim().isEmpty()) return "";
+        try {
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
+            java.util.Date date = fmt.parse(since);
+            if (date == null) return "";
+            long now = System.currentTimeMillis();
+            long diff = now - date.getTime();
+            if (diff < 0) diff = 0;
+            long days = diff / (24 * 60 * 60 * 1000);
+            if (days > 365) {
+                int years = (int)(days / 365);
+                return years + " 年";
+            } else if (days > 30) {
+                int months = (int)(days / 30);
+                return months + " 个月";
+            } else if (days >= 1) {
+                return (int)days + " 天";
+            } else {
+                return "今天";
+            }
         } catch (Throwable t) {
             return "";
         }
