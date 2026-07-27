@@ -153,6 +153,7 @@ public class SocialApiClient {
             info.status = f.optString("status", "offline");
             info.activity = f.optString("activity", "");
             info.unreadCount = f.optInt("unreadCount", 0);
+            info.lastHeartbeat = f.optString("lastHeartbeat", "");
             friends.add(info);
         }
         return friends;

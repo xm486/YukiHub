@@ -304,6 +304,26 @@ public class FriendsChatDialog {
             st.setMaxLines(1);
             st.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(st);
+        } else if (friend.isOffline() && friend.lastHeartbeat != null && !friend.lastHeartbeat.isEmpty()) {
+            // Steam 风格：离线好友显示最后在线时间
+            String lastSeen = formatHeartbeatRelative(friend.lastHeartbeat);
+            if (lastSeen != null && !lastSeen.isEmpty()) {
+                TextView st = new TextView(activity);
+                st.setText("最后在线 " + lastSeen);
+                st.setTextColor(0xFF7A8599);
+                st.setTextSize(11);
+                st.setMaxLines(1);
+                st.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                col.addView(st);
+            } else if (friend.signature != null && !friend.signature.isEmpty()) {
+                TextView st = new TextView(activity);
+                st.setText(friend.signature);
+                st.setTextColor(0xFF9AA4BF);
+                st.setTextSize(11);
+                st.setMaxLines(1);
+                st.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                col.addView(st);
+            }
         } else if (friend.signature != null && !friend.signature.isEmpty()) {
             TextView st = new TextView(activity);
             st.setText(friend.signature);
@@ -718,106 +738,389 @@ public class FriendsChatDialog {
         String currentAct = profile.optString("activity", "");
         int totalGames = profile.optInt("totalGames", 0);
         int totalPlayTime = profile.optInt("totalPlayTime", 0);
+        JSONArray recentGames = profile.optJSONArray("recentGames");
 
-        // 头像
+        // ====== 顶部 Banner 区（Steam 风格） ======
+        // 用一个深色渐变背景块作为头部 banner
+        View banner = new View(activity);
+        banner.setBackgroundResource(R.drawable.bg_profile_card);
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(-1, dp(6));
+        bannerLp.setMargins(0, 0, 0, dp(10));
+        contentContainer.addView(banner, bannerLp);
+
+        // ====== 头像 + 基本信息（横向排列） ======
+        LinearLayout headerRow = new LinearLayout(activity);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(dp(4), dp(4), dp(4), dp(8));
+
+        // 头像（带蓝色环形边框，Steam 风格）
         FrameLayout avatarBox = new FrameLayout(activity);
-        avatarBox.setBackgroundResource(R.drawable.bg_input);
-        LinearLayout.LayoutParams abl = new LinearLayout.LayoutParams(dp(64), dp(64));
-        abl.setMargins(0, 0, 0, dp(8));
-        abl.gravity = Gravity.CENTER_HORIZONTAL;
-        avatarBox.setLayoutParams(abl);
+        avatarBox.setBackgroundResource(R.drawable.bg_profile_avatar_ring);
+        LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(dp(72), dp(72));
+        avatarLp.setMargins(0, 0, dp(14), 0);
+        avatarBox.setLayoutParams(avatarLp);
 
         TextView avatarText = new TextView(activity);
         avatarText.setText(nickname.isEmpty() ? "?" : nickname.substring(0, 1).toUpperCase());
         avatarText.setTextColor(0xFFF5F7FF);
-        avatarText.setTextSize(24);
+        avatarText.setTextSize(26);
         avatarText.setGravity(Gravity.CENTER);
         avatarBox.addView(avatarText, new FrameLayout.LayoutParams(-1, -1));
 
-        // 加载头像
+        ImageView avatarImg = null;
         if (!avatarUrl.isEmpty()) {
-            try {
-                ImageView avatarImg = new ImageView(activity);
-                avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                avatarBox.addView(avatarImg, new FrameLayout.LayoutParams(-1, -1));
-                loadAvatarInto(avatarUrl, avatarImg, avatarText);
-            } catch (Throwable ignored) {}
+            avatarImg = new ImageView(activity);
+            avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            avatarImg.setVisibility(View.GONE);
+            avatarBox.addView(avatarImg, new FrameLayout.LayoutParams(-1, -1));
+            loadAvatarInto(avatarUrl, avatarImg, avatarText);
         }
-        contentContainer.addView(avatarBox);
+        headerRow.addView(avatarBox);
+
+        // 右侧信息列
+        LinearLayout infoCol = new LinearLayout(activity);
+        infoCol.setOrientation(LinearLayout.VERTICAL);
+        infoCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
 
         // 昵称
         TextView nameView = new TextView(activity);
         nameView.setText(nickname);
         nameView.setTextColor(0xFFF5F7FF);
-        nameView.setTextSize(20);
+        nameView.setTextSize(19);
         nameView.setTypeface(null, android.graphics.Typeface.BOLD);
-        nameView.setGravity(Gravity.CENTER);
-        contentContainer.addView(nameView);
+        nameView.setMaxLines(1);
+        nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        infoCol.addView(nameView);
 
-        // UID 和状态
-        TextView uidView = new TextView(activity);
-        uidView.setText("UID " + uid + "  ·  " + statusLabel(status));
-        uidView.setTextColor(0xFF9AA4BF);
-        uidView.setTextSize(14);
-        uidView.setGravity(Gravity.CENTER);
-        uidView.setPadding(0, dp(4), 0, dp(8));
-        contentContainer.addView(uidView);
+        // 状态行（在线状态点 + 文字 + UID）
+        LinearLayout statusRow = new LinearLayout(activity);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        statusRow.setPadding(0, dp(3), 0, 0);
 
-        // 签名
-        if (!signature.isEmpty()) {
-            TextView sigView = new TextView(activity);
-            sigView.setText(signature);
-            sigView.setTextColor(0xFF9AA4BF);
-            sigView.setTextSize(13);
-            sigView.setGravity(Gravity.CENTER);
-            sigView.setPadding(0, 0, 0, dp(8));
-            contentContainer.addView(sigView);
-        }
+        View statusDot = new View(activity);
+        statusDot.setBackgroundResource(presenceDotRes(status));
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(8), dp(8));
+        dotLp.setMargins(0, 0, dp(5), 0);
+        statusRow.addView(statusDot, dotLp);
 
-        // 分割线
-        contentContainer.addView(divider());
+        TextView statusText = new TextView(activity);
+        statusText.setText(statusLabel(status) + "  ·  UID " + uid);
+        statusText.setTextColor(0xFF9AA4BF);
+        statusText.setTextSize(12);
+        statusRow.addView(statusText);
+        infoCol.addView(statusRow);
+        headerRow.addView(infoCol);
+        contentContainer.addView(headerRow);
 
-        // 活动（Steam 风格：在线时绿色显示）
+        // ====== 正在游戏（Steam 风格绿色条幅） ======
         if (!currentAct.isEmpty() && "online".equals(status)) {
-            TextView actView = new TextView(activity);
-            actView.setText(currentAct);
-            actView.setTextColor(0xFF90BA3C);
-            actView.setTextSize(13);
-            actView.setGravity(Gravity.CENTER);
-            actView.setPadding(0, dp(8), 0, dp(4));
-            contentContainer.addView(actView);
+            LinearLayout playingBar = new LinearLayout(activity);
+            playingBar.setOrientation(LinearLayout.HORIZONTAL);
+            playingBar.setGravity(Gravity.CENTER_VERTICAL);
+            playingBar.setBackgroundResource(R.drawable.bg_profile_card);
+            playingBar.setPadding(dp(12), dp(8), dp(12), dp(8));
+            LinearLayout.LayoutParams playingLp = new LinearLayout.LayoutParams(-1, -2);
+            playingLp.setMargins(0, dp(4), 0, dp(4));
+            playingBar.setLayoutParams(playingLp);
+
+            // 绿色圆点
+            View playingDot = new View(activity);
+            playingDot.setBackgroundResource(R.drawable.bg_profile_dot_online);
+            playingDot.setLayoutParams(new LinearLayout.LayoutParams(dp(8), dp(8)));
+            ((LinearLayout.LayoutParams) playingDot.getLayoutParams()).setMargins(0, 0, dp(8), 0);
+            playingBar.addView(playingDot);
+
+            TextView playingText = new TextView(activity);
+            playingText.setText("正在游戏中");
+            playingText.setTextColor(0xFF90BA3C);
+            playingText.setTextSize(11);
+            playingText.setTypeface(null, android.graphics.Typeface.BOLD);
+            playingBar.addView(playingText);
+
+            View sp1 = new View(activity);
+            sp1.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1));
+            playingBar.addView(sp1);
+
+            TextView actText = new TextView(activity);
+            actText.setText(currentAct.trim());
+            actText.setTextColor(0xFFC4D49C);
+            actText.setTextSize(11);
+            actText.setMaxLines(1);
+            actText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            playingBar.addView(actText);
+
+            contentContainer.addView(playingBar);
         }
 
-        // 游戏统计
+        // ====== 用户简介（Bio）区块 —— Steam 风格 Summary ======
+        if (!signature.isEmpty()) {
+            contentContainer.addView(divider());
+            TextView bioTitle = sectionLabel("个人简介");
+            bioTitle.setPadding(0, dp(8), 0, dp(4));
+            contentContainer.addView(bioTitle);
+
+            // 简介内容卡片
+            LinearLayout bioCard = new LinearLayout(activity);
+            bioCard.setOrientation(LinearLayout.VERTICAL);
+            bioCard.setBackgroundResource(R.drawable.bg_profile_card);
+            bioCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+            LinearLayout.LayoutParams bioLp = new LinearLayout.LayoutParams(-1, -2);
+            bioLp.setMargins(0, 0, 0, dp(4));
+            bioCard.setLayoutParams(bioLp);
+
+            TextView bioText = new TextView(activity);
+            bioText.setText(signature);
+            bioText.setTextColor(0xFFC0CCDB);
+            bioText.setTextSize(13);
+            bioText.setLineSpacing(dp(3), 1.0f);
+            bioCard.addView(bioText);
+
+            contentContainer.addView(bioCard);
+        }
+
+        // ====== 游戏统计（Bento 风格卡片） ======
+        TextView statsTitle = sectionLabel("游戏统计");
+        statsTitle.setPadding(0, dp(10), 0, dp(4));
+        contentContainer.addView(statsTitle);
+
         LinearLayout statsRow = new LinearLayout(activity);
         statsRow.setOrientation(LinearLayout.HORIZONTAL);
-        statsRow.setPadding(0, dp(8), 0, 0);
+        statsRow.setPadding(0, 0, 0, dp(4));
 
-        int h = dp(56);
-        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(0, h, 1);
-        sl.setMargins(0, 0, dp(6), 0);
+        // 游戏数卡片
+        LinearLayout gamesCard = buildStatCard("游戏库", String.valueOf(totalGames), "款");
+        LinearLayout.LayoutParams gcLp = new LinearLayout.LayoutParams(0, -2, 1);
+        gcLp.setMargins(0, 0, dp(6), 0);
+        statsRow.addView(gamesCard, gcLp);
 
-        TextView gamesStat = new TextView(activity);
-        gamesStat.setText(totalGames + "\n🎮 游戏数");
-        gamesStat.setGravity(Gravity.CENTER);
-        gamesStat.setTextColor(0xFFF5F7FF);
-        gamesStat.setTextSize(13);
-        gamesStat.setTypeface(null, android.graphics.Typeface.BOLD);
-        gamesStat.setBackgroundResource(R.drawable.bg_input);
-        statsRow.addView(gamesStat, sl);
-
-        TextView playStat = new TextView(activity);
+        // 游玩时长卡片
         int hours = totalPlayTime / 3600;
         int mins = (totalPlayTime % 3600) / 60;
-        playStat.setText((hours > 0 ? hours + "h " : "") + mins + "m\n◷ 游玩时长");
-        playStat.setGravity(Gravity.CENTER);
-        playStat.setTextColor(0xFFF5F7FF);
-        playStat.setTextSize(13);
-        playStat.setTypeface(null, android.graphics.Typeface.BOLD);
-        playStat.setBackgroundResource(R.drawable.bg_input);
-        statsRow.addView(playStat, new LinearLayout.LayoutParams(0, h, 1));
+        String playTimeStr;
+        if (hours > 0) {
+            // 显示如 "12.5h"
+            double h = totalPlayTime / 3600.0;
+            playTimeStr = String.format(java.util.Locale.getDefault(), "%.1f", h);
+        } else {
+            playTimeStr = mins + "m";
+        }
+        LinearLayout playCard = buildStatCard("总时长", playTimeStr, hours > 0 ? "h" : "");
+        statsRow.addView(playCard, new LinearLayout.LayoutParams(0, -2, 1));
 
         contentContainer.addView(statsRow);
+
+        // ====== 最近游玩记录（Steam Recent Activity 风格） ======
+        if (recentGames != null && recentGames.length() > 0) {
+            contentContainer.addView(divider());
+            TextView recentTitle = sectionLabel("最近游玩");
+            recentTitle.setPadding(0, dp(8), 0, dp(4));
+            contentContainer.addView(recentTitle);
+
+            for (int i = 0; i < recentGames.length(); i++) {
+                try {
+                    JSONObject g = recentGames.getJSONObject(i);
+                    String title = g.optString("title", "未命名游戏");
+                    int playTime = g.optInt("playTime", 0);
+                    long lastPlayedAt = g.optLong("lastPlayedAt", 0);
+                    contentContainer.addView(buildRecentGameItem(title, playTime, lastPlayedAt, i));
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        // 底部留白
+        View bottomSp = new View(activity);
+        bottomSp.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(20)));
+        contentContainer.addView(bottomSp);
+    }
+
+    /** 构建统计卡片（Bento 风格） */
+    private LinearLayout buildStatCard(String label, String value, String unit) {
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setBackgroundResource(R.drawable.bg_profile_card);
+        card.setPadding(dp(10), dp(14), dp(10), dp(14));
+
+        // 数字 + 单位 行
+        LinearLayout valRow = new LinearLayout(activity);
+        valRow.setOrientation(LinearLayout.HORIZONTAL);
+        valRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.BOTTOM);
+
+        TextView valText = new TextView(activity);
+        valText.setText(value);
+        valText.setTextColor(0xFFF5F7FF);
+        valText.setTextSize(26);
+        valText.setTypeface(null, android.graphics.Typeface.BOLD);
+        valRow.addView(valText);
+
+        if (unit != null && !unit.isEmpty()) {
+            TextView unitText = new TextView(activity);
+            unitText.setText(unit);
+            unitText.setTextColor(0xFF9AA4BF);
+            unitText.setTextSize(12);
+            unitText.setPadding(dp(2), 0, 0, dp(2));
+            valRow.addView(unitText);
+        }
+        card.addView(valRow);
+
+        // 标签
+        TextView labelText = new TextView(activity);
+        labelText.setText(label);
+        labelText.setTextColor(0xFF8995B0);
+        labelText.setTextSize(11);
+        labelText.setPadding(0, dp(2), 0, 0);
+        card.addView(labelText);
+
+        return card;
+    }
+
+    /** 构建最近游玩游戏项 */
+    private View buildRecentGameItem(String title, int playTimeSec, long lastPlayedAt, int index) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackgroundResource(R.drawable.bg_profile_card);
+        row.setPadding(dp(10), dp(10), dp(10), dp(10));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+        rlp.setMargins(0, 0, 0, dp(6));
+        row.setLayoutParams(rlp);
+
+        // 序号圆形
+        TextView numBadge = new TextView(activity);
+        numBadge.setText(String.valueOf(index + 1));
+        numBadge.setTextColor(0xFF8AB4FF);
+        numBadge.setTextSize(11);
+        numBadge.setTypeface(null, android.graphics.Typeface.BOLD);
+        numBadge.setGravity(Gravity.CENTER);
+        numBadge.setBackgroundResource(R.drawable.bg_profile_stat_chip);
+        LinearLayout.LayoutParams numLp = new LinearLayout.LayoutParams(dp(24), dp(24));
+        numLp.setMargins(0, 0, dp(10), 0);
+        row.addView(numBadge, numLp);
+
+        // 左侧色条（渐变效果用不同颜色）
+        View accent = new View(activity);
+        accent.setBackgroundColor(accentColorForGame(index));
+        LinearLayout.LayoutParams accLp = new LinearLayout.LayoutParams(dp(3), dp(28));
+        accLp.setMargins(0, 0, dp(10), 0);
+        row.addView(accent, accLp);
+
+        // 中间信息列
+        LinearLayout col = new LinearLayout(activity);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView titleView = new TextView(activity);
+        titleView.setText(title);
+        titleView.setTextColor(0xFFF5F7FF);
+        titleView.setTextSize(14);
+        titleView.setMaxLines(1);
+        titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(titleView);
+
+        LinearLayout metaRow = new LinearLayout(activity);
+        metaRow.setOrientation(LinearLayout.HORIZONTAL);
+        metaRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        // 游玩时长
+        TextView timeView = new TextView(activity);
+        timeView.setText(formatPlayTime(playTimeSec));
+        timeView.setTextColor(0xFF9AA4BF);
+        timeView.setTextSize(11);
+        metaRow.addView(timeView);
+
+        // 分隔点
+        if (lastPlayedAt > 0) {
+            View dot = new View(activity);
+            dot.setBackgroundColor(0xFF5A6A8B);
+            dot.setLayoutParams(new LinearLayout.LayoutParams(dp(2), dp(2)));
+            ((LinearLayout.LayoutParams) dot.getLayoutParams()).setMargins(dp(6), 0, dp(6), 0);
+            metaRow.addView(dot);
+
+            // 最后游玩时间
+            TextView lastView = new TextView(activity);
+            lastView.setText("最后游玩 " + formatRelativeTime(lastPlayedAt));
+            lastView.setTextColor(0xFF8995B0);
+            lastView.setTextSize(11);
+            metaRow.addView(lastView);
+        }
+        col.addView(metaRow);
+        row.addView(col);
+
+        // 右侧时长标签
+        if (playTimeSec > 0) {
+            TextView timeBadge = new TextView(activity);
+            timeBadge.setText(formatPlayTimeShort(playTimeSec));
+            timeBadge.setTextColor(0xFFC4D49C);
+            timeBadge.setTextSize(11);
+            timeBadge.setTypeface(null, android.graphics.Typeface.BOLD);
+            timeBadge.setPadding(dp(8), dp(3), dp(8), dp(3));
+            timeBadge.setBackgroundResource(R.drawable.bg_social_button);
+            row.addView(timeBadge);
+        }
+
+        return row;
+    }
+
+    /** 格式化游玩时长（秒 -> "Xh Ym"） */
+    private String formatPlayTime(int seconds) {
+        if (seconds <= 0) return "未游玩";
+        int h = seconds / 3600;
+        int m = (seconds % 3600) / 60;
+        if (h > 0) return h + " 小时" + (m > 0 ? " " + m + " 分" : "");
+        return m + " 分钟";
+    }
+
+    /** 格式化游玩时长短格式（秒 -> "Xh" 或 "Xm"） */
+    private String formatPlayTimeShort(int seconds) {
+        if (seconds <= 0) return "";
+        int h = seconds / 3600;
+        int m = (seconds % 3600) / 60;
+        if (h > 0) return h + "h";
+        return m + "m";
+    }
+
+    /** 格式化相对时间（时间戳毫秒 -> "X天前" 等） */
+    private String formatRelativeTime(long timestampMs) {
+        if (timestampMs <= 0) return "";
+        long now = System.currentTimeMillis();
+        long diff = now - timestampMs;
+        if (diff < 0) diff = 0;
+        long minutes = diff / (60 * 1000);
+        long hours = diff / (60 * 60 * 1000);
+        long days = diff / (24 * 60 * 60 * 1000);
+        if (days > 30) {
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault());
+            return fmt.format(new java.util.Date(timestampMs));
+        } else if (days >= 1) {
+            return days + " 天前";
+        } else if (hours >= 1) {
+            return hours + " 小时前";
+        } else if (minutes >= 1) {
+            return minutes + " 分钟前";
+        } else {
+            return "刚刚";
+        }
+    }
+
+    /** 将 last_heartbeat 字符串（YYYY-MM-DD HH:MM:SS）转为相对时间 */
+    private String formatHeartbeatRelative(String heartbeat) {
+        if (heartbeat == null || heartbeat.trim().isEmpty()) return "";
+        try {
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
+            java.util.Date date = fmt.parse(heartbeat);
+            if (date == null) return "";
+            return formatRelativeTime(date.getTime());
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 游戏列表色条颜色 */
+    private int accentColorForGame(int index) {
+        int[] colors = {0xFF6C8CFF, 0xFFB04AD9, 0xFF34C759, 0xFFFF9500, 0xFF64D2FF, 0xFFFF6B6B};
+        return colors[index % colors.length];
     }
 
     private String statusLabel(String status) {
