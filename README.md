@@ -32,7 +32,10 @@
 ## 特性
 
 - 多种导入方式：支持手动添加、批量导入文件夹以及从第三方平台迁移（如 <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>、<a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>、<a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>、<a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>）。
-- 支持添加、编辑、删除游戏条目
+- 类steam的社交在线服务，在这里，你可以与好友尽情享受Gal的快乐，并且可以像steam一样记录时长，并且查看好友的游玩动态，以及正在游玩的游戏
+- 支持鲲OAuth快捷登录
+- 拥有一个相对来说比较完整的ocr翻译功能，可以让你在游玩gal的途中，减少硬啃生肉游戏的烦恼，可以自选多种翻译api，并且支持高自由度的api自定义设置(原项目来自<a href="https://github.com/murangogo/MoeTranslate">MoeTranslate(萌译)</a>)
+- 支持添加、编辑、删除游戏条目，并且支持多选和一键清空
 - 集合了VNDB和bangumi的游戏数据资料源
 - 支持目录为空的游戏条目
   - 适用于安卓应用型游戏、外部程序、自定义启动项
@@ -288,8 +291,18 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 - Playnite
 - <a href="https://github.com/YuriSizuku/OnscripterYuri">OnscripterYuri</a>
 - <a href="https://github.com/hrydgard/ppsspp">ppsspp</a>
+- <a href="https://github.com/murangogo/MoeTranslate">MoeTranslate(萌译)</a>
 
 也感谢所有参与测试、反馈和建议的用户。
+
+---
+
+## 相关项目 / 生态 (Related Projects)
+
+- **[Rinne Mobile](https://github.com/Weiss-UltimateSavior/RinneMobile)**：Rinne Mobile是本项目的一个分支，主攻移动端竖屏ui，同时，这是一个 YukiHub 重构 开发 的版本，使用更加现代化的技术栈与MVVM架构，目前正在三次重构向kotlin迁移。
+- **[KamiGAL](https://github.com/ruizhishenri-commits/KamiGAL)**：无意间发现的一个YukiHub分支，感觉很有意思，便收录进来，好像还打算做ios版本，不过好像已经停止更新。令人感叹。
+
+感谢以上所有项目的开发者，他们的工作为这个生态增添了更多可能性。同时也希望未来这个生态里能有更出色的项目，这里也会收录。
 
 ---
 
