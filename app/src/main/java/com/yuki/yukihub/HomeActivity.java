@@ -93,8 +93,22 @@ public class HomeActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         applyImmersive();
-        setContentView(R.layout.activity_home);
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        // 从 MainActivity 导航栏回来时强制显示首页
+        boolean forceHome = getIntent().getBooleanExtra("force_home", false);
+
+        // 启动页选择（非强制回家时生效）
+        if (!forceHome) {
+            String startupPage = prefs.getString("startup_page", "home");
+            if ("library".equals(startupPage)) {
+                startActivity(new Intent(this, MainActivity.class));
+                finish();
+                return;
+            }
+        }
+
+        setContentView(R.layout.activity_home);
         repository = new GameRepository(this);
         bindViews();
         bindActions();
@@ -388,6 +402,44 @@ public class HomeActivity extends AppCompatActivity {
             @Override public void onStopTrackingTouch(SeekBar seekBar) { }
         });
 
+        // 启动页选择
+        TextView startupTitle = new TextView(this);
+        startupTitle.setText("\n启动页");
+        startupTitle.setTextColor(0xFFFFFFFF);
+        startupTitle.setTextSize(14);
+        startupTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(startupTitle);
+
+        String savedStartup = prefs == null ? "home" : prefs.getString("startup_page", "home");
+        final String[] startupOptions = {"home", "library", "bigscreen"};
+        String[] startupLabels = {"🏠 首页（默认）", "🎮 游戏库", "🖥 大屏模式（敬请期待）"};
+        final int[] startupChoice = {0};
+        for (int i = 0; i < startupOptions.length; i++) {
+            if (startupOptions[i].equals(savedStartup)) { startupChoice[0] = i; break; }
+        }
+
+        android.widget.RadioGroup startupGroup = new android.widget.RadioGroup(this);
+        startupGroup.setOrientation(android.widget.RadioGroup.VERTICAL);
+        final android.widget.RadioButton[] startupRadios = new android.widget.RadioButton[startupOptions.length];
+        for (int i = 0; i < startupOptions.length; i++) {
+            startupRadios[i] = new android.widget.RadioButton(this);
+            startupRadios[i].setText(startupLabels[i]);
+            startupRadios[i].setTextColor(0xFFFFFFFF);
+            startupRadios[i].setPadding(dp(4), dp(4), 0, dp(4));
+            if (i == startupChoice[0]) startupRadios[i].setChecked(true);
+            final int idx = i;
+            startupRadios[i].setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isChecked) {
+                    for (int j = 0; j < startupRadios.length; j++) {
+                        if (j != idx) startupRadios[j].setChecked(false);
+                    }
+                    startupChoice[0] = idx;
+                }
+            });
+            startupGroup.addView(startupRadios[i]);
+        }
+        root.addView(startupGroup);
+
         // 高级设置入口
         TextView advancedHint = new TextView(this);
         advancedHint.setText("\n扫描目录、引擎配置、背景、WebDAV 同步、账号管理等高级设置请进入游戏库设置页面。");
@@ -424,9 +476,16 @@ public class HomeActivity extends AppCompatActivity {
         dialog.setOnDismissListener(d -> applyImmersive());
         dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             if (prefs != null) {
+                // 大屏模式预留：选中了也不存（仍用 home），保持预留状态
+                String selectedStartup = startupOptions[startupChoice[0]];
+                if ("bigscreen".equals(selectedStartup)) {
+                    Toast.makeText(this, "大屏模式正在开发中，敬请期待", Toast.LENGTH_SHORT).show();
+                    selectedStartup = "home";
+                }
                 prefs.edit()
                         .putFloat("ui_font_scale", fontScaleValue[0])
                         .putFloat("ui_scale", uiScaleValue[0])
+                        .putString("startup_page", selectedStartup)
                         .apply();
             }
             Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();

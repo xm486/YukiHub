@@ -27,12 +27,21 @@ public class SocialApiClient {
     private static final String TAG = "SocialApiClient";
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
+    private static final String KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token";
+    private static final String KEY_AUTH_NICKNAME = "auth_nickname";
+    private static final String KEY_AUTH_AVATAR = "auth_avatar";
+    private static final String KEY_AUTH_UID = "auth_uid";
     private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
     private static final int CONNECT_TIMEOUT = 12_000;
     private static final int READ_TIMEOUT = 15_000;
 
     private final Context appContext;
     private int lastPendingRequests = 0;
+
+    /** 账号被禁用异常，上层应清除登录状态并提示用户 */
+    public static class AccountDisabledException extends RuntimeException {
+        public AccountDisabledException(String message) { super(message); }
+    }
 
     public SocialApiClient(Context context) {
         this.appContext = context.getApplicationContext();
@@ -65,6 +74,10 @@ public class SocialApiClient {
 
             int code = conn.getResponseCode();
             String body = readAll(conn, code);
+            if (code == 403 && body.contains("ACCOUNT_DISABLED")) {
+                clearAuthSession();
+                throw new AccountDisabledException("该账号已被禁用");
+            }
             if (code != 200) {
                 throw new RuntimeException("HTTP " + code + (body.isEmpty() ? "" : ": " + extractError(body)));
             }
@@ -96,6 +109,10 @@ public class SocialApiClient {
 
             int code = conn.getResponseCode();
             String respBody = readAll(conn, code);
+            if (code == 403 && respBody.contains("ACCOUNT_DISABLED")) {
+                clearAuthSession();
+                throw new AccountDisabledException("该账号已被禁用");
+            }
             if (code != 200 && code != 201) {
                 throw new RuntimeException("HTTP " + code + (respBody.isEmpty() ? "" : ": " + extractError(respBody)));
             }
@@ -130,6 +147,21 @@ public class SocialApiClient {
         } catch (Throwable t) {
             return json;
         }
+    }
+
+    /** 清除本地登录状态（账号被禁用时调用） */
+    private void clearAuthSession() {
+        try {
+            SharedPreferences prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit()
+                    .remove(KEY_AUTH_ACCESS_TOKEN)
+                    .remove(KEY_AUTH_REFRESH_TOKEN)
+                    .remove(KEY_AUTH_NICKNAME)
+                    .remove(KEY_AUTH_AVATAR)
+                    .remove(KEY_AUTH_UID)
+                    .apply();
+            Log.w(TAG, "Auth session cleared: account disabled");
+        } catch (Throwable ignored) {}
     }
 
     // ==================== 好友 API ====================

@@ -636,6 +636,7 @@ public class FriendsChatDialog {
         bubble.setLineSpacing(dp(2), 1.0f);
         bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
         bubble.setBackgroundResource(msg.isMine ? R.drawable.bg_chat_bubble_self : R.drawable.bg_chat_bubble_friend);
+        bubble.setTag("chat_bubble");
 
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
         bl.gravity = msg.isMine ? Gravity.END : Gravity.START;
@@ -662,15 +663,23 @@ public class FriendsChatDialog {
         ChatMessage local = new ChatMessage();
         local.content = msgContent;
         local.isMine = true;
-        chatMessageList.addView(buildMessageBubble(local));
+        final View bubbleView = buildMessageBubble(local);
+        chatMessageList.addView(bubbleView);
         scrollToBottom();
 
         AppExecutors.runOnIo(() -> {
             try {
                 ChatMessage sent = apiClient.sendMessage(chatFriend.id, msgContent);
-                uiHandler.post(() -> { if (sent.id > maxMessageId) maxMessageId = sent.id; });
+                uiHandler.post(() -> {
+                    if (sent.id > maxMessageId) maxMessageId = sent.id;
+                    // 用服务器返回的过滤后内容替换乐观气泡（敏感词修正）
+                    if (!msgContent.equals(sent.content)) {
+                        updateBubbleContent(bubbleView, sent.content);
+                    }
+                });
             } catch (Throwable t) {
                 uiHandler.post(() -> Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                handleApiError(t);
             }
         });
     }
@@ -695,7 +704,9 @@ public class FriendsChatDialog {
                         scrollToBottom();
                     });
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                handleApiError(t);
+            }
         }, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
@@ -1174,7 +1185,8 @@ public class FriendsChatDialog {
         local.senderUid = getMyUid();
         local.senderIsAdmin = chatGroup != null && chatGroup.isAdmin();
         local.createdAt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
-        groupMessageList.addView(buildGroupMessageBubble(local));
+        final View bubbleView = buildGroupMessageBubble(local);
+        groupMessageList.addView(bubbleView);
         scrollGroupToBottom();
 
         AppExecutors.runOnIo(() -> {
@@ -1182,10 +1194,15 @@ public class FriendsChatDialog {
                 GroupMessage sent = apiClient.sendGroupMessage(chatGroup.id, msgContent);
                 uiHandler.post(() -> {
                     if (sent.id > groupMaxMessageId) groupMaxMessageId = sent.id;
+                    // 用服务器返回的过滤后内容替换乐观气泡（敏感词修正）
+                    if (!msgContent.equals(sent.content)) {
+                        updateBubbleContent(bubbleView, sent.content);
+                    }
                 });
             } catch (Throwable t) {
                 uiHandler.post(() ->
-                        Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                    Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                handleApiError(t);
             }
         });
     }
@@ -1216,12 +1233,31 @@ public class FriendsChatDialog {
                     // 更新在线人数
                     updateOnlineCount(result.onlineCount);
                 });
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                handleApiError(t);
+            }
         }, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     private void stopGroupPolling() {
         if (groupPollFuture != null) { groupPollFuture.cancel(false); groupPollFuture = null; }
+    }
+
+    /** 在气泡 View 树中递归查找 TextView 并更新文字（用于敏感词过滤后修正乐观 UI） */
+    private void updateBubbleContent(View root, String newContent) {
+        if (root instanceof android.widget.TextView) {
+            android.widget.TextView tv = (android.widget.TextView) root;
+            Object tag = tv.getTag();
+            if ("group_bubble".equals(tag) || "chat_bubble".equals(tag)) {
+                tv.setText(newContent);
+            }
+        }
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup vg = (android.view.ViewGroup) root;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                updateBubbleContent(vg.getChildAt(i), newContent);
+            }
+        }
     }
 
     private void scrollGroupToBottom() {
@@ -1608,6 +1644,21 @@ public class FriendsChatDialog {
         nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         infoCol.addView(nameView);
 
+        // 封禁标识
+        boolean isDisabled = profile.optBoolean("isDisabled", false);
+        if (isDisabled) {
+            TextView banBadge = new TextView(activity);
+            banBadge.setText("⛔ 已封禁");
+            banBadge.setTextColor(0xFFFF6B6B);
+            banBadge.setTextSize(10);
+            banBadge.setTypeface(null, android.graphics.Typeface.BOLD);
+            banBadge.setPadding(dp(5), dp(2), dp(5), dp(2));
+            banBadge.setBackgroundResource(R.drawable.bg_input);
+            LinearLayout.LayoutParams banLp = new LinearLayout.LayoutParams(-2, -2);
+            banLp.setMargins(dp(8), 0, 0, 0);
+            infoCol.addView(banBadge, banLp);
+        }
+
         // 状态行（在线状态点 + 文字 + UID）
         LinearLayout statusRow = new LinearLayout(activity);
         statusRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1621,8 +1672,13 @@ public class FriendsChatDialog {
         statusRow.addView(statusDot, dotLp);
 
         TextView statusText = new TextView(activity);
-        statusText.setText(statusLabel(status) + "  ·  UID " + uid);
-        statusText.setTextColor(0xFF9AA4BF);
+        if (isDisabled) {
+            statusText.setText("已封禁  ·  UID " + uid);
+            statusText.setTextColor(0xFFFF6B6B);
+        } else {
+            statusText.setText(statusLabel(status) + "  ·  UID " + uid);
+            statusText.setTextColor(0xFF9AA4BF);
+        }
         statusText.setTextSize(12);
         statusRow.addView(statusText);
         infoCol.addView(statusRow);
@@ -2338,6 +2394,17 @@ public class FriendsChatDialog {
 
     private int dp(int value) {
         return (int)(value * activity.getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    /** 统一处理网络异常：如果是账号被禁用，关闭聊天弹窗 */
+    private void handleApiError(Throwable t) {
+        if (t instanceof SocialApiClient.AccountDisabledException) {
+            uiHandler.post(() -> {
+                Toast.makeText(activity, "您的账号已被管理员禁用", Toast.LENGTH_LONG).show();
+                try { if (dialog != null && dialog.isShowing()) dialog.dismiss(); } catch (Throwable ignored) {}
+                try { if (optionDialog != null && optionDialog.isShowing()) optionDialog.dismiss(); } catch (Throwable ignored) {}
+            });
+        }
     }
 
     private void scrollToBottom() {

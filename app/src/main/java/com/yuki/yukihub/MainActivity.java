@@ -1777,7 +1777,7 @@ if (btnNotice != null) {
 View navHome = findViewById(R.id.navHome);
 View navBigScreen = findViewById(R.id.navBigScreen);
 View navChat = findViewById(R.id.navChat);
-if (navHome != null) { prepareManualClickFeedback(navHome); navHome.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, HomeActivity.class)); finish(); }); }
+if (navHome != null) { prepareManualClickFeedback(navHome); navHome.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, HomeActivity.class).putExtra("force_home", true)); finish(); }); }
 if (navBigScreen != null) { prepareManualClickFeedback(navBigScreen); navBigScreen.setOnClickListener(v -> { clickFeedback(v); Toast.makeText(this, "大屏模式正在开发中，入口已为欧尼酱预留。", Toast.LENGTH_SHORT).show(); }); }
 if (navChat != null) { prepareManualClickFeedback(navChat); navChat.setOnClickListener(v -> { clickFeedback(v); showFriendsChatPlaceholder(); }); }
 // 排序按钮
@@ -2887,6 +2887,21 @@ private JSONObject postJsonWithAuth(String url, JSONObject body) throws Exceptio
     try {
         return postJson(url, body, token);
     } catch (RuntimeException e) {
+        // 检查是否是 403 禁用
+        if (e.getMessage() != null && e.getMessage().contains("HTTP 403") && e.getMessage().contains("禁用")) {
+            if (prefs != null) {
+                prefs.edit()
+                        .remove(KEY_AUTH_ACCESS_TOKEN)
+                        .remove(KEY_AUTH_REFRESH_TOKEN)
+                        .putString(KEY_AUTH_STATUS, AUTH_STATUS_EXPIRED)
+                        .apply();
+            }
+            runOnUiThread(() -> {
+                updateProfilePanel();
+                Toast.makeText(this, "您的账号已被管理员禁用", Toast.LENGTH_LONG).show();
+            });
+            throw new RuntimeException("账号已被禁用");
+        }
         // 检查是否是 401 错误
         if (e.getMessage() != null && e.getMessage().contains("HTTP 401")) {
             Log.d("YukiHub", "Got 401, attempting token refresh...");
