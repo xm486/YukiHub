@@ -222,6 +222,10 @@ public class HomeActivity extends AppCompatActivity {
             touch(v);
             showSettingsDialog();
         });
+        findViewById(R.id.homeNavTranslate).setOnClickListener(v -> {
+            touch(v);
+            startActivity(new Intent(this, com.yuki.yukihub.translate.TranslateControlActivity.class));
+        });
         findViewById(R.id.homeSearch).setOnClickListener(v -> {
             touch(v);
             Toast.makeText(this, "搜索功能后续接入首页。", Toast.LENGTH_SHORT).show();
@@ -610,9 +614,12 @@ public class HomeActivity extends AppCompatActivity {
             try {
                 com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(this);
                 int unread = client.getTotalUnread();
+                client.getFriendsList();
+                int pending = client.getPendingRequestsCount();
+                int total = unread + pending;
                 runOnUiThread(() -> {
-                    if (unread > 0) {
-                        badge.setText(String.valueOf(unread));
+                    if (total > 0) {
+                        badge.setText(String.valueOf(total));
                         badge.setVisibility(View.VISIBLE);
                     } else {
                         badge.setVisibility(View.GONE);

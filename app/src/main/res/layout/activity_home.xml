@@ -131,6 +131,19 @@
                         android:background="@drawable/bg_unread_badge"
                         android:visibility="gone" />
                 </FrameLayout>
+
+                <LinearLayout
+                    android:id="@+id/homeNavTranslate"
+                    android:layout_width="58dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="3dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="🌐" android:textColor="#E8FFFFFF" android:textSize="16sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="翻译" android:textColor="#E8FFFFFF" android:textSize="9sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" />

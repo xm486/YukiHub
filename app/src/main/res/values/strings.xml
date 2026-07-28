@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">YukiHub</string>
+    <string name="accessibility_service_description">YukiHub 用于游戏屏幕翻译的截图服务</string>
 
 </resources>

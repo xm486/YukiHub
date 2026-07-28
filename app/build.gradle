@@ -60,10 +60,16 @@ android {
     }
 
     packagingOptions {
+        // PaddleOCR 为唯一 OCR 引擎，离线支持中文、英文、日文及拉丁系语言。
         pickFirst 'lib/arm64-v8a/libSDL2.so'
         jniLibs {
             useLegacyPackaging true
         }
+    }
+
+    androidResources {
+        // PP-OCRv6 ONNX 模型直接从 assets 读取，不压缩
+        noCompress 'onnx'
     }
 
     compileOptions {
@@ -94,5 +100,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("androidx.palette:palette:1.0.0")
+
+    // PaddleOCR PP-OCRv6_small — 唯一 OCR 引擎，离线运行
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-extensions-android:0.12.4")
+    implementation("org.locationtech.jts:jts-core:1.19.0")
 }
 

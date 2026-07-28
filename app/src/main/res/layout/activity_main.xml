@@ -127,7 +127,7 @@
             </LinearLayout>
 
             <FrameLayout
-                android:id="@+id/navChat"
+                 android:id="@+id/navChat"
                 android:layout_width="match_parent"
                 android:layout_height="36dp"
                 android:layout_marginTop="3dp"
@@ -157,6 +157,21 @@
                     android:background="@drawable/bg_unread_badge"
                     android:visibility="gone" />
             </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/navTranslate"
+                android:layout_width="match_parent"
+                android:layout_height="36dp"
+                android:layout_marginTop="3dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:background="@drawable/bg_sidebar_item"
+                android:foreground="?android:attr/selectableItemBackgroundBorderless">
+                <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="🌐" android:textColor="#E8FFFFFF" android:textSize="13sp" />
+                <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="翻译" android:textColor="#E8FFFFFF" android:textSize="7sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" />

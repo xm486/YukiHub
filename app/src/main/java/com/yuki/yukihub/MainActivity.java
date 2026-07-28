@@ -1775,9 +1775,11 @@ if (btnNotice != null) {
 }
 // 导航按钮
 View navHome = findViewById(R.id.navHome);
-View navBigScreen = findViewById(R.id.navBigScreen);
+ View navTranslate = findViewById(R.id.navTranslate);
+ View navBigScreen = findViewById(R.id.navBigScreen);
 View navChat = findViewById(R.id.navChat);
 if (navHome != null) { prepareManualClickFeedback(navHome); navHome.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, HomeActivity.class).putExtra("force_home", true)); finish(); }); }
+if (navTranslate != null) { prepareManualClickFeedback(navTranslate); navTranslate.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, com.yuki.yukihub.translate.TranslateControlActivity.class)); }); }
 if (navBigScreen != null) { prepareManualClickFeedback(navBigScreen); navBigScreen.setOnClickListener(v -> { clickFeedback(v); Toast.makeText(this, "大屏模式正在开发中，入口已为欧尼酱预留。", Toast.LENGTH_SHORT).show(); }); }
 if (navChat != null) { prepareManualClickFeedback(navChat); navChat.setOnClickListener(v -> { clickFeedback(v); showFriendsChatPlaceholder(); }); }
 // 排序按钮
@@ -2348,9 +2350,13 @@ private void updateChatBadge() {
         try {
             com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(this);
             int unread = client.getTotalUnread();
+            // 调用 getFriendsList() 刷新 pendingRequests 缓存，再取好友申请数
+            client.getFriendsList();
+            int pending = client.getPendingRequestsCount();
+            int total = unread + pending;
             runOnUiThread(() -> {
-                if (unread > 0) {
-                    badge.setText(String.valueOf(unread));
+                if (total > 0) {
+                    badge.setText(String.valueOf(total));
                     badge.setVisibility(View.VISIBLE);
                 } else {
                     badge.setVisibility(View.GONE);

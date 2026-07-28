@@ -1,0 +1,80 @@
+YukiHub Third Party Notices
+==========================
+
+This file lists third-party libraries and projects used in YukiHub,
+along with their copyright notices and licenses.
+
+---------------------------------------------------------------------
+
+MoeTranslate
+Copyright (C) 2024 murangogo
+License: GNU Lesser General Public License v3.0 (LGPL)
+
+Used/adapted modules (Kotlin → Java):
+  - FloatingBallService (悬浮球服务、截图分发、自动翻译)
+  - CropView (区域框选)
+  - ScreenShotAccessibilityService (无障碍截图)
+  - MLKitOCR (ML Kit 端侧 OCR)
+  - TranslationTextAPI (翻译引擎接口)
+  - TranslationPicAPI (图片翻译接口)
+  - FloatingTextView (翻译结果悬浮层)
+  - TranslationHistory (翻译历史滚动缓冲)
+  - BingTranslation (Bing 网页翻译，免费无需 API Key)
+  - CustomTranslationText (自定义文本翻译 API)
+  - CustomTranslationImage (自定义图片翻译 API)
+  - JsonPathParser (JSON 响应路径解析)
+  - CustomStorage (自定义 API 配置存储)
+  - UtilTools.calculateSimilarity (Levenshtein 编辑距离)
+
+All adapted modules retain the original copyright notice and LGPL
+license header. The Java implementations include adaptation notes
+referencing the original Kotlin source.
+
+---------------------------------------------------------------------
+
+Google ML Kit - Text Recognition
+Copyright (C) Google LLC
+License: Apache License 2.0
+
+Used for on-device OCR text recognition (Chinese, English, Japanese,
+Korean). Models are managed by Google Play Services.
+
+---------------------------------------------------------------------
+
+OkHttp
+Copyright (C) Square, Inc.
+License: Apache License 2.0
+
+Used for HTTP networking in custom translation API providers.
+
+---------------------------------------------------------------------
+
+Retrofit
+Copyright (C) Square, Inc.
+License: Apache License 2.0
+
+Available as a networking dependency in YukiHub.
+
+---------------------------------------------------------------------
+
+Material Components for Android
+Copyright (C) Google LLC
+License: Apache License 2.0
+
+Used for UI components in the translation control page.
+
+---------------------------------------------------------------------
+
+AndroidX Libraries
+Copyright (C) The Android Open Source Project
+License: Apache License 2.0
+
+Various AndroidX libraries used throughout YukiHub.
+
+---------------------------------------------------------------------
+
+Shizuku
+Copyright (C) Rikka
+License: Apache License 2.0
+
+Available as a system-level operation dependency in YukiHub.
