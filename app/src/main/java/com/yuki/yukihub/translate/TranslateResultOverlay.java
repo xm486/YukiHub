@@ -49,6 +49,7 @@ public class TranslateResultOverlay {
     private int fontColor = 0xFFE9A0B1;
     private int backgroundColor = 0xD9383838;
     private float cornerRadius = 12f;
+    private float paddingDp = 16f;
     private boolean penetrable = true;
 
     // 拖动相关
@@ -103,7 +104,8 @@ public class TranslateResultOverlay {
         textView.setBackground(shape);
         textView.setTextColor(fontColor);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp);
-        textView.setPadding(dp(16), dp(10), dp(16), dp(14));
+        int padPx = dp((int) paddingDp);
+        textView.setPadding(padPx, (int) (padPx * 0.625f), padPx, (int) (padPx * 0.875f));
         textView.setGravity(Gravity.START);
     }
 
@@ -202,13 +204,19 @@ public class TranslateResultOverlay {
     /**
      * 设置外观参数。
      */
-    public void setAppearance(float fontSizeSp, int fontColor, int backgroundColor, float cornerRadius, boolean penetrable) {
+    public void setAppearance(float fontSizeSp, int fontColor, int backgroundColor, float cornerRadius, float paddingDp, boolean penetrable) {
         this.fontSizeSp = fontSizeSp;
         this.fontColor = fontColor;
         this.backgroundColor = backgroundColor;
         this.cornerRadius = cornerRadius;
+        this.paddingDp = paddingDp;
         this.penetrable = penetrable;
         updateAppearance();
+    }
+
+    /** 旧版兼容：不传 padding，使用默认值 */
+    public void setAppearance(float fontSizeSp, int fontColor, int backgroundColor, float cornerRadius, boolean penetrable) {
+        setAppearance(fontSizeSp, fontColor, backgroundColor, cornerRadius, 16f, penetrable);
     }
 
     /**

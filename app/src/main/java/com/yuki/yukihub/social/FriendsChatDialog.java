@@ -308,23 +308,23 @@ public class FriendsChatDialog {
         rlp.setMargins(0, dp(2), 0, dp(2));
         row.setLayoutParams(rlp);
 
-        // 头像占位
-        TextView avatar = new TextView(activity);
-        avatar.setTextSize(14);
-        avatar.setTextColor(0xFFF5F7FF);
-        avatar.setGravity(Gravity.CENTER);
-        avatar.setBackgroundResource(R.drawable.bg_input);
-        avatar.setText(friend.nickname != null && !friend.nickname.isEmpty()
-                ? friend.nickname.substring(0, 1).toUpperCase() : "?");
-        LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(dp(36), dp(36));
-        al.setMargins(0, 0, dp(8), 0);
+        // 圆形头像占位（首字母）
+        int avatarSize = 36;
+        String initial = friend.nickname != null && !friend.nickname.isEmpty()
+                ? friend.nickname.substring(0, 1) : "?";
+        int bgColor = avatarBgColor(friend.nickname);
+        TextView avatar = createCircleTextAvatar(avatarSize, initial, bgColor);
+        LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(dp(avatarSize), dp(avatarSize));
+        al.setMargins(0, 0, dp(10), 0);
         row.addView(avatar, al);
 
-        // 加载头像
+        // 圆形头像图片（覆盖在首字母上面）
         if (friend.avatarUrl != null && !friend.avatarUrl.isEmpty()) {
             ImageView avatarImg = new ImageView(activity);
             avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            avatarImg.setLayoutParams(new LinearLayout.LayoutParams(dp(36), dp(36)));
+            LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(dp(avatarSize), dp(avatarSize));
+            imLp.setMargins(0, 0, dp(10), 0);
+            avatarImg.setLayoutParams(imLp);
             avatarImg.setVisibility(View.GONE);
             row.addView(avatarImg, 0);
             loadAvatarInto(friend.avatarUrl, avatarImg, avatar);
@@ -992,16 +992,12 @@ public class FriendsChatDialog {
 
             row.addView(leftCol);
 
-            // 右侧：头像
+            // 右侧：圆形头像
             String myAvatar = msg.senderAvatar != null ? msg.senderAvatar : getMyAvatar();
-            TextView avatarText = new TextView(activity);
-            avatarText.setText(myNick.isEmpty() ? "?" : myNick.substring(0, 1).toUpperCase());
-            avatarText.setTextColor(0xFFF5F7FF);
-            avatarText.setTextSize(12);
-            avatarText.setGravity(Gravity.CENTER);
-            avatarText.setBackgroundResource(R.drawable.bg_input);
+            int selfBg = avatarBgColor(myNick);
+            TextView avatarText = createCircleTextAvatar(34, myNick.isEmpty() ? "?" : myNick.substring(0, 1).toUpperCase(), selfBg);
             LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-            abLp.setMargins(dp(8), 0, 0, 0);
+            abLp.setMargins(dp(10), 0, 0, 0);
             row.addView(avatarText, abLp);
 
             // 点击自己的头像也查看资料
@@ -1030,16 +1026,12 @@ public class FriendsChatDialog {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.TOP);
 
-            // 头像（从左到右排列在 LinearLayout 中）
-            TextView avatarText = new TextView(activity);
+            // 圆形头像
             String nick = msg.senderNickname != null ? msg.senderNickname : "?";
-            avatarText.setText(nick.isEmpty() ? "?" : nick.substring(0, 1).toUpperCase());
-            avatarText.setTextColor(0xFFF5F7FF);
-            avatarText.setTextSize(12);
-            avatarText.setGravity(Gravity.CENTER);
-            avatarText.setBackgroundResource(R.drawable.bg_input);
+            int otherBg = avatarBgColor(nick);
+            TextView avatarText = createCircleTextAvatar(34, nick.isEmpty() ? "?" : nick.substring(0, 1).toUpperCase(), otherBg);
             LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-            abLp.setMargins(0, 0, dp(8), 0);
+            abLp.setMargins(0, 0, dp(10), 0);
             row.addView(avatarText, abLp);
 
             if (msg.senderAvatar != null && !msg.senderAvatar.isEmpty()) {
@@ -1047,7 +1039,7 @@ public class FriendsChatDialog {
                 avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 avatarImg.setVisibility(View.GONE);
                 LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-                imLp.setMargins(0, 0, dp(8), 0);
+                imLp.setMargins(0, 0, dp(10), 0);
                 row.addView(avatarImg, 0, imLp); // 插到最前面覆盖文字
                 // 头像 ImageView 也绑点击
                 if (msg.senderUid > 0) {
@@ -1338,14 +1330,11 @@ public class FriendsChatDialog {
                 rlp.setMargins(0, dp(2), 0, dp(2));
                 row.setLayoutParams(rlp);
 
-                TextView avatar = new TextView(activity);
-                avatar.setTextSize(14);
-                avatar.setTextColor(0xFFF5F7FF);
-                avatar.setGravity(Gravity.CENTER);
-                avatar.setBackgroundResource(R.drawable.bg_input);
-                avatar.setText(nickname.isEmpty() ? "?" : nickname.substring(0, 1).toUpperCase());
+                // 圆形头像
+                int sBg = avatarBgColor(nickname);
+                TextView avatar = createCircleTextAvatar(32, nickname.isEmpty() ? "?" : nickname.substring(0, 1).toUpperCase(), sBg);
                 LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(dp(32), dp(32));
-                al.setMargins(0, 0, dp(8), 0);
+                al.setMargins(0, 0, dp(10), 0);
                 row.addView(avatar, al);
 
                 // 加载头像
@@ -2150,6 +2139,23 @@ public class FriendsChatDialog {
         }
     }
 
+    /** Bitmap 圆形裁剪（基于最小边） */
+    private android.graphics.Bitmap toRoundBitmap(android.graphics.Bitmap src) {
+        if (src == null) return null;
+        int size = Math.min(src.getWidth(), src.getHeight());
+        int x = (src.getWidth() - size) / 2;
+        int y = (src.getHeight() - size) / 2;
+        android.graphics.Bitmap output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(output);
+        android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        float r = size / 2f;
+        android.graphics.Path path = new android.graphics.Path();
+        path.addCircle(r, r, r, android.graphics.Path.Direction.CW);
+        canvas.clipPath(path);
+        canvas.drawBitmap(src, -x, -y, paint);
+        return output;
+    }
+
     private void loadAvatarInto(String url, ImageView imageView, TextView fallback) {
         if (url == null || url.isEmpty()) return;
 
@@ -2172,15 +2178,46 @@ public class FriendsChatDialog {
                 android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(conn.getInputStream());
                 conn.disconnect();
                 if (bmp != null) {
-                    avatarCache.put(url, bmp);
+                    android.graphics.Bitmap roundBmp = toRoundBitmap(bmp);
+                    avatarCache.put(url, roundBmp);
                     activity.runOnUiThread(() -> {
-                        imageView.setImageBitmap(bmp);
+                        imageView.setImageBitmap(roundBmp);
                         imageView.setVisibility(View.VISIBLE);
                         fallback.setVisibility(View.GONE);
                     });
                 }
             } catch (Throwable ignored) {}
         }, "YukiHub-Avatar-Load").start();
+    }
+
+    /** 根据昵称生成一致的头像背景色 */
+    private int avatarBgColor(String name) {
+        if (name == null || name.isEmpty()) return 0xFF455A64;
+        // 使用 hashCode 的低 15 位生成颜色，保证同一用户颜色一致
+        int hash = Math.abs(name.hashCode());
+        int r = 40 + (hash & 0x7F);
+        int g = 60 + ((hash >> 7) & 0x7F);
+        int b = 80 + ((hash >> 14) & 0x7F);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
+
+    /** 创建圆形 TextView 头像占位（首字母） */
+    private TextView createCircleTextAvatar(int size, String firstLetter, int bgColor) {
+        TextView tv = new TextView(activity);
+        tv.setText(firstLetter.isEmpty() ? "?" : firstLetter.toUpperCase());
+        tv.setTextColor(0xFFF5F7FF);
+        tv.setTextSize(size * 0.42f); // 字母大小适配
+        tv.setGravity(Gravity.CENTER);
+        tv.setTypeface(null, android.graphics.Typeface.BOLD);
+
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        gd.setColor(bgColor);
+        tv.setBackground(gd);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(size), dp(size));
+        tv.setLayoutParams(lp);
+        return tv;
     }
 
     private void showRequestsView() {

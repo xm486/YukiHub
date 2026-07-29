@@ -114,6 +114,10 @@ public class TranslateControlActivity extends AppCompatActivity {
         addResultFontSizeSelector(root);
         addPenetrableSwitch(root);
 
+        // === 个性化 ===
+        addSectionTitle(root, "个性化");
+        addPersonalizationSection(root);
+
         if (scroll.getChildCount() > 0) {
             scroll.removeAllViews();
         }
@@ -356,7 +360,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "小牛翻译",
                         "YukiHub 可以使用小牛翻译的 API 来提供翻译服务，这意味着你需要从小牛翻译平台申请 API。\n\n小牛翻译提供免费额度，每天有 20 万字符的免费调用次数。\n\n小牛翻译由东北大学自然语言处理实验室开发，在日语翻译方面效果较好。",
                         "https://niutrans.com/",
-                        "https://www.google.com/search?q=小牛翻译+API+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/niutrans/"
                 ));
                 boolean hasNiu = !prefs.raw().getString(TranslationPreferences.KEY_NIUTRANS_APIKEY, "").isEmpty();
                 addConfigButton(container, hasNiu ? "✅ 已配置 API-KEY（点击修改）" : "⚙️ 配置 API-KEY", () -> showSingleKeyDialog(
@@ -369,7 +373,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "聚合 AI 翻译",
                         "YukiHub 可以使用主流 AI 模型进行翻译（只要兼容 OpenAI API 规范），包括 ChatGPT、通义千问（Qwen）、DeepSeek 等。\n\n这些 API 大多有免费额度，具体取决于各平台的政策。\n\n相比本地翻译，使用云 AI API 的翻译效果通常更好，尤其在上下文连贯性和术语一致性方面表现突出。",
                         "https://platform.openai.com/api-keys",
-                        "https://www.google.com/search?q=OpenAI兼容+API+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/uniaitrans/"
                 ));
                 boolean hasAi = !prefs.raw().getString(TranslationPreferences.KEY_OPENAI_APIKEY, "").isEmpty();
                 addConfigButton(container, hasAi ? "✅ 已配置（点击修改）" : "⚙️ 配置 API", () -> showOpenAiConfigDialog());
@@ -380,7 +384,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "火山引擎",
                         "YukiHub 可以使用火山引擎的翻译 API 来提供翻译服务，这意味着你需要从火山引擎平台申请 API。\n\n火山引擎提供免费额度，每月有 200 万字符的免费调用次数。\n\n火山引擎是字节跳动旗下的云服务平台，翻译质量稳定。",
                         "https://www.volcengine.com/",
-                        "https://www.google.com/search?q=火山引擎+翻译API+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/volc/"
                 ));
                 boolean hasVolc = !prefs.raw().getString(TranslationPreferences.KEY_VOLC_AK, "").isEmpty();
                 addConfigButton(container, hasVolc ? "✅ 已配置（点击修改）" : "⚙️ 配置 Access Key", () -> showDualKeyDialog(
@@ -394,7 +398,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "Azure AI 翻译",
                         "YukiHub 可以使用微软 Azure AI Translator 的 API 来提供翻译服务，这意味着你需要从 Azure 平台申请 API。\n\nAzure AI Translator 每月有 200 万字符的免费调用额度，支持 100 多种语言。\n\nAzure 是微软旗下的云服务平台，翻译质量稳定可靠。",
                         "https://portal.azure.com/",
-                        "https://www.google.com/search?q=Azure+AI+Translator+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/azure/"
                 ));
                 boolean hasAzure = !prefs.raw().getString(TranslationPreferences.KEY_AZURE_KEY, "").isEmpty();
                 addConfigButton(container, hasAzure ? "✅ 已配置 KEY（点击修改）" : "⚙️ 配置 KEY", () -> showSingleKeyDialog(
@@ -407,7 +411,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "DeepL 翻译",
                         "YukiHub 可以使用 DeepL 的 API 来提供翻译服务，这意味着你需要从 DeepL 平台申请 API Key。\n\nDeepL 提供免费套餐（Free 计划），每月有 50 万字符的免费调用额度。\n\n相比其他翻译 API，DeepL 在文学性和上下文连贯性方面表现更佳。\n\nHost 填写：免费版填 api-free.deepl.com，付费版填 api.deepl.com。",
                         "https://www.deepl.com/pro-api",
-                        "https://www.google.com/search?q=DeepL+API+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/deepl/"
                 ));
                 boolean hasDeepl = !prefs.raw().getString(TranslationPreferences.KEY_DEEPL_APIKEY, "").isEmpty();
                 addConfigButton(container, hasDeepl ? "✅ 已配置（点击修改）" : "⚙️ 配置 Host 和 API Key", () -> showDeepLConfigDialog());
@@ -418,7 +422,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "百度翻译 API",
                         "YukiHub 可以使用百度翻译的 API 来提供翻译服务，这意味着你需要从百度翻译开放平台申请 API。\n\n百度翻译标准版免费，QPS 限制为 1 次/秒，每月有 100 万字符的免费调用额度。\n\n对于中文相关的翻译，百度翻译通常表现不错。",
                         "https://fanyi-api.baidu.com/",
-                        "https://www.google.com/search?q=百度翻译API+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/baidu/"
                 ));
                 boolean hasBaidu = !prefs.raw().getString(TranslationPreferences.KEY_BAIDU_APPID, "").isEmpty();
                 addConfigButton(container, hasBaidu ? "✅ 已配置（点击修改）" : "⚙️ 配置 APP ID 和密钥", () -> showDualKeyDialog(
@@ -432,7 +436,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                         "腾讯云翻译 API",
                         "YukiHub 可以使用腾讯云的翻译 API 来提供翻译服务，这意味着你需要从腾讯云平台申请 API。\n\n腾讯云翻译每月有 500 万字符的免费调用额度，是所有云翻译中免费额度最大的之一。\n\n腾讯云是腾讯旗下的云服务平台，翻译质量稳定。",
                         "https://cloud.tencent.com/",
-                        "https://www.google.com/search?q=腾讯云+翻译API+申请教程"
+                        "https://www.moetranslate.top/docs/translationapi/tencent/"
                 ));
                 boolean hasTencent = !prefs.raw().getString(TranslationPreferences.KEY_TENCENT_SECRETID, "").isEmpty();
                 addConfigButton(container, hasTencent ? "✅ 已配置（点击修改）" : "⚙️ 配置 SecretId 和 SecretKey", () -> showDualKeyDialog(
@@ -589,7 +593,7 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                 .show();
     }
 
-    /** 聚合 AI（OpenAI 兼容）配置对话框 */
+    /** 聚合 AI（OpenAI 兼容）配置对话框 — 完整版，对齐萌译 OpenAIText 全屏编辑器的全部字段 */
     private void showOpenAiConfigDialog() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -597,43 +601,139 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
         int pad = dp(16);
         root.setPadding(pad, pad, pad, pad);
 
-        android.widget.EditText editUrl = new android.widget.EditText(this);
-        editUrl.setHint("API 地址（留空使用默认 OpenAI）");
-        editUrl.setTextColor(0xFFE8F0F8);
-        editUrl.setHintTextColor(0x66FFFFFF);
-        editUrl.setTextSize(13);
-        editUrl.setBackgroundColor(0xFF263246);
-        editUrl.setPadding(dp(10), dp(8), dp(10), dp(8));
+        // --- API 地址 ---
+        android.widget.EditText editUrl = styledEditText("API 地址（留空使用默认 OpenAI：https://api.openai.com/v1）");
         editUrl.setText(prefs.raw().getString(TranslationPreferences.KEY_OPENAI_BASEURL, ""));
-        root.addView(editUrl, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        root.addView(editUrl, lpFull());
 
-        android.widget.EditText editKey = new android.widget.EditText(this);
-        editKey.setHint("API Key");
-        editKey.setTextColor(0xFFE8F0F8);
-        editKey.setHintTextColor(0x66FFFFFF);
-        editKey.setTextSize(13);
-        editKey.setBackgroundColor(0xFF263246);
-        editKey.setPadding(dp(10), dp(8), dp(10), dp(8));
+        // --- API Key ---
+        android.widget.EditText editKey = styledEditText("API Key");
         editKey.setText(prefs.raw().getString(TranslationPreferences.KEY_OPENAI_APIKEY, ""));
-        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
-        lp2.topMargin = dp(8);
-        root.addView(editKey, lp2);
+        root.addView(editKey, lpFull(dp(8)));
 
-        android.widget.EditText editModel = new android.widget.EditText(this);
-        editModel.setHint("模型名（如 gpt-4o、qwen-plus、deepseek-chat）");
-        editModel.setTextColor(0xFFE8F0F8);
-        editModel.setHintTextColor(0x66FFFFFF);
-        editModel.setTextSize(13);
-        editModel.setBackgroundColor(0xFF263246);
-        editModel.setPadding(dp(10), dp(8), dp(10), dp(8));
-        editModel.setText(prefs.raw().getString(TranslationPreferences.KEY_OPENAI_MODEL, "gpt-3.5-turbo"));
-        LinearLayout.LayoutParams lp3 = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
-        lp3.topMargin = dp(8);
-        root.addView(editModel, lp3);
+        // --- 模型名 ---
+        android.widget.EditText editModel = styledEditText("模型名（如 gpt-4o、qwen-plus、deepseek-chat）");
+        editModel.setText(prefs.raw().getString(TranslationPreferences.KEY_OPENAI_MODEL, ""));
+        root.addView(editModel, lpFull(dp(8)));
 
+        // 获取模型列表按钮
+        android.widget.Button btnFetchModels = new android.widget.Button(this);
+        btnFetchModels.setText("📋 获取模型列表");
+        btnFetchModels.setTextColor(0xFFE8F0F8);
+        btnFetchModels.setBackgroundColor(0xFF1A4A3A);
+        btnFetchModels.setTextSize(11);
+        btnFetchModels.setOnClickListener(v -> {
+            String currentKey = editKey.getText().toString().trim();
+            String currentUrl = editUrl.getText().toString().trim();
+            if (currentKey.isEmpty()) {
+                Toast.makeText(this, "请先填写 API Key", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            btnFetchModels.setEnabled(false);
+            btnFetchModels.setText("获取中...");
+            new Thread(() -> {
+                try {
+                    java.util.List<String> models = OpenAiTranslationProvider.fetchModels(currentKey, currentUrl);
+                    runOnUiThread(() -> {
+                        btnFetchModels.setEnabled(true);
+                        btnFetchModels.setText("📋 获取模型列表");
+                        if (models.isEmpty()) {
+                            Toast.makeText(this, "未获取到模型列表", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        showModelPickerDialog(models, editModel);
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        btnFetchModels.setEnabled(true);
+                        btnFetchModels.setText("📋 获取模型列表");
+                        Toast.makeText(this, "获取失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                    });
+                }
+            }).start();
+        });
+        root.addView(btnFetchModels, lpFull(dp(4)));
+
+        // --- 系统提示词 ---
+        android.widget.TextView tvSys = styledLabel("系统提示词（留空使用默认，下方默认值可参考修改）");
+        root.addView(tvSys, lpFull(dp(12)));
+        android.widget.EditText editSysPrompt = styledEditText("留空使用默认专业翻译提示词");
+        editSysPrompt.setSingleLine(false);
+        editSysPrompt.setMinLines(3);
+        String currentSys = prefs.raw().getString(TranslationPreferences.KEY_OPENAI_SYSTEM_PROMPT, "");
+        editSysPrompt.setText(currentSys.isEmpty() ? OpenAiTranslationProvider.DEFAULT_SYSTEM_PROMPT : currentSys);
+        root.addView(editSysPrompt, lpFull(dp(4)));
+
+        // --- 用户提示词 ---
+        android.widget.TextView tvUser = styledLabel("用户提示词（留空使用默认，占位符：usefromlang / usetolang / usesourcetext）");
+        root.addView(tvUser, lpFull(dp(12)));
+        android.widget.EditText editUserPrompt = styledEditText("留空使用默认");
+        editUserPrompt.setSingleLine(false);
+        editUserPrompt.setMinLines(2);
+        String currentUser = prefs.raw().getString(TranslationPreferences.KEY_OPENAI_USER_PROMPT, "");
+        editUserPrompt.setText(currentUser.isEmpty() ? OpenAiTranslationProvider.DEFAULT_USER_PROMPT : currentUser);
+        root.addView(editUserPrompt, lpFull(dp(4)));
+
+        // --- 温度 ---
+        android.widget.EditText editTemp = styledEditText("温度（0.0~2.0，留空表示不发送 temperature）");
+        editTemp.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        String currentTemp = prefs.raw().getString(TranslationPreferences.KEY_OPENAI_TEMPERATURE, "");
+        editTemp.setText(currentTemp.isEmpty() ? OpenAiTranslationProvider.DEFAULT_TEMPERATURE : currentTemp);
+        root.addView(editTemp, lpFull(dp(8)));
+
+        // --- 自定义请求参数 ---
+        android.widget.TextView tvExtra = styledLabel(
+                "自定义请求参数（高级，可覆盖模型参数）\n" +
+                "例如：key=enable_thinking value=false\n" +
+                "     key=chat_template_kwargs value={\"enable_thinking\":false}");
+        root.addView(tvExtra, lpFull(dp(12)));
+
+        final LinearLayout extraContainer = new LinearLayout(this);
+        extraContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(extraContainer, lpFull(dp(4)));
+
+        // 动态行列表
+        final java.util.List<android.widget.EditText[]> extraRows = new java.util.ArrayList<>();
+
+        // 「添加参数」按钮
+        android.widget.Button btnAddParam = new android.widget.Button(this);
+        btnAddParam.setText("+ 添加参数");
+        btnAddParam.setTextColor(0xFFE8F0F8);
+        btnAddParam.setBackgroundColor(0xFF1A4A3A);
+        btnAddParam.setTextSize(12);
+        root.addView(btnAddParam, lpFull(dp(4)));
+
+        // 加载已有参数
+        String extraJson = prefs.raw().getString(TranslationPreferences.KEY_OPENAI_EXTRA_PARAMS, "");
+        java.util.List<OpenAiTranslationProvider.Pair> existingParams =
+                OpenAiTranslationProvider.decodeExtraParams(extraJson);
+        for (OpenAiTranslationProvider.Pair p : existingParams) {
+            addExtraParamRow(extraContainer, extraRows, p.key, p.value);
+        }
+        // 即使没有已有参数，也显示一行空行
+        if (extraRows.isEmpty()) {
+            addExtraParamRow(extraContainer, extraRows, "", "");
+        }
+
+        btnAddParam.setOnClickListener(v -> {
+            addExtraParamRow(extraContainer, extraRows, "", "");
+        });
+
+        // --- 重置默认按钮 ---
+        android.widget.Button btnReset = new android.widget.Button(this);
+        btnReset.setText("↻ 重置为默认提示词");
+        btnReset.setTextColor(0xFFE8F0F8);
+        btnReset.setBackgroundColor(0xFF333740);
+        btnReset.setTextSize(12);
+        btnReset.setOnClickListener(v -> {
+            editSysPrompt.setText(OpenAiTranslationProvider.DEFAULT_SYSTEM_PROMPT);
+            editUserPrompt.setText(OpenAiTranslationProvider.DEFAULT_USER_PROMPT);
+            editTemp.setText(OpenAiTranslationProvider.DEFAULT_TEMPERATURE);
+            Toast.makeText(this, "已重置为默认值", Toast.LENGTH_SHORT).show();
+        });
+        root.addView(btnReset, lpFull(dp(8)));
+
+        // --- 对话框 ---
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("聚合 AI 翻译配置")
                 .setView(root)
@@ -641,6 +741,22 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                     prefs.putString(TranslationPreferences.KEY_OPENAI_BASEURL, editUrl.getText().toString().trim());
                     prefs.putString(TranslationPreferences.KEY_OPENAI_APIKEY, editKey.getText().toString().trim());
                     prefs.putString(TranslationPreferences.KEY_OPENAI_MODEL, editModel.getText().toString().trim());
+                    prefs.putString(TranslationPreferences.KEY_OPENAI_SYSTEM_PROMPT, editSysPrompt.getText().toString().trim());
+                    prefs.putString(TranslationPreferences.KEY_OPENAI_USER_PROMPT, editUserPrompt.getText().toString().trim());
+                    prefs.putString(TranslationPreferences.KEY_OPENAI_TEMPERATURE, editTemp.getText().toString().trim());
+
+                    // 收集自定义参数
+                    java.util.List<OpenAiTranslationProvider.Pair> pairs = new java.util.ArrayList<>();
+                    for (android.widget.EditText[] row : extraRows) {
+                        String k = row[0].getText().toString().trim();
+                        String v = row[1].getText().toString().trim();
+                        if (!k.isEmpty()) {
+                            pairs.add(new OpenAiTranslationProvider.Pair(k, v));
+                        }
+                    }
+                    prefs.putString(TranslationPreferences.KEY_OPENAI_EXTRA_PARAMS,
+                            OpenAiTranslationProvider.encodeExtraParams(pairs));
+
                     Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
                     recreate();
                 })
@@ -650,6 +766,99 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
                     } catch (Throwable t) {
                         Toast.makeText(this, "无法打开浏览器", Toast.LENGTH_SHORT).show();
                     }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 给 OpenAI 自定义参数添加一行 key-value 输入 */
+    private void addExtraParamRow(LinearLayout container,
+                                   java.util.List<android.widget.EditText[]> rows,
+                                   String key, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+
+        android.widget.EditText editK = styledEditText("参数名");
+        editK.setText(key);
+        LinearLayout.LayoutParams lpK = new LinearLayout.LayoutParams(
+                0, dp(44), 1f);
+
+        android.widget.EditText editV = styledEditText("值");
+        editV.setText(value);
+        LinearLayout.LayoutParams lpV = new LinearLayout.LayoutParams(
+                0, dp(44), 1.5f);
+        lpV.leftMargin = dp(4);
+
+        android.widget.Button btnDel = new android.widget.Button(this);
+        btnDel.setText("✕");
+        btnDel.setTextColor(0xFFFF6B6B);
+        btnDel.setBackgroundColor(0xFF2A1A1A);
+        btnDel.setTextSize(12);
+        LinearLayout.LayoutParams lpDel = new LinearLayout.LayoutParams(
+                dp(36), dp(36));
+        lpDel.leftMargin = dp(4);
+        lpDel.gravity = android.view.Gravity.CENTER_VERTICAL;
+
+        row.addView(editK, lpK);
+        row.addView(editV, lpV);
+        row.addView(btnDel, lpDel);
+
+        android.widget.EditText[] rowArr = {editK, editV};
+        rows.add(rowArr);
+
+        btnDel.setOnClickListener(v -> {
+            container.removeView(row);
+            rows.remove(rowArr);
+        });
+
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(4);
+        container.addView(row, rowLp);
+    }
+
+    /** 工具：创建带统一深色主题样式的 EditText */
+    private android.widget.EditText styledEditText(String hint) {
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setHint(hint);
+        et.setTextColor(0xFFE8F0F8);
+        et.setHintTextColor(0x66FFFFFF);
+        et.setTextSize(13);
+        et.setBackgroundColor(0xFF263246);
+        int pad = dp(10);
+        et.setPadding(pad, dp(8), pad, dp(8));
+        return et;
+    }
+
+    /** 工具：创建带统一深色主题样式的 TextView 标签 */
+    private android.widget.TextView styledLabel(String text) {
+        android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setText(text);
+        tv.setTextColor(0xFFA0B4C8);
+        tv.setTextSize(11);
+        return tv;
+    }
+
+    /** 工具：MATCH_PARENT + 可选 topMargin 的 LayoutParams */
+    private LinearLayout.LayoutParams lpFull() {
+        return lpFull(0);
+    }
+
+    private LinearLayout.LayoutParams lpFull(int topMargin) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = topMargin;
+        return lp;
+    }
+
+    /** 模型列表选择对话框 */
+    private void showModelPickerDialog(java.util.List<String> models, android.widget.EditText targetEdit) {
+        String[] items = models.toArray(new String[0]);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("选择模型（共 " + models.size() + " 个）")
+                .setItems(items, (d, which) -> {
+                    targetEdit.setText(items[which]);
+                    Toast.makeText(this, "已选择：" + items[which], Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -1150,4 +1359,329 @@ android.widget.ArrayAdapter<String> adapter = themedAdapter(labels);
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
+
+    // ==================== 个性化设置 ====================
+
+    private void addPersonalizationSection(LinearLayout root) {
+        // --- 悬浮球设置 ---
+        TextView ballTitle = new TextView(this);
+        ballTitle.setText("悬浮球");
+        ballTitle.setTextColor(0xFFB8C7D9);
+        ballTitle.setTextSize(13);
+        ballTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(ballTitle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 悬浮球图片更换
+        String customIcon = prefs.raw().getString(TranslationPreferences.KEY_CUSTOM_BALL_ICON, "");
+        addConfigButton(root, customIcon.isEmpty() ? "🖼️ 悬浮球图标（当前：默认）" : "🖼️ 悬浮球图标（当前：" + customIcon + "）",
+                () -> showBallIconDialog());
+
+        // 悬浮球大小
+        addBallSizeSlider(root);
+
+        // 悬浮球透明度
+        addBallOpacitySlider(root);
+
+        // 长按延迟
+        addLongPressDelaySlider(root);
+
+        // --- 翻译结果框设置 ---
+        TextView resultTitle = new TextView(this);
+        resultTitle.setText("翻译结果框");
+        resultTitle.setTextColor(0xFFB8C7D9);
+        resultTitle.setTextSize(13);
+        resultTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = dp(12);
+        root.addView(resultTitle, rlp);
+
+        // 结果文字颜色
+        int currentFontColor = prefs.raw().getInt(TranslationPreferences.KEY_RESULT_FONT_COLOR,
+                TranslationPreferences.DEFAULT_FONT_COLOR);
+        addConfigButton(root, "✏️ 结果文字颜色（当前：" + String.format("#%08X", currentFontColor) + "）",
+                () -> showColorPickerDialog("结果文字颜色", TranslationPreferences.KEY_RESULT_FONT_COLOR,
+                        TranslationPreferences.DEFAULT_FONT_COLOR));
+
+        // 结果背景颜色
+        int currentBgColor = prefs.raw().getInt(TranslationPreferences.KEY_RESULT_BG_COLOR,
+                TranslationPreferences.DEFAULT_BG_COLOR);
+        addConfigButton(root, "🎨 结果背景颜色（当前：" + String.format("#%08X", currentBgColor) + "）",
+                () -> showColorPickerDialog("结果背景颜色", TranslationPreferences.KEY_RESULT_BG_COLOR,
+                        TranslationPreferences.DEFAULT_BG_COLOR));
+
+        // 结果内边距
+        addResultPaddingSlider(root);
+
+        // 操作提示 Toast 开关
+        Switch notToastSwitch = new Switch(this);
+        notToastSwitch.setText("隐藏操作提示 Toast（框选完成、移动结果层等）");
+        notToastSwitch.setTextColor(0xFFFFFFFF);
+        notToastSwitch.setChecked(prefs.raw().getBoolean(TranslationPreferences.KEY_ADJUST_NOT_TOAST,
+                TranslationPreferences.DEFAULT_ADJUST_NOT_TOAST));
+        notToastSwitch.setOnCheckedChangeListener((button, checked) ->
+                prefs.putBoolean(TranslationPreferences.KEY_ADJUST_NOT_TOAST, checked));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(8);
+        root.addView(notToastSwitch, nlp);
+    }
+
+    /** 悬浮球图标选择对话框 */
+    private void showBallIconDialog() {
+        String[] options = {"使用默认图标", "从图片选择"};
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("悬浮球图标")
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        // 恢复默认
+                        prefs.putString(TranslationPreferences.KEY_CUSTOM_BALL_ICON, "");
+                        // 删除自定义图标文件（如有）
+                        try {
+                            java.io.File iconDir = new java.io.File(getExternalFilesDir(null), "icon");
+                            java.io.File[] files = iconDir.listFiles();
+                            if (files != null) {
+                                for (java.io.File f : files) {
+                                    if (f.isFile()) f.delete();
+                                }
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                        Toast.makeText(this, "已恢复默认图标", Toast.LENGTH_SHORT).show();
+                        recreate();
+                    } else if (which == 1) {
+                        // 打开文件选择器
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                            intent.setType("image/*");
+                            intent.addCategory(Intent.CATEGORY_OPENABLE);
+                            ballIconPickerLauncher.launch(intent);
+                        } catch (Throwable t) {
+                            Toast.makeText(this, "无法打开文件选择器", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 处理用户选择的图片，复制到 icon 目录 */
+    private void handleBallIconSelection(android.net.Uri uri) {
+        if (uri == null) return;
+        try {
+            java.io.File iconDir = new java.io.File(getExternalFilesDir(null), "icon");
+            if (!iconDir.exists()) iconDir.mkdirs();
+            // 清理旧图标
+            java.io.File[] oldFiles = iconDir.listFiles();
+            if (oldFiles != null) {
+                for (java.io.File f : oldFiles) {
+                    if (f.isFile()) f.delete();
+                }
+            }
+            // 获取文件名
+            String displayName = "custom_ball_icon.png";
+            android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (nameIdx >= 0) {
+                    String name = cursor.getString(nameIdx);
+                    if (name != null && !name.isEmpty()) displayName = name;
+                }
+            }
+            if (cursor != null) cursor.close();
+
+            java.io.File destFile = new java.io.File(iconDir, displayName);
+            try (java.io.InputStream is = getContentResolver().openInputStream(uri);
+                 java.io.FileOutputStream fos = new java.io.FileOutputStream(destFile)) {
+                if (is == null) {
+                    Toast.makeText(this, "无法读取图片", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = is.read(buf)) > 0) {
+                    fos.write(buf, 0, len);
+                }
+            }
+            prefs.putString(TranslationPreferences.KEY_CUSTOM_BALL_ICON, displayName);
+            Toast.makeText(this, "图标已更换：" + displayName, Toast.LENGTH_SHORT).show();
+            recreate();
+        } catch (Exception e) {
+            Toast.makeText(this, "图片加载失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 悬浮球大小滑块 */
+    private void addBallSizeSlider(LinearLayout root) {
+        TextView label = new TextView(this);
+        int currentSize = prefs.raw().getInt(TranslationPreferences.KEY_BALL_SIZE,
+                TranslationPreferences.DEFAULT_BALL_SIZE);
+        label.setText("悬浮球大小：" + currentSize + "dp");
+        label.setTextColor(0xFFCCCCCC);
+        label.setTextSize(12);
+        root.addView(label);
+
+        SeekBar seek = new SeekBar(this);
+        seek.setMax(60); // 范围 20~80
+        seek.setProgress(currentSize - 20);
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int size = progress + 20;
+                label.setText("悬浮球大小：" + size + "dp");
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                int size = seekBar.getProgress() + 20;
+                prefs.putInt(TranslationPreferences.KEY_BALL_SIZE, size);
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        slp.topMargin = dp(2);
+        root.addView(seek, slp);
+    }
+
+    /** 悬浮球透明度滑块 */
+    private void addBallOpacitySlider(LinearLayout root) {
+        TextView label = new TextView(this);
+        float currentOpacity = prefs.raw().getFloat(TranslationPreferences.KEY_BALL_OPACITY,
+                TranslationPreferences.DEFAULT_BALL_OPACITY);
+        label.setText("悬浮球透明度：" + Math.round(currentOpacity * 100) + "%");
+        label.setTextColor(0xFFCCCCCC);
+        label.setTextSize(12);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlp.topMargin = dp(8);
+        root.addView(label, tlp);
+
+        SeekBar seek = new SeekBar(this);
+        seek.setMax(100);
+        seek.setProgress(Math.round(currentOpacity * 100));
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float opacity = progress / 100f;
+                label.setText("悬浮球透明度：" + progress + "%");
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                float opacity = seekBar.getProgress() / 100f;
+                prefs.putFloat(TranslationPreferences.KEY_BALL_OPACITY, opacity);
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        slp.topMargin = dp(2);
+        root.addView(seek, slp);
+    }
+
+    /** 长按延迟滑块 */
+    private void addLongPressDelaySlider(LinearLayout root) {
+        TextView label = new TextView(this);
+        long currentDelay = prefs.raw().getLong(TranslationPreferences.KEY_LONG_PRESS_DELAY,
+                TranslationPreferences.DEFAULT_LONG_PRESS_DELAY);
+        label.setText("长按延迟：" + currentDelay + "ms");
+        label.setTextColor(0xFFCCCCCC);
+        label.setTextSize(12);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlp.topMargin = dp(8);
+        root.addView(label, tlp);
+
+        SeekBar seek = new SeekBar(this);
+        seek.setMax(1500); // 范围 200~1700ms
+        seek.setProgress((int) Math.max(0, currentDelay - 200));
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                long delay = progress + 200;
+                label.setText("长按延迟：" + delay + "ms");
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                long delay = seekBar.getProgress() + 200;
+                prefs.putLong(TranslationPreferences.KEY_LONG_PRESS_DELAY, delay);
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        slp.topMargin = dp(2);
+        root.addView(seek, slp);
+    }
+
+    /** 结果内边距滑块 */
+    private void addResultPaddingSlider(LinearLayout root) {
+        TextView label = new TextView(this);
+        int currentPad = prefs.raw().getInt(TranslationPreferences.KEY_RESULT_PADDING,
+                TranslationPreferences.DEFAULT_PADDING);
+        label.setText("结果框内边距：" + currentPad + "dp");
+        label.setTextColor(0xFFCCCCCC);
+        label.setTextSize(12);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlp.topMargin = dp(8);
+        root.addView(label, tlp);
+
+        SeekBar seek = new SeekBar(this);
+        seek.setMax(48); // 范围 0~48dp
+        seek.setProgress(currentPad);
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                label.setText("结果框内边距：" + progress + "dp");
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                prefs.putInt(TranslationPreferences.KEY_RESULT_PADDING, seekBar.getProgress());
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        slp.topMargin = dp(2);
+        root.addView(seek, slp);
+    }
+
+    /** 颜色选择对话框 — 使用萌译同款 ColorPickerDialog，支持透明度滑块 */
+    private void showColorPickerDialog(String title, String prefKey, int defaultColor) {
+        int currentColor = prefs.raw().getInt(prefKey, defaultColor);
+        com.jaredrummler.android.colorpicker.ColorPickerDialog dialog = com.jaredrummler.android.colorpicker.ColorPickerDialog.newBuilder()
+                .setColor(currentColor)
+                .setShowAlphaSlider(true)
+                .setDialogTitle(0)
+                .create();
+        dialog.setColorPickerDialogListener(new com.jaredrummler.android.colorpicker.ColorPickerDialogListener() {
+            @Override
+            public void onColorSelected(int dialogId, int color) {
+                prefs.raw().edit().putInt(prefKey, color).apply();
+                Toast.makeText(TranslateControlActivity.this, "已保存", Toast.LENGTH_SHORT).show();
+                recreate();
+            }
+
+            @Override
+            public void onDialogDismissed(int dialogId) {
+                // 不做处理
+            }
+        });
+        dialog.show(getSupportFragmentManager(), "color_picker_" + prefKey);
+    }
+
+    /** Activity Result launcher for ball icon file picker */
+    private final androidx.activity.result.ActivityResultLauncher<Intent> ballIconPickerLauncher =
+            registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null
+                                && result.getData().getData() != null) {
+                            handleBallIconSelection(result.getData().getData());
+                        }
+                    });
 }

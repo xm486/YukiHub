@@ -101,6 +101,9 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("androidx.palette:palette:1.0.0")
 
+    // 颜色选择器（萌译同款，支持透明度滑块）
+    implementation("com.jaredrummler:colorpicker:1.1.0")
+
     // PaddleOCR PP-OCRv6_small — 唯一 OCR 引擎，离线运行
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.0")
     implementation("com.microsoft.onnxruntime:onnxruntime-extensions-android:0.12.4")

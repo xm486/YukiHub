@@ -327,6 +327,58 @@ private void showAiReviewSettingsDialogImpl() {
     root.addView(profileLabel("模型"));
     EditText model = profileEdit(settings.model, "deepseek-chat / gpt-4o-mini");
     root.addView(model, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+
+    // 获取模型列表按钮
+    Button fetchModelsBtn = new Button(activity);
+    fetchModelsBtn.setText("📋 获取模型列表");
+    fetchModelsBtn.setTextColor(0xFFFFFFFF);
+    fetchModelsBtn.setBackgroundColor(0xFF1A4A3A);
+    fetchModelsBtn.setTextSize(11);
+    LinearLayout.LayoutParams fetchLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(34));
+    fetchLp.setMargins(0, dp(4), 0, dp(8));
+    root.addView(fetchModelsBtn, fetchLp);
+    fetchModelsBtn.setOnClickListener(v -> {
+        String currentKey = apiKey.getText().toString().trim();
+        String currentUrl = baseUrl.getText().toString().trim();
+        if (currentKey.isEmpty()) {
+            Toast.makeText(activity, "请先填写 API Key", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        fetchModelsBtn.setEnabled(false);
+        fetchModelsBtn.setText("获取中...");
+        AppExecutors.runOnIo(() -> {
+            try {
+                java.util.List<String> models = com.yuki.yukihub.translate.OpenAiTranslationProvider.fetchModels(currentKey, currentUrl);
+                if (isActivityAlive()) {
+                    activity.runOnUiThread(() -> {
+                        fetchModelsBtn.setEnabled(true);
+                        fetchModelsBtn.setText("📋 获取模型列表");
+                        if (models.isEmpty()) {
+                            Toast.makeText(activity, "未获取到模型列表", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        String[] items = models.toArray(new String[0]);
+                        new AlertDialog.Builder(activity)
+                                .setTitle("选择模型（共 " + models.size() + " 个）")
+                                .setItems(items, (d, which) -> {
+                                    model.setText(items[which]);
+                                    Toast.makeText(activity, "已选择：" + items[which], Toast.LENGTH_SHORT).show();
+                                })
+                                .setNegativeButton("取消", null)
+                                .show();
+                    });
+                }
+            } catch (Throwable t) {
+                if (isActivityAlive()) {
+                    activity.runOnUiThread(() -> {
+                        fetchModelsBtn.setEnabled(true);
+                        fetchModelsBtn.setText("📋 获取模型列表");
+                        Toast.makeText(activity, "获取失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+                    });
+                }
+            }
+        });
+    });
     provider.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
         private boolean first = true;
         @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {

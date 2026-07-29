@@ -1,5 +1,7 @@
 package com.yuki.yukihub.translate;
 
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.app.AlertDialog;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -42,8 +44,8 @@ public class YukiTranslateService extends Service {
     private static final String TAG = "YukiTranslateService";
     private static final String CHANNEL_ID = "yukihub_translation";
     private static final int NOTIFICATION_ID = 10087;
-    private static final long LONG_PRESS_MS = 500L;
-    private static final int BALL_SIZE_DP = 52;
+    private static final long DEFAULT_LONG_PRESS_MS = 500L;
+    private static final int DEFAULT_BALL_SIZE_DP = 52;
 
     public static final String ACTION_START = "com.yuki.yukihub.translate.START";
     public static final String ACTION_STOP = "com.yuki.yukihub.translate.STOP";
@@ -69,6 +71,9 @@ public class YukiTranslateService extends Service {
     private TranslateResultOverlay resultOverlay;
     private BallStatus ballStatus = BallStatus.NORMAL;
     private boolean ballAdded;
+    // 旋转动画（翻译中光效）
+    private ValueAnimator rotationAnimator;
+    private long longPressMs = DEFAULT_LONG_PRESS_MS;
     private boolean downMoved;
     private float downRawX;
     private float downRawY;
@@ -204,17 +209,54 @@ public class YukiTranslateService extends Service {
     private void addFloatingBallIfNeeded() {
         if (ballAdded || windowManager == null) return;
 
+        // 读取个性化设置
+        int ballSize = getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                .getInt(TranslationPreferences.KEY_BALL_SIZE, TranslationPreferences.DEFAULT_BALL_SIZE);
+        float ballOpacity = getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                .getFloat(TranslationPreferences.KEY_BALL_OPACITY, TranslationPreferences.DEFAULT_BALL_OPACITY);
+        long longPressDelay = getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                .getLong(TranslationPreferences.KEY_LONG_PRESS_DELAY, TranslationPreferences.DEFAULT_LONG_PRESS_DELAY);
+        longPressMs = longPressDelay;
+
         floatingBall = new TextView(this);
         floatingBall.setText("译");
         floatingBall.setTextColor(Color.WHITE);
         floatingBall.setTextSize(20);
         floatingBall.setGravity(Gravity.CENTER);
         floatingBall.setContentDescription("YukiHub 翻译悬浮球");
-        floatingBall.setBackground(createBallBackground());
+        floatingBall.setBackground(createBallBackground(ballOpacity));
+
+        // 悬浮球图标：自定义优先
+        String customIcon = getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                .getString(TranslationPreferences.KEY_CUSTOM_BALL_ICON, "");
+        if (!customIcon.isEmpty()) {
+            try {
+                java.io.File iconFile = new java.io.File(getExternalFilesDir(null), "icon/" + customIcon);
+                if (iconFile.exists()) {
+                    android.graphics.Bitmap bitmap = android.graphics.BitmapFactory.decodeFile(iconFile.getAbsolutePath());
+                    if (bitmap != null) {
+                        // 圆形裁剪
+                        android.graphics.Bitmap rounded = getCircularBitmap(bitmap);
+                        if (rounded != null) {
+                            android.widget.ImageView iv = new android.widget.ImageView(this);
+                            iv.setImageBitmap(rounded);
+                            // 用 ImageView 代替 TextView
+                            // 由于 floatingBall 是 TextView，这里改用 setCompoundDrawables
+                            android.graphics.drawable.Drawable d = new android.graphics.drawable.BitmapDrawable(getResources(), rounded);
+                            floatingBall.setCompoundDrawablesWithIntrinsicBounds(null, null, null, d);
+                            floatingBall.setText("");
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "load custom ball icon failed", t);
+            }
+        }
+
         floatingBall.setOnTouchListener(this::onBallTouch);
 
         ballParams = new WindowManager.LayoutParams(
-                dp(BALL_SIZE_DP), dp(BALL_SIZE_DP),
+                dp(ballSize), dp(ballSize),
                 overlayWindowType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -225,6 +267,24 @@ public class YukiTranslateService extends Service {
         ballParams.y = prefs.getInt("translate_ball_y", dp(220));
         windowManager.addView(floatingBall, ballParams);
         ballAdded = true;
+    }
+
+    /** 圆形裁剪 Bitmap */
+    private android.graphics.Bitmap getCircularBitmap(android.graphics.Bitmap src) {
+        if (src == null) return null;
+        int size = Math.min(src.getWidth(), src.getHeight());
+        android.graphics.Bitmap output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(output);
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setAntiAlias(true);
+        paint.setFilterBitmap(true);
+        android.graphics.Rect rect = new android.graphics.Rect(0, 0, size, size);
+        android.graphics.RectF rectF = new android.graphics.RectF(rect);
+        canvas.drawARGB(0, 0, 0, 0);
+        canvas.drawOval(rectF, paint);
+        paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(src, rect, rect, paint);
+        return output;
     }
 
     private boolean onBallTouch(View view, MotionEvent event) {
@@ -239,7 +299,7 @@ public class YukiTranslateService extends Service {
                 longPressRunnable = () -> {
                     if (!downMoved) showBallMenu();
                 };
-                mainHandler.postDelayed(longPressRunnable, LONG_PRESS_MS);
+                mainHandler.postDelayed(longPressRunnable, longPressMs);
                 return true;
             case MotionEvent.ACTION_MOVE:
                 float dx = event.getRawX() - downRawX;
@@ -278,7 +338,8 @@ public class YukiTranslateService extends Service {
                     return;
                 }
                 if (selectedRect == null) {
-                    showCropOverlay();
+                    // 首次使用：先弹引导，再进入框选
+                    showFirstCropGuide();
                     return;
                 }
                 // 确保结果层已显示
@@ -297,13 +358,41 @@ public class YukiTranslateService extends Service {
                 }
                 removeCropOverlay();
                 ballStatus = BallStatus.NORMAL;
-                Toast.makeText(this, "框选完成", Toast.LENGTH_SHORT).show();
+                if (!hideAdjustToast()) Toast.makeText(this, "框选完成", Toast.LENGTH_SHORT).show();
                 break;
             case MOVING_RESULT:
                 // 结果移动状态下点击悬浮球：关闭触摸
                 if (resultOverlay != null) resultOverlay.setTouchable(false);
                 ballStatus = BallStatus.NORMAL;
                 break;
+        }
+    }
+
+    private void showFirstCropGuide() {
+        if (isFinishingDialogContextUnavailable()) {
+            showCropOverlay();
+            return;
+        }
+        try {
+            AlertDialog d = new AlertDialog.Builder(this)
+                    .setTitle("欢迎使用 YukiHub 翻译")
+                    .setMessage("看起来你是第一次使用翻译功能～\n\n"
+                            + "点击「开始框选」后，屏幕会进入区域选择模式：\n"
+                            + "• 拖动四个角调整框选范围\n"
+                            + "• 拖动中间移动整个选框\n"
+                            + "• 再次点击悬浮球确认选区\n\n"
+                            + "之后每次点击悬浮球，都会自动翻译框选区域内的文字。\n"
+                            + "长按悬浮球可以打开菜单，进行重新框选、移动结果层等操作。")
+                    .setPositiveButton("开始框选", (d2, w) -> showCropOverlay())
+                    .setNegativeButton("稍后再说", null)
+                    .setCancelable(true)
+                    .create();
+            Window window = d.getWindow();
+            if (window != null) window.setType(overlayWindowType());
+            d.show();
+        } catch (Throwable t) {
+            Log.w(TAG, "show guide failed", t);
+            showCropOverlay();
         }
     }
 
@@ -379,10 +468,12 @@ public class YukiTranslateService extends Service {
                             lastOcrResult = text;
                         }
                         // 发送翻译请求
+                        startBallSpinAnimation();
                         translationManager.translate(text, sourceLanguage, targetLanguage,
                                 new TranslationManager.Callback() {
                                     @Override
                                     public void onSuccess(String sourceText, String translatedText) {
+                                        stopBallSpinAnimation();
                                         if (resultOverlay != null) {
                                             resultOverlay.setResult(sourceText, translatedText, showSourceMode);
                                         }
@@ -390,6 +481,7 @@ public class YukiTranslateService extends Service {
 
                                     @Override
                                     public void onError(Throwable error) {
+                                        stopBallSpinAnimation();
                                         if (resultOverlay != null) {
                                             resultOverlay.setText("翻译失败：" + (error == null ? "未知错误" : error.getMessage()));
                                         }
@@ -427,9 +519,16 @@ public class YukiTranslateService extends Service {
         if ("UNIAI".equals(engine)) {
             String apiKey = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_APIKEY, "");
             String baseUrl = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_BASEURL, "");
-            String model = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_MODEL, "gpt-3.5-turbo");
+            String model = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_MODEL, "");
+            String systemPrompt = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_SYSTEM_PROMPT, "");
+            String userPrompt = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_USER_PROMPT, "");
+            String temperature = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_TEMPERATURE, "");
+            String extraParamsJson = translatePrefs.raw().getString(TranslationPreferences.KEY_OPENAI_EXTRA_PARAMS, "");
             if (apiKey.isEmpty()) return null;
-            return new OpenAiTranslationProvider(apiKey, baseUrl, model, null, null, null);
+            java.util.List<OpenAiTranslationProvider.Pair> extraParams =
+                    OpenAiTranslationProvider.decodeExtraParams(extraParamsJson);
+            return new OpenAiTranslationProvider(apiKey, baseUrl, model,
+                    systemPrompt, userPrompt, temperature, extraParams);
         }
         if ("VOLC".equals(engine)) {
             String ak = translatePrefs.raw().getString(TranslationPreferences.KEY_VOLC_AK, "");
@@ -550,11 +649,18 @@ public class YukiTranslateService extends Service {
 
         // 应用结果层外观
         if (resultOverlay != null) {
+            int fontColor = translatePrefs.raw().getInt(TranslationPreferences.KEY_RESULT_FONT_COLOR,
+                    TranslationPreferences.DEFAULT_FONT_COLOR);
+            int bgColor = translatePrefs.raw().getInt(TranslationPreferences.KEY_RESULT_BG_COLOR,
+                    TranslationPreferences.DEFAULT_BG_COLOR);
+            int padding = translatePrefs.raw().getInt(TranslationPreferences.KEY_RESULT_PADDING,
+                    TranslationPreferences.DEFAULT_PADDING);
             resultOverlay.setAppearance(
                     translatePrefs.getResultFontSize(),
-                    0xFFE9A0B1,
-                    0xD9383838,
+                    fontColor,
+                    bgColor,
                     12f,
+                    (float) padding,
                     translatePrefs.isResultPenetrable()
             );
         }
@@ -678,7 +784,7 @@ public class YukiTranslateService extends Service {
                                     if (resultOverlay != null && resultOverlay.isAdded()) {
                                         resultOverlay.setTouchable(true);
                                         ballStatus = BallStatus.MOVING_RESULT;
-                                        Toast.makeText(this, "拖动结果层后点击悬浮球确认", Toast.LENGTH_SHORT).show();
+                                        if (!hideAdjustToast()) Toast.makeText(this, "拖动结果层后点击悬浮球确认", Toast.LENGTH_SHORT).show();
                                     } else {
                                         Toast.makeText(this, "结果层未显示", Toast.LENGTH_SHORT).show();
                                     }
@@ -713,7 +819,15 @@ public class YukiTranslateService extends Service {
         return !canDrawOverlays(this);
     }
 
+    /** 是否隐藏操作提示 Toast（框选完成、移动结果层等） */
+    private boolean hideAdjustToast() {
+        return getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                .getBoolean(TranslationPreferences.KEY_ADJUST_NOT_TOAST,
+                        TranslationPreferences.DEFAULT_ADJUST_NOT_TOAST);
+    }
+
     private void cleanupOverlay() {
+        stopBallSpinAnimation();
         cancelLongPress();
         removeCropOverlay();
         if (resultOverlay != null) {
@@ -744,6 +858,52 @@ public class YukiTranslateService extends Service {
                 .putInt("translate_ball_x", ballParams.x)
                 .putInt("translate_ball_y", ballParams.y)
                 .apply();
+    }
+
+    // ==================== 悬浮球旋转光效 ====================
+
+    /** 启动翻译中旋转光效：悬浮球外围有光晕旋转呼吸 */
+    private void startBallSpinAnimation() {
+        if (rotationAnimator != null) return;
+        if (floatingBall == null) return;
+
+        rotationAnimator = ValueAnimator.ofFloat(0f, 360f);
+        rotationAnimator.setDuration(1200); // 1.2秒一圈
+        rotationAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        rotationAnimator.setInterpolator(null); // 线性匀速
+        rotationAnimator.addUpdateListener(anim -> {
+            if (floatingBall == null) return;
+            float angle = (float) anim.getAnimatedValue();
+            // 在悬浮球外围画一个旋转亮环
+            GradientDrawable bg = new GradientDrawable();
+            bg.setShape(GradientDrawable.OVAL);
+            float op = getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                    .getFloat(TranslationPreferences.KEY_BALL_OPACITY, TranslationPreferences.DEFAULT_BALL_OPACITY);
+            int baseColor = 0xEE6750A4;
+            int alpha = Math.round(((baseColor >>> 24) & 0xFF) * op);
+            bg.setColor((alpha << 24) | (baseColor & 0x00FFFFFF));
+            // 添加一个渐变边框作为光效环
+            int size = floatingBall.getWidth();
+            if (size <= 0) size = dp(DEFAULT_BALL_SIZE_DP);
+            int ringWidth = dp(2);
+            int ringAlpha = (int) (70 + 50 * Math.sin(Math.toRadians(angle * 2))); // 亮度呼吸效果
+            bg.setStroke(ringWidth, 0x40FFFFFF | (ringAlpha << 24));
+            floatingBall.setBackground(bg);
+        });
+        rotationAnimator.start();
+    }
+
+    /** 停止旋转动画，恢复正常外观 */
+    private void stopBallSpinAnimation() {
+        if (rotationAnimator != null) {
+            rotationAnimator.cancel();
+            rotationAnimator = null;
+        }
+        if (floatingBall != null) {
+            float op = getSharedPreferences("yukihub_prefs", MODE_PRIVATE)
+                    .getFloat(TranslationPreferences.KEY_BALL_OPACITY, TranslationPreferences.DEFAULT_BALL_OPACITY);
+            floatingBall.setBackground(createBallBackground(op));
+        }
     }
 
     private Notification buildNotification() {
@@ -787,9 +947,15 @@ public class YukiTranslateService extends Service {
     }
 
     private GradientDrawable createBallBackground() {
+        return createBallBackground(1.0f);
+    }
+
+    private GradientDrawable createBallBackground(float opacity) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setShape(GradientDrawable.OVAL);
-        drawable.setColor(0xEE6750A4);
+        int baseColor = 0xEE6750A4;
+        int alpha = Math.round(((baseColor >>> 24) & 0xFF) * opacity);
+        drawable.setColor((alpha << 24) | (baseColor & 0x00FFFFFF));
         drawable.setStroke(dp(1), 0xFFFFFFFF);
         return drawable;
     }

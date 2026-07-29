@@ -62,6 +62,10 @@ public final class TranslationPreferences {
     public static final String KEY_OPENAI_APIKEY = "translate_openai_apikey";
     public static final String KEY_OPENAI_BASEURL = "translate_openai_baseurl";
     public static final String KEY_OPENAI_MODEL = "translate_openai_model";
+    public static final String KEY_OPENAI_SYSTEM_PROMPT = "translate_openai_system_prompt";
+    public static final String KEY_OPENAI_USER_PROMPT = "translate_openai_user_prompt";
+    public static final String KEY_OPENAI_TEMPERATURE = "translate_openai_temperature";
+    public static final String KEY_OPENAI_EXTRA_PARAMS = "translate_openai_extra_params";
     public static final String KEY_VOLC_AK = "translate_volc_ak";
     public static final String KEY_VOLC_SK = "translate_volc_sk";
     public static final String KEY_AZURE_KEY = "translate_azure_key";
@@ -71,6 +75,25 @@ public final class TranslationPreferences {
     public static final String KEY_BAIDU_SECRETKEY = "translate_baidu_secretkey";
     public static final String KEY_TENCENT_SECRETID = "translate_tencent_secretid";
     public static final String KEY_TENCENT_SECRETKEY = "translate_tencent_secretkey";
+
+    // 个性化设置键
+    public static final String KEY_BALL_SIZE = "translate_ball_size";
+    public static final String KEY_LONG_PRESS_DELAY = "translate_long_press_delay";
+    public static final String KEY_BALL_OPACITY = "translate_ball_opacity";
+    public static final String KEY_CUSTOM_BALL_ICON = "translate_custom_ball_icon";
+    public static final String KEY_RESULT_FONT_COLOR = "translate_result_font_color";
+    public static final String KEY_RESULT_BG_COLOR = "translate_result_bg_color";
+    public static final String KEY_RESULT_PADDING = "translate_result_padding";
+    public static final String KEY_ADJUST_NOT_TOAST = "translate_adjust_not_toast";
+
+    // 默认值
+    public static final int DEFAULT_BALL_SIZE = 52;
+    public static final long DEFAULT_LONG_PRESS_DELAY = 500L;
+    public static final float DEFAULT_BALL_OPACITY = 1.0f;
+    public static final int DEFAULT_FONT_COLOR = 0xFFE9A0B1;
+    public static final int DEFAULT_BG_COLOR = 0xD9383838;
+    public static final int DEFAULT_PADDING = 16;
+    public static final boolean DEFAULT_ADJUST_NOT_TOAST = false;
 
     private final SharedPreferences prefs;
 

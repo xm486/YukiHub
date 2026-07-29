@@ -70,8 +70,8 @@ public final class VolcTranslationProvider implements TranslationTextProvider {
         VolcSign signer = new VolcSign(REGION, SERVICE, SCHEMA, ENDPOINT, PATH, ak, sk);
 
         JSONObject requestBody = new JSONObject();
-        requestBody.put("TargetLanguage", to);
-        if (from != null) requestBody.put("SourceLanguage", from);
+        requestBody.put("TargetLanguage", modifyLanguage(to));
+        if (from != null) requestBody.put("SourceLanguage", modifyLanguage(from));
         requestBody.put("TextList", new JSONArray(Collections.singletonList(text)));
 
         Map<String, String> queryParams = new HashMap<>();
@@ -101,6 +101,13 @@ public final class VolcTranslationProvider implements TranslationTextProvider {
             sb.append(translationList.getJSONObject(i).getString("Translation"));
         }
         return sb.toString();
+    }
+
+    /** 火山引擎繁体中文语言码适配（与萌译一致） */
+    private String modifyLanguage(String lang) {
+        if ("zh-hk-Hant".equals(lang)) return "zh-Hant-hk";
+        if ("zh-tw-Hant".equals(lang)) return "zh-Hant-tw";
+        return lang;
     }
 
     @Override
