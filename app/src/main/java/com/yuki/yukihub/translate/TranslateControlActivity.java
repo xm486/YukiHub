@@ -40,20 +40,62 @@ public class TranslateControlActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = new TranslationPreferences(this);
-        setContentView(R.layout.activity_translate_control);
 
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setTitle("翻译设置");
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        }
+        // 自定义标题栏 + 内容区
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
 
-        buildContent();
+        // 标题栏
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(16), dp(12), dp(16), dp(12));
+        header.setBackgroundColor(0xFF1A1F2E);
+
+        TextView backBtn = new TextView(this);
+        backBtn.setText("← 返回");
+        backBtn.setTextColor(0xFF8AB4FF);
+        backBtn.setTextSize(14);
+        backBtn.setOnClickListener(v -> finish());
+        header.addView(backBtn);
+
+        TextView title = new TextView(this);
+        title.setText("翻译设置");
+        title.setTextColor(0xFFF5F7FF);
+        title.setTextSize(16);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, -2, 1);
+        tlp.setMargins(dp(12), 0, 0, 0);
+        header.addView(title, tlp);
+
+        wrapper.addView(header);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(0xFF101522);
+        scroll.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        wrapper.addView(scroll);
+
+        setContentView(wrapper);
+
+        buildContent(scroll);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        buildContent();
+        // 找到当前 ScrollView 并重建内容
+        View content = getWindow().getDecorView().findViewById(android.R.id.content);
+        if (content instanceof LinearLayout) {
+            LinearLayout wrapper = (LinearLayout) content;
+            for (int i = 0; i < wrapper.getChildCount(); i++) {
+                View child = wrapper.getChildAt(i);
+                if (child instanceof ScrollView) {
+                    buildContent((ScrollView) child);
+                    break;
+                }
+            }
+        }
     }
 
     @Override
@@ -62,15 +104,7 @@ public class TranslateControlActivity extends AppCompatActivity {
         return true;
     }
 
-    private void buildContent() {
-        ScrollView scroll = findViewById(R.id.translateScrollContainer);
-        if (scroll == null) {
-            // Fallback: create dynamically if layout not found
-            scroll = new ScrollView(this);
-            scroll.setFillViewport(true);
-            setContentView(scroll);
-        }
-
+    private void buildContent(ScrollView scroll) {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(16);

@@ -268,12 +268,39 @@ public class SocialApiClient {
 
     // ==================== 聊天 API ====================
 
+    /** 表情包条目 */
+    public static class EmojiInfo {
+        public final String name;
+        public final String url;
+        public EmojiInfo(String name, String url) { this.name = name; this.url = url; }
+    }
+
+    /** 获取服务器表情包列表 */
+    public java.util.List<EmojiInfo> getEmojiList() throws Exception {
+        String resp = doGet("/chat/emojis", null);
+        JSONObject root = new JSONObject(resp);
+        JSONArray arr = root.optJSONArray("emojis");
+        java.util.List<EmojiInfo> list = new java.util.ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject e = arr.getJSONObject(i);
+                list.add(new EmojiInfo(e.optString("name"), e.optString("url")));
+            }
+        }
+        return list;
+    }
+
     /** 发送消息 */
     public ChatMessage sendMessage(String receiverId, String content) throws Exception {
+        return sendMessage(receiverId, content, "text");
+    }
+
+    /** 发送消息（支持指定 msgType） */
+    public ChatMessage sendMessage(String receiverId, String content, String msgType) throws Exception {
         JSONObject body = new JSONObject();
         body.put("receiverId", receiverId);
         body.put("content", content);
-        body.put("msgType", "text");
+        body.put("msgType", msgType);
         String resp = doPost("/chat/send", body);
         JSONObject root = new JSONObject(resp);
         JSONObject msg = root.optJSONObject("message");
@@ -392,10 +419,15 @@ public class SocialApiClient {
 
     /** 发送群组消息 */
     public GroupMessage sendGroupMessage(int groupId, String content) throws Exception {
+        return sendGroupMessage(groupId, content, "text");
+    }
+
+    /** 发送群组消息（支持指定 msgType） */
+    public GroupMessage sendGroupMessage(int groupId, String content, String msgType) throws Exception {
         JSONObject body = new JSONObject();
         body.put("groupId", groupId);
         body.put("content", content);
-        body.put("msgType", "text");
+        body.put("msgType", msgType);
         String resp = doPost("/groups/send", body);
         JSONObject root = new JSONObject(resp);
         JSONObject msg = root.optJSONObject("message");

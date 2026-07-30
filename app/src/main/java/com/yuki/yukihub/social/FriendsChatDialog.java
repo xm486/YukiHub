@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -47,6 +48,11 @@ public class FriendsChatDialog {
     private static final android.util.LruCache<String, android.graphics.Bitmap> avatarCache =
             new android.util.LruCache<>(AVATAR_CACHE_SIZE);
 
+    // 表情包缓存（key = emoji URL）
+    private static final int EMOJI_CACHE_SIZE = 64;
+    private static final android.util.LruCache<String, android.graphics.Bitmap> emojiCache =
+            new android.util.LruCache<>(EMOJI_CACHE_SIZE);
+
     private final Activity activity;
     private final Context appContext;
     private final SocialApiClient apiClient;
@@ -54,6 +60,8 @@ public class FriendsChatDialog {
 
     private Dialog dialog;
     private Dialog optionDialog;
+    private Dialog emojiDialog;
+    private java.util.Map<String, String> emojiUrlMap;  // emojiName → URL
     private LinearLayout contentHost;
     private LinearLayout contentContainer;
     private TextView titleBar;
@@ -154,6 +162,15 @@ public class FriendsChatDialog {
         titleBar.setTypeface(null, android.graphics.Typeface.BOLD);
         titleBar.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
         header.addView(titleBar);
+
+        // 关闭按钮
+        TextView closeBtn = new TextView(activity);
+        closeBtn.setText("✕");
+        closeBtn.setTextColor(0xFF8AB4FF);
+        closeBtn.setTextSize(18);
+        closeBtn.setPadding(dp(6), 0, dp(2), 0);
+        closeBtn.setOnClickListener(v -> dialog.dismiss());
+        header.addView(closeBtn);
 
         root.addView(header);
 
@@ -541,6 +558,23 @@ public class FriendsChatDialog {
         inputRow.setGravity(Gravity.CENTER_VERTICAL);
         inputRow.setPadding(0, dp(4), 0, 0);
 
+        // 表情按钮（左侧）
+        TextView emojiBtn = new TextView(activity);
+        emojiBtn.setText("😀");
+        emojiBtn.setTextSize(22);
+        emojiBtn.setGravity(Gravity.CENTER);
+        emojiBtn.setOnClickListener(v -> {
+            if (emojiDialog != null && emojiDialog.isShowing()) {
+                emojiDialog.dismiss();
+            } else {
+                showEmojiPicker(false);
+            }
+        });
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        elp.setMargins(0, 0, dp(4), 0);
+        emojiBtn.setLayoutParams(elp);
+        inputRow.addView(emojiBtn);
+
         chatInput = new EditText(activity);
         chatInput.setHint("输入消息...");
         chatInput.setTextColor(0xFFF5F7FF);
@@ -560,11 +594,11 @@ public class FriendsChatDialog {
             return false;
         });
         LinearLayout.LayoutParams il = new LinearLayout.LayoutParams(0, -2, 1);
-        il.setMargins(0, 0, dp(6), 0);
+        il.setMargins(dp(4), 0, dp(4), 0);
         inputRow.addView(chatInput, il);
 
         Button sendBtn = socialButton("发送", v -> sendMessage());
-        sendBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(38)));
+        sendBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(36)));
         inputRow.addView(sendBtn);
         contentContainer.addView(inputRow);
 
@@ -629,18 +663,26 @@ public class FriendsChatDialog {
         wrapper.setOrientation(LinearLayout.VERTICAL);
         wrapper.setPadding(dp(4), dp(2), dp(4), dp(2));
 
-        TextView bubble = new TextView(activity);
-        bubble.setText(msg.content);
-        bubble.setTextColor(0xFFF5F7FF);
-        bubble.setTextSize(13);
-        bubble.setLineSpacing(dp(2), 1.0f);
-        bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
-        bubble.setBackgroundResource(msg.isMine ? R.drawable.bg_chat_bubble_self : R.drawable.bg_chat_bubble_friend);
-        bubble.setTag("chat_bubble");
+        // 表情包消息：直接显示图片
+        if ("emoji".equals(msg.msgType)) {
+            View emojiView = buildEmojiContentView(msg.content);
+            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(96), dp(96));
+            elp.gravity = msg.isMine ? Gravity.END : Gravity.START;
+            wrapper.addView(emojiView, elp);
+        } else {
+            TextView bubble = new TextView(activity);
+            bubble.setText(msg.content);
+            bubble.setTextColor(0xFFF5F7FF);
+            bubble.setTextSize(13);
+            bubble.setLineSpacing(dp(2), 1.0f);
+            bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+            bubble.setBackgroundResource(msg.isMine ? R.drawable.bg_chat_bubble_self : R.drawable.bg_chat_bubble_friend);
+            bubble.setTag("chat_bubble");
 
-        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
-        bl.gravity = msg.isMine ? Gravity.END : Gravity.START;
-        wrapper.addView(bubble, bl);
+            LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
+            bl.gravity = msg.isMine ? Gravity.END : Gravity.START;
+            wrapper.addView(bubble, bl);
+        }
 
         TextView time = new TextView(activity);
         time.setText(formatTime(msg.createdAt));
@@ -753,18 +795,28 @@ public class FriendsChatDialog {
         inputRow.setGravity(Gravity.CENTER_VERTICAL);
         inputRow.setPadding(0, dp(4), 0, 0);
 
-        // 表情按钮（预留，暂时禁用）
+        boolean canSpeak = group.canSpeak();
+
+        // 表情按钮（左侧）
         TextView emojiBtn = new TextView(activity);
         emojiBtn.setText("😀");
-        emojiBtn.setTextSize(18);
+        emojiBtn.setTextSize(22);
         emojiBtn.setGravity(Gravity.CENTER);
-        emojiBtn.setPadding(dp(6), dp(4), dp(6), dp(4));
-        emojiBtn.setAlpha(0.4f);
-        emojiBtn.setOnClickListener(v ->
-                Toast.makeText(activity, "表情包功能即将上线~", Toast.LENGTH_SHORT).show());
-        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(36), dp(38));
+        emojiBtn.setOnClickListener(v -> {
+            if (canSpeak) {
+                if (emojiDialog != null && emojiDialog.isShowing()) {
+                    emojiDialog.dismiss();
+                } else {
+                    showEmojiPicker(true);
+                }
+            } else {
+                Toast.makeText(activity, "公告版仅管理员可发言", Toast.LENGTH_SHORT).show();
+            }
+        });
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(40), dp(40));
         elp.setMargins(0, 0, dp(4), 0);
-        inputRow.addView(emojiBtn, elp);
+        emojiBtn.setLayoutParams(elp);
+        inputRow.addView(emojiBtn);
 
         groupChatInput = new EditText(activity);
         groupChatInput.setTextColor(0xFFF5F7FF);
@@ -776,7 +828,6 @@ public class FriendsChatDialog {
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         groupChatInput.setHorizontallyScrolling(false);
 
-        boolean canSpeak = group.canSpeak();
         if (canSpeak) {
             groupChatInput.setHint("输入消息...");
             groupChatInput.setEnabled(true);
@@ -797,18 +848,14 @@ public class FriendsChatDialog {
         }
 
         LinearLayout.LayoutParams il = new LinearLayout.LayoutParams(0, -2, 1);
-        il.setMargins(0, 0, dp(6), 0);
+        il.setMargins(dp(4), 0, dp(4), 0);
         inputRow.addView(groupChatInput, il);
 
         Button sendBtn = socialButton("发送", v -> {
             if (canSpeak) sendGroupMessage();
             else Toast.makeText(activity, "公告版仅管理员可发言", Toast.LENGTH_SHORT).show();
         });
-        sendBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(38)));
-        if (!canSpeak) {
-            sendBtn.setEnabled(false);
-            sendBtn.setAlpha(0.5f);
-        }
+        sendBtn.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(36)));
         inputRow.addView(sendBtn);
         contentContainer.addView(inputRow);
 
@@ -969,17 +1016,25 @@ public class FriendsChatDialog {
             }
             leftCol.addView(myNickRow);
 
-            TextView bubble = new TextView(activity);
-            bubble.setText(msg.content);
-            bubble.setTextColor(0xFFF5F7FF);
-            bubble.setTextSize(13);
-            bubble.setLineSpacing(dp(2), 1.0f);
-            bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
-            bubble.setBackgroundResource(R.drawable.bg_chat_bubble_self);
-            LinearLayout.LayoutParams bubbleLp = new LinearLayout.LayoutParams(-2, -2);
-            bubbleLp.gravity = Gravity.END;
-            bubble.setTag("group_bubble");
-            leftCol.addView(bubble, bubbleLp);
+            if ("emoji".equals(msg.msgType)) {
+                // 表情包：只显示图片
+                View emojiView = buildEmojiContentView(msg.content);
+                LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(96), dp(96));
+                elp.gravity = Gravity.END;
+                leftCol.addView(emojiView, elp);
+            } else {
+                TextView bubble = new TextView(activity);
+                bubble.setText(msg.content);
+                bubble.setTextColor(0xFFF5F7FF);
+                bubble.setTextSize(13);
+                bubble.setLineSpacing(dp(2), 1.0f);
+                bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+                bubble.setBackgroundResource(R.drawable.bg_chat_bubble_self);
+                bubble.setTag("group_bubble");
+                LinearLayout.LayoutParams bubbleLp = new LinearLayout.LayoutParams(-2, -2);
+                bubbleLp.gravity = Gravity.END;
+                leftCol.addView(bubble, bubbleLp);
+            }
 
             TextView time = new TextView(activity);
             time.setText(formatTime(msg.createdAt));
@@ -1076,16 +1131,22 @@ public class FriendsChatDialog {
             }
             rightCol.addView(nickRow);
 
-            TextView bubble = new TextView(activity);
-            bubble.setText(msg.content);
-            bubble.setTextColor(0xFFF5F7FF);
-            bubble.setTextSize(13);
-            bubble.setLineSpacing(dp(2), 1.0f);
-            bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
-            bubble.setBackgroundResource(R.drawable.bg_chat_bubble_friend);
-            LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
-            bubble.setTag("group_bubble");
-            rightCol.addView(bubble, bl);
+            if ("emoji".equals(msg.msgType)) {
+                // 表情包：只显示图片
+                View emojiView = buildEmojiContentView(msg.content);
+                rightCol.addView(emojiView);
+            } else {
+                TextView bubble = new TextView(activity);
+                bubble.setText(msg.content);
+                bubble.setTextColor(0xFFF5F7FF);
+                bubble.setTextSize(13);
+                bubble.setLineSpacing(dp(2), 1.0f);
+                bubble.setPadding(dp(10), dp(6), dp(10), dp(6));
+                bubble.setBackgroundResource(R.drawable.bg_chat_bubble_friend);
+                bubble.setTag("group_bubble");
+                LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
+                rightCol.addView(bubble, bl);
+            }
 
             TextView time = new TextView(activity);
             time.setText(formatTime(msg.createdAt));
@@ -2159,7 +2220,7 @@ public class FriendsChatDialog {
     private void loadAvatarInto(String url, ImageView imageView, TextView fallback) {
         if (url == null || url.isEmpty()) return;
 
-        // 检查缓存
+        // 1. 内存缓存
         android.graphics.Bitmap cached = avatarCache.get(url);
         if (cached != null) {
             imageView.setImageBitmap(cached);
@@ -2168,15 +2229,32 @@ public class FriendsChatDialog {
             return;
         }
 
+        // 2. 磁盘缓存
+        android.graphics.Bitmap diskBmp = bitmapFromDiskCache(url);
+        if (diskBmp != null) {
+            android.graphics.Bitmap roundBmp = toRoundBitmap(diskBmp);
+            avatarCache.put(url, roundBmp);
+            activity.runOnUiThread(() -> {
+                imageView.setImageBitmap(roundBmp);
+                imageView.setVisibility(View.VISIBLE);
+                fallback.setVisibility(View.GONE);
+            });
+            // 后台检查更新（条件请求，图没变不会下载）
+            checkForUpdate(url, diskBmp, bmp -> {
+                android.graphics.Bitmap newRound = toRoundBitmap(bmp);
+                avatarCache.put(url, newRound);
+                saveBitmapToDiskCache(url, bmp);
+                activity.runOnUiThread(() -> {
+                    imageView.setImageBitmap(newRound);
+                });
+            });
+            return;
+        }
+
+        // 3. 网络加载
         new Thread(() -> {
             try {
-                java.net.URL imgUrl = new java.net.URL(url);
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) imgUrl.openConnection();
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-                conn.setInstanceFollowRedirects(true);
-                android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(conn.getInputStream());
-                conn.disconnect();
+                android.graphics.Bitmap bmp = downloadBitmapWithCache(url);
                 if (bmp != null) {
                     android.graphics.Bitmap roundBmp = toRoundBitmap(bmp);
                     avatarCache.put(url, roundBmp);
@@ -2188,6 +2266,116 @@ public class FriendsChatDialog {
                 }
             } catch (Throwable ignored) {}
         }, "YukiHub-Avatar-Load").start();
+    }
+
+    // ==================== 磁盘缓存 & HTTP 条件请求 ====================
+
+    /** 获取磁盘缓存目录 */
+    private java.io.File getDiskCacheDir() {
+        java.io.File dir = new java.io.File(appContext.getCacheDir(), "image_cache");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    /** URL → 缓存文件名 */
+    private String urlToCacheKey(String url) {
+        return "img_" + Math.abs(url.hashCode());
+    }
+
+    /** 从磁盘缓存读取 Bitmap */
+    private android.graphics.Bitmap bitmapFromDiskCache(String url) {
+        java.io.File file = new java.io.File(getDiskCacheDir(), urlToCacheKey(url));
+        if (file.exists()) {
+            try {
+                return android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath());
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    /** 保存 Bitmap 到磁盘缓存（WEBP 80% 质量） */
+    private void saveBitmapToDiskCache(String url, android.graphics.Bitmap bmp) {
+        java.io.File file = new java.io.File(getDiskCacheDir(), urlToCacheKey(url));
+        try {
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
+            bmp.compress(android.graphics.Bitmap.CompressFormat.WEBP, 80, fos);
+            fos.close();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 从磁盘缓存读取 Last-Modified 时间戳 */
+    private String getLastModifiedFromDisk(String url) {
+        java.io.File metaFile = new java.io.File(getDiskCacheDir(), urlToCacheKey(url) + ".meta");
+        if (metaFile.exists()) {
+            try {
+                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(metaFile));
+                String lm = br.readLine();
+                br.close();
+                return lm;
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    /** 保存 Last-Modified 时间戳到磁盘 */
+    private void saveLastModifiedToDisk(String url, String lastModified) {
+        if (lastModified == null || lastModified.isEmpty()) return;
+        java.io.File metaFile = new java.io.File(getDiskCacheDir(), urlToCacheKey(url) + ".meta");
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter(metaFile);
+            fw.write(lastModified);
+            fw.close();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 下载 Bitmap，带条件请求 + 自动缓存到磁盘 */
+    private android.graphics.Bitmap downloadBitmapWithCache(String url) throws Exception {
+        java.net.URL imgUrl = new java.net.URL(url);
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) imgUrl.openConnection();
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.setInstanceFollowRedirects(true);
+
+        // 带上条件请求头
+        String lm = getLastModifiedFromDisk(url);
+        if (lm != null) {
+            conn.setRequestProperty("If-Modified-Since", lm);
+        }
+
+        int responseCode = conn.getResponseCode();
+
+        // 304 Not Modified — 服务器文件没变，返回 null 表示无需更新
+        if (responseCode == java.net.HttpURLConnection.HTTP_NOT_MODIFIED) {
+            conn.disconnect();
+            return null;
+        }
+
+        // 200 OK — 下载新图片
+        android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(conn.getInputStream());
+        conn.disconnect();
+
+        if (bmp != null) {
+            // 保存到磁盘缓存
+            saveBitmapToDiskCache(url, bmp);
+            // 保存 Last-Modified
+            String newLm = conn.getHeaderField("Last-Modified");
+            saveLastModifiedToDisk(url, newLm);
+        }
+
+        return bmp;
+    }
+
+    /** 后台检查图片更新（条件请求，图没变不下载） */
+    private void checkForUpdate(String url, android.graphics.Bitmap oldBmp, java.util.function.Consumer<android.graphics.Bitmap> onUpdate) {
+        new Thread(() -> {
+            try {
+                android.graphics.Bitmap newer = downloadBitmapWithCache(url);
+                // downloadBitmapWithCache 返回 null 表示 304 无需更新
+                if (newer != null) {
+                    onUpdate.accept(newer);
+                }
+            } catch (Throwable ignored) {}
+        }, "YukiHub-Image-Update-Check").start();
     }
 
     /** 根据昵称生成一致的头像背景色 */
@@ -2617,5 +2805,235 @@ public class FriendsChatDialog {
             java.text.SimpleDateFormat dateFmt = new java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault());
             return dateFmt.format(date);
         } catch (Throwable t) { return ""; }
+    }
+
+    // ==================== 表情包 ====================
+
+    /** 从 URL 加载表情 Bitmap 到 ImageView（异步，带缓存） */
+    private void loadEmojiInto(String url, ImageView imageView, int size) {
+        if (url == null || url.isEmpty()) return;
+
+        // 1. 内存缓存
+        android.graphics.Bitmap cached = emojiCache.get(url);
+        if (cached != null) {
+            imageView.setImageBitmap(cached);
+            return;
+        }
+
+        // 2. 磁盘缓存
+        android.graphics.Bitmap diskBmp = bitmapFromDiskCache(url);
+        if (diskBmp != null) {
+            float ratio = (float) size / Math.max(diskBmp.getWidth(), diskBmp.getHeight());
+            int w = Math.round(diskBmp.getWidth() * ratio);
+            int h = Math.round(diskBmp.getHeight() * ratio);
+            android.graphics.Bitmap scaled = android.graphics.Bitmap.createScaledBitmap(diskBmp, w, h, true);
+            emojiCache.put(url, scaled);
+            activity.runOnUiThread(() -> imageView.setImageBitmap(scaled));
+            // 后台检查更新
+            checkForUpdate(url, diskBmp, bmp -> {
+                float r2 = (float) size / Math.max(bmp.getWidth(), bmp.getHeight());
+                int w2 = Math.round(bmp.getWidth() * r2);
+                int h2 = Math.round(bmp.getHeight() * r2);
+                android.graphics.Bitmap scaled2 = android.graphics.Bitmap.createScaledBitmap(bmp, w2, h2, true);
+                emojiCache.put(url, scaled2);
+                saveBitmapToDiskCache(url, bmp);
+                activity.runOnUiThread(() -> imageView.setImageBitmap(scaled2));
+            });
+            return;
+        }
+
+        // 3. 网络加载
+        new Thread(() -> {
+            try {
+                android.graphics.Bitmap bmp = downloadBitmapWithCache(url);
+                if (bmp != null) {
+                    float ratio = (float) size / Math.max(bmp.getWidth(), bmp.getHeight());
+                    int w = Math.round(bmp.getWidth() * ratio);
+                    int h = Math.round(bmp.getHeight() * ratio);
+                    android.graphics.Bitmap scaled = android.graphics.Bitmap.createScaledBitmap(bmp, w, h, true);
+                    emojiCache.put(url, scaled);
+                    activity.runOnUiThread(() -> imageView.setImageBitmap(scaled));
+                }
+            } catch (Throwable ignored) {}
+        }, "YukiHub-Emoji-Load").start();
+    }
+
+    /** 构建表情图片 View（服务端 URL 加载） */
+    private View buildEmojiContentView(String emojiName) {
+        ImageView emojiView = new ImageView(activity);
+        int emojiSize = dp(96);
+        emojiView.setLayoutParams(new LinearLayout.LayoutParams(emojiSize, emojiSize));
+        // 尝试从 URL 映射获取，否则构造默认 URL
+        String url = emojiUrlMap != null ? emojiUrlMap.get(emojiName) : null;
+        if (url == null) {
+            url = "https://yukihub.zh.kg/uploads/emojis/" + emojiName + ".webp";
+        }
+        loadEmojiInto(url, emojiView, emojiSize);
+        return emojiView;
+    }
+
+    /** 表情包选择弹窗（从服务器拉取列表） */
+    private void showEmojiPicker(boolean isGroupChat) {
+        // 先显示加载中
+        Toast.makeText(activity, "加载表情包中...", Toast.LENGTH_SHORT).show();
+
+        // 后台拉取
+        AppExecutors.runOnIo(() -> {
+            try {
+                java.util.List<SocialApiClient.EmojiInfo> serverEmojis = apiClient.getEmojiList();
+                if (serverEmojis == null || serverEmojis.isEmpty()) {
+                    uiHandler.post(() -> Toast.makeText(activity, "暂无表情包", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+
+                // 构建 name→URL 映射
+                final java.util.Map<String, String> map = new java.util.HashMap<>();
+                final java.util.List<String> names = new java.util.ArrayList<>();
+                for (SocialApiClient.EmojiInfo e : serverEmojis) {
+                    map.put(e.name, e.url);
+                    names.add(e.name);
+                }
+                // 保存到全局映射（供气泡加载用）
+                emojiUrlMap = map;
+
+                // 回到 UI 线程构建弹窗
+                activity.runOnUiThread(() -> {
+                    LinearLayout rootBox = new LinearLayout(activity);
+                    rootBox.setOrientation(LinearLayout.VERTICAL);
+                    rootBox.setBackgroundResource(R.drawable.bg_social_panel);
+                    rootBox.setPadding(dp(10), dp(8), dp(10), dp(10));
+
+                    // 标题行
+                    TextView titleBar = new TextView(activity);
+                    titleBar.setText("表情包  (点空白处关闭)");
+                    titleBar.setTextColor(0xFF8AB4FF);
+                    titleBar.setTextSize(13);
+                    titleBar.setPadding(0, 0, 0, dp(6));
+                    rootBox.addView(titleBar);
+
+                    // 表情网格
+                    int cols = 5;
+                    android.widget.GridView grid = new android.widget.GridView(activity);
+                    grid.setNumColumns(cols);
+                    grid.setStretchMode(android.widget.GridView.STRETCH_COLUMN_WIDTH);
+                    grid.setHorizontalSpacing(dp(4));
+                    grid.setVerticalSpacing(dp(4));
+                    grid.setPadding(0, 0, 0, 0);
+                    grid.setBackgroundColor(0xFF101522);
+
+                    android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
+                        @Override public int getCount() { return names.size(); }
+                        @Override public Object getItem(int position) { return names.get(position); }
+                        @Override public long getItemId(int position) { return position; }
+                        @Override public View getView(int position, View convertView, ViewGroup parent) {
+                            String name = names.get(position);
+                            ImageView iv = (convertView instanceof ImageView) ? (ImageView) convertView : new ImageView(activity);
+                            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                            iv.setLayoutParams(new android.widget.AbsListView.LayoutParams(dp(56), dp(56)));
+                            String url = map.get(name);
+                            if (url != null) loadEmojiInto(url, iv, dp(48));
+                            return iv;
+                        }
+                    };
+                    grid.setAdapter(adapter);
+
+                    grid.setOnItemClickListener((parent, view, position, id) -> {
+                        String emojiName = names.get(position);
+                        if (emojiDialog != null) emojiDialog.dismiss();
+                        if (isGroupChat) sendEmojiGroupMessage(emojiName);
+                        else sendEmojiMessage(emojiName);
+                    });
+
+                    rootBox.addView(grid, new LinearLayout.LayoutParams(-1, dp(280)));
+
+                    // 关闭按钮
+                    TextView closeBtn = new TextView(activity);
+                    closeBtn.setText("关闭");
+                    closeBtn.setTextColor(0xFFF5F7FF);
+                    closeBtn.setTextSize(13);
+                    closeBtn.setGravity(Gravity.CENTER);
+                    closeBtn.setBackgroundResource(R.drawable.bg_input);
+                    closeBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
+                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
+                    clp.topMargin = dp(8);
+                    rootBox.addView(closeBtn, clp);
+
+                    emojiDialog = new Dialog(activity);
+                    emojiDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+                    emojiDialog.setContentView(rootBox);
+                    emojiDialog.setCancelable(true);
+                    closeBtn.setOnClickListener(v -> emojiDialog.dismiss());
+                    if (emojiDialog.getWindow() != null) {
+                        emojiDialog.getWindow().setLayout(
+                                (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.92f),
+                                ViewGroup.LayoutParams.WRAP_CONTENT);
+                        emojiDialog.getWindow().setGravity(Gravity.BOTTOM);
+                        emojiDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+                    }
+                    emojiDialog.show();
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() -> Toast.makeText(activity, "表情包加载失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    /** 发送表情消息（好友私聊） */
+    private void sendEmojiMessage(String emojiName) {
+        if (chatFriend == null) return;
+        final String content = emojiName;
+
+        // 乐观 UI
+        ChatMessage local = new ChatMessage();
+        local.content = content;
+        local.msgType = "emoji";
+        local.isMine = true;
+        final View bubbleView = buildMessageBubble(local);
+        chatMessageList.addView(bubbleView);
+        scrollToBottom();
+
+        AppExecutors.runOnIo(() -> {
+            try {
+                ChatMessage sent = apiClient.sendMessage(chatFriend.id, content, "emoji");
+                uiHandler.post(() -> {
+                    if (sent.id > maxMessageId) maxMessageId = sent.id;
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() -> Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                handleApiError(t);
+            }
+        });
+    }
+
+    /** 发送表情消息（群聊） */
+    private void sendEmojiGroupMessage(String emojiName) {
+        if (chatGroup == null) return;
+        final String content = emojiName;
+
+        // 乐观 UI
+        GroupMessage local = new GroupMessage();
+        local.content = content;
+        local.msgType = "emoji";
+        local.isMine = true;
+        local.senderNickname = getMyNickname();
+        local.senderAvatar = getMyAvatar();
+        local.senderUid = getMyUid();
+        local.senderIsAdmin = chatGroup != null && chatGroup.isAdmin();
+        local.createdAt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
+        final View bubbleView = buildGroupMessageBubble(local);
+        groupMessageList.addView(bubbleView);
+        scrollGroupToBottom();
+
+        AppExecutors.runOnIo(() -> {
+            try {
+                GroupMessage sent = apiClient.sendGroupMessage(chatGroup.id, content, "emoji");
+                uiHandler.post(() -> {
+                    if (sent.id > groupMaxMessageId) groupMaxMessageId = sent.id;
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() -> Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                handleApiError(t);
+            }
+        });
     }
 }
