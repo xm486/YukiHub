@@ -1929,11 +1929,31 @@ private void showProfileDialog() {
     LinearLayout info = new LinearLayout(this);
     info.setOrientation(LinearLayout.VERTICAL);
     info.setPadding(dp(12), 0, 0, 0);
+    // 昵称行：昵称 + 铅笔按钮（仅登录后可改云端昵称）
+    LinearLayout nameRow = new LinearLayout(this);
+    nameRow.setOrientation(LinearLayout.HORIZONTAL);
+    nameRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
     TextView nameView = new TextView(this);
     nameView.setText(currentName);
     nameView.setTextColor(getColorCompat(R.color.yh_text));
     nameView.setTextSize(20);
     nameView.setTypeface(null, android.graphics.Typeface.BOLD);
+    nameView.setSingleLine(true);
+    nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    nameRow.addView(nameView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+    if (isLoggedIn()) {
+        ImageView editNameBtn = new ImageView(this);
+        editNameBtn.setImageResource(R.drawable.ic_edit_pencil);
+        editNameBtn.setColorFilter(getColorCompat(R.color.yh_text_muted));
+        editNameBtn.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        editNameBtn.setContentDescription("修改昵称");
+        int ep = dp(4);
+        editNameBtn.setPadding(ep, ep, ep, ep);
+        editNameBtn.setOnClickListener(v -> showCloudNicknameDialog(nameView));
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(dp(26), dp(26));
+        editLp.setMargins(dp(6), 0, 0, 0);
+        nameRow.addView(editNameBtn, editLp);
+    }
     TextView statsView = new TextView(this);
     String uid = prefs == null ? "" : prefs.getString(KEY_AUTH_UID, "");
     String uidStr = uid.isEmpty() ? "" : "UID: " + uid + "  ·  ";
@@ -1941,7 +1961,7 @@ private void showProfileDialog() {
     statsView.setTextColor(getColorCompat(R.color.yh_text_muted));
     statsView.setTextSize(12);
     statsView.setPadding(0, dp(5), 0, 0);
-    info.addView(nameView);
+    info.addView(nameRow);
     TextView accountBadge = new TextView(this);
     accountBadge.setText(accountStatusLabelForDialog());
     accountBadge.setTextSize(11);
@@ -2111,6 +2131,87 @@ private void showProfileDialog() {
         dialog.dismiss();
     });
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> profileAvatarLauncher.launch("image/*"));
+}
+
+/**
+ * 云端昵称修改弹窗（个人资料页头像右侧铅笔按钮触发）。
+ * 调用服务器 /user/update_nickname 更新云端昵称主数据源，
+ * 成功后同步更新本地 auth_nickname 缓存并刷新界面。
+ */
+private void showCloudNicknameDialog(final TextView nameViewToUpdate) {
+    if (!isLoggedIn()) {
+        Toast.makeText(this, "登录后才能修改云端昵称", Toast.LENGTH_SHORT).show();
+        return;
+    }
+    final String current = displayProfileName();
+
+    final EditText input = new EditText(this);
+    input.setText(current);
+    input.setHint("2-20 个字符");
+    input.setSingleLine(true);
+    input.setTextColor(getColorCompat(R.color.yh_text));
+    input.setHintTextColor(getColorCompat(R.color.yh_text_muted));
+    input.setBackgroundResource(R.drawable.bg_input);
+    input.setPadding(dp(10), dp(8), dp(10), dp(8));
+    if (input.getText() != null) input.setSelection(input.getText().length());
+
+    LinearLayout wrap = new LinearLayout(this);
+    wrap.setOrientation(LinearLayout.VERTICAL);
+    wrap.setBackgroundResource(R.drawable.bg_dialog);
+    tintDialogRoot(wrap);
+    wrap.setPadding(dp(18), dp(14), dp(18), dp(10));
+    wrap.addView(input, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+    TextView tip = new TextView(this);
+    tip.setText("昵称会同步到云端，好友和社区都能看到。不能包含 < > { } [ ] / \\ 等特殊字符。");
+    tip.setTextColor(getColorCompat(R.color.yh_text_muted));
+    tip.setTextSize(11);
+    tip.setPadding(dp(2), dp(8), dp(2), 0);
+    wrap.addView(tip);
+
+    AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("修改昵称")
+            .setView(wrap)
+            .setPositiveButton("保存", null)
+            .setNegativeButton("取消", null)
+            .show();
+    styleAlertDialogDark(dialog);
+
+    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        final String name = input.getText() == null ? "" : input.getText().toString().trim();
+        if (name.length() < 2 || name.length() > 20) {
+            Toast.makeText(MainActivity.this, "昵称需要2-20个字符", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (name.matches(".*[<>{}\\[\\]/\\\\].*")) {
+            Toast.makeText(MainActivity.this, "昵称包含不允许的字符", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        v.setEnabled(false);
+        AppExecutors.runOnIo(() -> {
+            try {
+                com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(MainActivity.this);
+                final String newName = client.updateNickname(name);
+                runOnUiThread(() -> {
+                    // 更新本地云端昵称缓存 + 本地昵称，避免下次同步被本地旧值覆盖
+                    if (prefs != null) {
+                        prefs.edit()
+                                .putString(KEY_AUTH_NICKNAME, newName)
+                                .putString(KEY_PROFILE_NAME, newName)
+                                .apply();
+                    }
+                    if (nameViewToUpdate != null) nameViewToUpdate.setText(newName);
+                    updateProfilePanel();
+                    Toast.makeText(MainActivity.this, "昵称已修改", Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                });
+            } catch (Throwable t) {
+                runOnUiThread(() -> {
+                    v.setEnabled(true);
+                    Toast.makeText(MainActivity.this, "修改失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    });
 }
 
 private String profileName() {

@@ -353,6 +353,22 @@ public class SocialApiClient {
         return new JSONObject(resp);
     }
 
+    /**
+     * 修改昵称（云端）
+     * 成功返回服务器最新的 nickname，失败抛异常。
+     */
+    public String updateNickname(String nickname) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("nickname", nickname == null ? "" : nickname);
+        String resp = doPost("/user/update_nickname", body);
+        JSONObject root = new JSONObject(resp);
+        if (!root.optBoolean("success", false)) {
+            throw new RuntimeException(root.optString("error", "修改失败"));
+        }
+        JSONObject user = root.optJSONObject("user");
+        return user != null ? user.optString("nickname", nickname) : nickname;
+    }
+
     private ChatMessage parseMessage(JSONObject obj) {
         ChatMessage msg = new ChatMessage();
         msg.id = obj.optInt("id", 0);
