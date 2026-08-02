@@ -226,13 +226,13 @@ public class HomeActivity extends AppCompatActivity {
             touch(v);
             startActivity(new Intent(this, com.yuki.yukihub.translate.TranslateControlActivity.class));
         });
-        findViewById(R.id.homeSearch).setOnClickListener(v -> {
+        findViewById(R.id.homeCommunity).setOnClickListener(v -> {
             touch(v);
-            Toast.makeText(this, "搜索功能后续接入首页。", Toast.LENGTH_SHORT).show();
-        });
-        findViewById(R.id.homeNotice).setOnClickListener(v -> {
-            touch(v);
-            Toast.makeText(this, "暂时没有新的通知。", Toast.LENGTH_SHORT).show();
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://yukihub.zh.kg/community")));
+            } catch (Throwable t) {
+                Toast.makeText(this, "无法打开社区，请检查网络", Toast.LENGTH_SHORT).show();
+            }
         });
     }
 

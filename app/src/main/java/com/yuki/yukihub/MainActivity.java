@@ -141,6 +141,7 @@ import com.yuki.yukihub.metadata.YmgalClient;
 import com.yuki.yukihub.model.EngineType;
 import com.yuki.yukihub.model.Game;
 import com.yuki.yukihub.ons.OnsSettings;
+import com.yuki.yukihub.scanner.FastGameScanner;
 import com.yuki.yukihub.scanner.GameScanner;
 import com.yuki.yukihub.scanner.ScanResult;
 import com.yuki.yukihub.ui.GameAdapter;
@@ -231,6 +232,9 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private static final int MAX_SCAN_ROOTS = 3;
     private static final String KEY_STARTUP_SCAN_DEPTH = "startup_scan_depth";
     private static final String KEY_AUTO_SCAN_ON_STARTUP = "auto_scan_on_startup";
+    private static final String KEY_SCAN_MODE = "scan_mode"; // fast / legacy
+    private static final String SCAN_MODE_FAST = "fast";
+    private static final String SCAN_MODE_LEGACY = "legacy";
     private static final String KEY_CHECK_UPDATE_ON_STARTUP = "check_update_on_startup";
     private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
     private static final long UPDATE_AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
@@ -5373,6 +5377,27 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         });
         scanDepthSeek.setProgress(savedDepth - 1);
 
+        TextView scanModeTitle = new TextView(this);
+        scanModeTitle.setText("\n扫描模式");
+        scanModeTitle.setTextColor(getColorCompat(R.color.yh_text));
+        scanModeTitle.setTextSize(14);
+        scanModeTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(scanModeTitle);
+
+        TextView scanModeInfo = new TextView(this);
+        scanModeInfo.setText("快速模式：批量读取目录并缓存，扫描更快；兼容模式：旧版逐项扫描，行为最保守。如快速模式扫描结果异常可切回兼容模式。");
+        scanModeInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        scanModeInfo.setTextSize(11);
+        scanModeInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(scanModeInfo);
+
+        Spinner scanModeSpinner = new Spinner(this);
+        ArrayAdapter<String> scanModeAdapter = krSpinnerAdapter(new String[]{"快速模式", "兼容模式"});
+        scanModeSpinner.setAdapter(scanModeAdapter);
+        String savedScanMode = prefs == null ? SCAN_MODE_FAST : prefs.getString(KEY_SCAN_MODE, SCAN_MODE_FAST);
+        scanModeSpinner.setSelection(SCAN_MODE_LEGACY.equals(savedScanMode) ? 1 : 0);
+        root.addView(scanModeSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+
         TextView fontTitle = new TextView(this);
         fontTitle.setText("\n整体字体大小");
         fontTitle.setTextColor(getColorCompat(R.color.yh_text));
@@ -5981,6 +6006,7 @@ else sourceSpinner.setSelection(0);
                     .putString(MetadataController.KEY_BANGUMI_TOKEN, token)
                     .putInt(KEY_STARTUP_SCAN_DEPTH, depth)
                     .putBoolean(KEY_AUTO_SCAN_ON_STARTUP, autoScanCheck.isChecked())
+                    .putString(KEY_SCAN_MODE, scanModeSpinner.getSelectedItemPosition() == 1 ? SCAN_MODE_LEGACY : SCAN_MODE_FAST)
                     .putBoolean(KEY_CHECK_UPDATE_ON_STARTUP, updateOnStartupCheck.isChecked())
                     .putString(KEY_ENGINE_LABEL_POSITION, engineLabelSpinner.getSelectedItemPosition() == 1 ? "cover" : "title")
                     .putString(KEY_SORT_MODE, sortMode)
@@ -8316,10 +8342,18 @@ private String pref(Map<String, String> prefs, String key, String def) {
                 }
             } catch (Exception ignored) { }
         }
-        if (options.contains("data.xp3")) {
-            options.remove("data.xp3");
-            options.add(0, "data.xp3");
-        }
+        // KR 启动入口排序：中文「启动/游戏」xp3 > data.xp3 > 其它（见 KrkrEntryPriority）
+        // 非 KR 候选（.desktop / .iso 等）保持原有相对顺序，排在 KR 候选之后。
+        java.util.Collections.sort(options, (a, b) -> {
+            int sa = com.yuki.yukihub.scanner.KrkrEntryPriority.scoreEntry(a);
+            int sb = com.yuki.yukihub.scanner.KrkrEntryPriority.scoreEntry(b);
+            boolean ka = sa != com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE;
+            boolean kb = sb != com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE;
+            if (ka && kb) return sb - sa;
+            if (ka) return -1;
+            if (kb) return 1;
+            return 0;
+        });
         if (options.contains("[游戏目录]")) options.remove("[游戏目录]");
         options.add("[游戏目录]");
         if (options.isEmpty()) options.add("未扫描到可启动文件，请先选择目录");
@@ -8467,15 +8501,21 @@ if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size
         int scanDepth = prefs == null ? DEFAULT_STARTUP_SCAN_DEPTH : prefs.getInt(KEY_STARTUP_SCAN_DEPTH, DEFAULT_STARTUP_SCAN_DEPTH);
         scanDepth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, scanDepth));
         final int finalScanDepth = scanDepth;
+        final boolean useFastScan = prefs == null || SCAN_MODE_FAST.equals(prefs.getString(KEY_SCAN_MODE, SCAN_MODE_FAST));
+        final String scanModeLabel = useFastScan ? "快速" : "兼容";
         final List<String> scanRoots = new ArrayList<>(rootUris);
         AppExecutors.runOnSingle(() -> {
             List<ScanResult> results = new ArrayList<>();
             for (String root : scanRoots) {
                 if (root == null || root.trim().isEmpty()) continue;
                 try {
-                    results.addAll(GameScanner.scan(this, Uri.parse(root), finalScanDepth));
+                    if (useFastScan) {
+                        results.addAll(FastGameScanner.scan(this, Uri.parse(root), finalScanDepth));
+                    } else {
+                        results.addAll(GameScanner.scan(this, Uri.parse(root), finalScanDepth));
+                    }
                 } catch (Throwable t) {
-                    Log.w("YukiHub", "library scan failed root=" + root, t);
+                    Log.w("YukiHub", "library scan failed root=" + root + " mode=" + scanModeLabel, t);
                 }
             }
             ScanImportStats stats = importScannedGames(results);
@@ -8484,7 +8524,7 @@ if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size
                 autoLibraryScanRunning = false;
                 setScanLoading(false);
                 loadGames();
-                if (showToast) Toast.makeText(this, "扫描 " + scanRoots.size() + " 个目录：新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
+                if (showToast) Toast.makeText(this, "扫描[" + scanModeLabel + "] " + scanRoots.size() + " 个目录：新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
             });
         });
     }

@@ -172,18 +172,14 @@
                     <TextView android:id="@+id/homeGreeting" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="欢迎回来，Yuki" android:textColor="#D9FFFFFF" android:textSize="9sp" />
                 </LinearLayout>
 
-                <TextView android:id="@+id/homeSearch" android:layout_width="38dp" android:layout_height="38dp" android:background="@drawable/bg_home_glass" android:clickable="true" android:focusable="true" android:gravity="center" android:text="⌕" android:textColor="#FFFFFFFF" android:textSize="20sp" />
-
                 <FrameLayout
-                    android:id="@+id/homeNotice"
+                    android:id="@+id/homeCommunity"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
-                    android:layout_marginStart="7dp"
                     android:background="@drawable/bg_home_glass"
                     android:clickable="true"
                     android:focusable="true">
-                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:contentDescription="通知" android:src="@drawable/ic_home_notification" />
-                    <View android:layout_width="6dp" android:layout_height="6dp" android:layout_gravity="top|right" android:layout_marginTop="7dp" android:layout_marginEnd="7dp" android:background="@drawable/bg_profile_dot_expired" />
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:contentDescription="社区" android:src="@drawable/ic_home_community" />
                 </FrameLayout>
 
                 <TextView

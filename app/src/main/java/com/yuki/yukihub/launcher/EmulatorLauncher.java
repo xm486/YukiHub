@@ -460,6 +460,31 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
         try { return Integer.parseInt(desktopPath.substring(start, end)); } catch (Throwable ignored) { return 0; }
     }
 
+    /**
+     * 解析 rootUri 对应的 DocumentFile。
+     * 优先按 tree uri 解析（快速/兼容扫描生成的都是 tree-style uri）；
+     * 对历史遗留的 plain document uri（content://authority/document/<docId>）自动转 tree uri 兜底，
+     * 避免 fromTreeUri 抛异常导致启动文件定位失败。
+     */
+    private static DocumentFile documentFromUri(Context context, String rootUri) {
+        if (context == null || rootUri == null || rootUri.trim().isEmpty()) return null;
+        try {
+            return DocumentFile.fromTreeUri(context, Uri.parse(rootUri));
+        } catch (Throwable ignored) { }
+        try {
+            Uri uri = Uri.parse(rootUri);
+            if ("content".equalsIgnoreCase(uri.getScheme())) {
+                String docId = DocumentsContract.getDocumentId(uri);
+                if (docId != null && !docId.trim().isEmpty()) {
+                    Uri treeUri = DocumentsContract.buildTreeDocumentUri(uri.getAuthority(), docId);
+                    DocumentFile dir = DocumentFile.fromTreeUri(context, treeUri);
+                    if (dir != null && dir.isDirectory()) return dir;
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
     private static String resolveDesktopPath(Context context, String rootUri, String launchTarget) {
         String target = launchTarget == null ? "" : launchTarget.trim();
         if (target.startsWith("/") || target.startsWith("file://")) return stripFileScheme(target);
@@ -468,7 +493,7 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
         if (rootPath.toLowerCase(Locale.ROOT).endsWith(".desktop")) return stripFileScheme(rootPath);
         if (rootPath.startsWith("content://")) {
             try {
-                DocumentFile dir = DocumentFile.fromTreeUri(context, Uri.parse(rootUri));
+                DocumentFile dir = documentFromUri(context, rootUri);
                 DocumentFile child = dir == null ? null : dir.findFile(target);
                 if (child != null) {
                     String childPath = uriToFilePath(child.getUri().toString());
@@ -483,7 +508,7 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
     private static List<Uri> buildKirikiriLaunchUris(Context context, String rootUri, String launchTarget) {
         List<Uri> uris = new ArrayList<>();
         Uri root = Uri.parse(rootUri);
-        DocumentFile dir = DocumentFile.fromTreeUri(context, root);
+        DocumentFile dir = documentFromUri(context, rootUri);
         String target = launchTarget == null || launchTarget.isEmpty() ? "data.xp3" : launchTarget;
         if (dir != null && dir.isDirectory()) {
             if ("[游戏目录]".equals(target) || "DIR".equalsIgnoreCase(target)) {
@@ -503,13 +528,22 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
     private static void addFirstXp3(List<Uri> uris, DocumentFile dir) {
         DocumentFile[] files = dir.listFiles();
         if (files == null) return;
+        // 按优先级挑选：中文「启动/游戏」xp3 > data.xp3 > 其它（见 KrkrEntryPriority）
+        DocumentFile best = null;
+        int bestScore = com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE;
         for (DocumentFile file : files) {
-            String name = file.getName() == null ? "" : file.getName().toLowerCase();
-            if (file.isFile() && name.endsWith(".xp3")) {
-                Uri u = file.getUri();
-                if (!uris.contains(u)) uris.add(u);
-                return;
+            if (file == null || !file.isFile()) continue;
+            String name = file.getName();
+            if (name == null || !name.toLowerCase(Locale.ROOT).endsWith(".xp3")) continue;
+            int score = com.yuki.yukihub.scanner.KrkrEntryPriority.scoreXp3(name);
+            if (best == null || score > bestScore) {
+                best = file;
+                bestScore = score;
             }
+        }
+        if (best != null) {
+            Uri u = best.getUri();
+            if (!uris.contains(u)) uris.add(u);
         }
     }
 
@@ -1017,6 +1051,22 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         try {
             File root = new File(rootPath);
             if (!root.isDirectory()) return null;
+            // 按优先级挑选：中文「启动/游戏」xp3 > data.xp3 > 其它 xp3 > startup.tjs（见 KrkrEntryPriority）
+            File[] children = root.listFiles();
+            if (children != null) {
+                File best = null;
+                int bestScore = com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE;
+                for (File child : children) {
+                    if (child == null || !child.isFile()) continue;
+                    int score = com.yuki.yukihub.scanner.KrkrEntryPriority.scoreEntry(child.getName());
+                    if (score == com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE) continue;
+                    if (best == null || score > bestScore) {
+                        best = child;
+                        bestScore = score;
+                    }
+                }
+                if (best != null) return best.getAbsolutePath();
+            }
             String[] names = new String[]{"data.xp3", "startup.tjs", "patch.xp3"};
             for (String name : names) {
                 File f = new File(root, name);
@@ -1027,13 +1077,38 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
     }
 
     private static String findKrkrPreferredEntryFromTree(Context context, String rootUri, String rootPath) {
+        // 按优先级挑选：中文「启动/游戏」xp3 > data.xp3 > 其它 xp3 > startup.tjs（见 KrkrEntryPriority）
+        try {
+            DocumentFile dir = documentFromUri(context, rootUri);
+            if (dir != null && dir.isDirectory()) {
+                DocumentFile[] files = dir.listFiles();
+                if (files != null) {
+                    String bestName = null;
+                    int bestScore = com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE;
+                    for (DocumentFile file : files) {
+                        if (file == null || !file.isFile()) continue;
+                        String name = file.getName();
+                        if (name == null) continue;
+                        int score = com.yuki.yukihub.scanner.KrkrEntryPriority.scoreEntry(name);
+                        if (score == com.yuki.yukihub.scanner.KrkrEntryPriority.SCORE_NONE) continue;
+                        if (bestName == null || score > bestScore) {
+                            bestName = name;
+                            bestScore = score;
+                        }
+                    }
+                    if (bestName != null) {
+                        return rootPath.endsWith("/") ? rootPath + bestName : rootPath + "/" + bestName;
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
         String[] names = new String[]{"data.xp3", "startup.tjs", "patch.xp3"};
         for (String name : names) {
             String p = findKrkrTargetFromTree(context, rootUri, rootPath, name);
             if (p != null) return p;
         }
         try {
-            DocumentFile dir = DocumentFile.fromTreeUri(context, Uri.parse(rootUri));
+            DocumentFile dir = documentFromUri(context, rootUri);
             if (dir == null || !dir.isDirectory()) return null;
             DocumentFile[] files = dir.listFiles();
             if (files == null) return null;
@@ -1051,7 +1126,7 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
     private static String findKrkrTargetFromTree(Context context, String rootUri, String rootPath, String target) {
         if (context == null || rootUri == null || target == null || target.trim().isEmpty()) return null;
         try {
-            DocumentFile dir = DocumentFile.fromTreeUri(context, Uri.parse(rootUri));
+            DocumentFile dir = documentFromUri(context, rootUri);
             if (dir == null || !dir.isDirectory()) return null;
             String[] parts = target.split("/");
             DocumentFile current = dir;
