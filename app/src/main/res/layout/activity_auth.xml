@@ -352,6 +352,23 @@
             android:background="@drawable/bg_kungal_card"
             android:stateListAnimator="@null" />
 
+        <!-- Hikarinagi quick login — Hikarinagi 快捷登录 -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnHikarinagiLogin"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginBottom="6dp"
+            android:text="Hikarinagi 账号登录"
+            android:textColor="#EAF7FF"
+            android:textSize="14sp"
+            android:drawableStart="@drawable/ic_hikarinagi_logo"
+            android:drawablePadding="10dp"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:background="@drawable/bg_kungal_card"
+            android:stateListAnimator="@null" />
+
         <!-- Continue as local -->
         <TextView
             android:id="@+id/tvContinueLocal"

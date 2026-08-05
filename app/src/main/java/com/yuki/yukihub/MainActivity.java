@@ -254,7 +254,7 @@ private static final String SORT_MODE_RECENT = "recent";
 private static final String SORT_MODE_NAME = "name";
 private static final String SORT_MODE_NEWEST = "newest";
 private static final String KEY_PROFILE_NAME = "profile_name";
-private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
+    private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
 private static final String KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token";
 private static final String KEY_AUTH_USER_ID = "auth_user_id";
 private static final String KEY_AUTH_UID = "auth_uid";
@@ -264,14 +264,25 @@ private static final String KEY_AUTH_EMAIL = "auth_email";
 private static final String KEY_AUTH_STATUS = "auth_status";
 private static final String KEY_KUN_BOUND = "kungal_bound";
 private static final String KEY_KUN_OAUTH_STATE = "kun_oauth_state";
-private static final String KEY_KUN_OAUTH_CODE_VERIFIER = "kun_oauth_code_verifier";
-private static final String KEY_KUN_OAUTH_STARTED_AT = "kun_oauth_started_at";
-private static final String KEY_KUN_OAUTH_MODE = "kun_oauth_mode";
-private static final String KUN_OAUTH_MODE_BIND = "bind";
-private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
-private static final String KUN_OAUTH_AUTHORIZE_URL = "https://oauth.kungal.com/api/v1/oauth/authorize";
-private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
-private static final String KUN_OAUTH_SCOPE = "openid profile email";
+    private static final String KEY_KUN_OAUTH_CODE_VERIFIER = "kun_oauth_code_verifier";
+    private static final String KEY_KUN_OAUTH_STARTED_AT = "kun_oauth_started_at";
+    private static final String KEY_KUN_OAUTH_MODE = "kun_oauth_mode";
+    private static final String KUN_OAUTH_MODE_BIND = "bind";
+    private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
+    private static final String KUN_OAUTH_AUTHORIZE_URL = "https://oauth.kungal.com/api/v1/oauth/authorize";
+    private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
+    private static final String KUN_OAUTH_SCOPE = "openid profile email";
+    private static final String KEY_HIKARINAGI_BOUND = "hikarinagi_bound";
+    private static final String KEY_HIKARINAGI_OAUTH_STATE = "hikarinagi_oauth_state";
+    private static final String KEY_HIKARINAGI_OAUTH_CODE_VERIFIER = "hikarinagi_oauth_code_verifier";
+    private static final String KEY_HIKARINAGI_OAUTH_NONCE = "hikarinagi_oauth_nonce";
+    private static final String KEY_HIKARINAGI_OAUTH_STARTED_AT = "hikarinagi_oauth_started_at";
+    private static final String KEY_HIKARINAGI_OAUTH_MODE = "hikarinagi_oauth_mode";
+    private static final String HIKARINAGI_OAUTH_MODE_BIND = "bind";
+    private static final String HIKARINAGI_ANDROID_CLIENT_ID = "hkn_qtmXMJfBoxcNLA-a";
+    private static final String HIKARINAGI_OAUTH_AUTHORIZE_URL = "https://id.hikarinagi.org/oidc/auth";
+    private static final String HIKARINAGI_OAUTH_REDIRECT_URI = "yukihub://hikarinagi/callback";
+    private static final String HIKARINAGI_OAUTH_SCOPE = "openid user:read";
 private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
 private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
 private static final String KEY_SHARE_PLAYING = "share_playing_status";
@@ -301,7 +312,8 @@ private static final int UI_SOUND_CONFIRM = 1;
 private static final int UI_SOUND_SWITCH = 2;
     private static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
     private static final String KEY_DISCLAIMER_ACCEPTED_AT = "disclaimer_accepted_at";
-    private static final int DISCLAIMER_VERSION = 1;
+    private static final String KEY_DISCLAIMER_ACCEPTED_VERSION = "disclaimer_accepted_version";
+    private static final int DISCLAIMER_VERSION = 2;
     private static final String KEY_GAME_COLUMNS = "game_columns";
     private static final int DEFAULT_GAME_COLUMNS = 5;
 private int pendingScanRootReplaceIndex = -2;
@@ -524,7 +536,9 @@ private void handleHomeTargetIntent(Intent intent) {
         if (prefs == null) return false;
         long acceptedAt = prefs.getLong(KEY_DISCLAIMER_ACCEPTED_AT, 0L);
         boolean accepted = prefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false);
-        if (accepted && acceptedAt > 0) return true;
+        int acceptedVersion = prefs.getInt(KEY_DISCLAIMER_ACCEPTED_VERSION, 0);
+        // 版本号变化时重新展示新声明（老用户升级后也能看到）
+        if (accepted && acceptedAt > 0 && acceptedVersion == DISCLAIMER_VERSION) return true;
         View content = LayoutInflater.from(this).inflate(R.layout.dialog_disclaimer_first_launch, null, false);
         tintDialogRoot(content);
         CheckBox agree = content.findViewById(R.id.cbDisclaimerAgree);
@@ -550,7 +564,10 @@ private void handleHomeTargetIntent(Intent intent) {
         btnExit.setOnClickListener(v -> finish());
         btnContinue.setOnClickListener(v -> {
             if (!agree.isChecked()) return;
-            prefs.edit().putBoolean(KEY_DISCLAIMER_ACCEPTED, true).putLong(KEY_DISCLAIMER_ACCEPTED_AT, System.currentTimeMillis()).apply();
+            prefs.edit().putBoolean(KEY_DISCLAIMER_ACCEPTED, true)
+                                .putLong(KEY_DISCLAIMER_ACCEPTED_AT, System.currentTimeMillis())
+                                .putInt(KEY_DISCLAIMER_ACCEPTED_VERSION, DISCLAIMER_VERSION)
+                                .apply();
             dialog.dismiss();
             recreate();
         });
@@ -2034,6 +2051,32 @@ private void showProfileDialog() {
     kunRow.addView(kunBindBtn, kunBtnLp);
     root.addView(kunRow);
 
+    LinearLayout hikariRow = new LinearLayout(this);
+    hikariRow.setOrientation(LinearLayout.HORIZONTAL);
+    hikariRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    hikariRow.setPadding(0, dp(8), 0, dp(4));
+    ImageView hikariIcon = new ImageView(this);
+    hikariIcon.setImageResource(R.drawable.ic_hikarinagi_logo);
+    hikariIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+    hikariIcon.setAdjustViewBounds(true);
+    LinearLayout.LayoutParams hikariIconLp = new LinearLayout.LayoutParams(dp(22), dp(22));
+    hikariIconLp.setMargins(0, 0, dp(6), 0);
+    hikariRow.addView(hikariIcon, hikariIconLp);
+    TextView hikariStatus = new TextView(this);
+    hikariStatus.setText(hikarinagiBound() ? "Hikarinagi · 已绑定" : "Hikarinagi · 未绑定");
+    hikariStatus.setTextColor(hikarinagiBound() ? 0xFFE8FFE9 : getColorCompat(R.color.yh_text_muted));
+    hikariStatus.setTextSize(12);
+    hikariStatus.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    hikariRow.addView(hikariStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+    Button hikariBindBtn = krButton(hikarinagiBound() ? "已绑定" : "绑定 Hikarinagi");
+    hikariBindBtn.setTextColor(hikarinagiBound() ? getColorCompat(R.color.yh_text_muted) : primaryTextColor());
+    hikariBindBtn.setEnabled(isLoggedIn() && !hikarinagiBound());
+    hikariBindBtn.setOnClickListener(v -> startHikarinagiBindOAuth());
+    LinearLayout.LayoutParams hikariBtnLp = new LinearLayout.LayoutParams(dp(118), dp(40));
+    hikariBtnLp.setMargins(dp(8), 0, 0, 0);
+    hikariRow.addView(hikariBindBtn, hikariBtnLp);
+    root.addView(hikariRow);
+
     LinearLayout statCards = new LinearLayout(this);
     statCards.setOrientation(LinearLayout.HORIZONTAL);
     statCards.setPadding(0, dp(2), 0, dp(10));
@@ -2292,6 +2335,43 @@ private void startKungalBindOAuth() {
         startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE));
     } catch (Throwable t) {
         Toast.makeText(this, "无法打开鲲站绑定页面：" + emptyText(t.getMessage(), "请检查浏览器"), Toast.LENGTH_LONG).show();
+    }
+}
+
+private boolean hikarinagiBound() {
+    return prefs != null && prefs.getBoolean(KEY_HIKARINAGI_BOUND, false);
+}
+
+private void startHikarinagiBindOAuth() {
+    if (!isLoggedIn()) {
+        Toast.makeText(this, "请先登录 YukiHub 账号", Toast.LENGTH_SHORT).show();
+        return;
+    }
+    try {
+        String state = randomUrlSafe(32);
+        String verifier = randomUrlSafe(64);
+        String challenge = pkceS256(verifier);
+        String nonce = randomUrlSafe(16);
+        prefs.edit()
+                .putString(KEY_HIKARINAGI_OAUTH_STATE, state)
+                .putString(KEY_HIKARINAGI_OAUTH_CODE_VERIFIER, verifier)
+                .putString(KEY_HIKARINAGI_OAUTH_NONCE, nonce)
+                .putLong(KEY_HIKARINAGI_OAUTH_STARTED_AT, System.currentTimeMillis())
+                .putString(KEY_HIKARINAGI_OAUTH_MODE, HIKARINAGI_OAUTH_MODE_BIND)
+                .apply();
+        Uri uri = Uri.parse(HIKARINAGI_OAUTH_AUTHORIZE_URL).buildUpon()
+                .appendQueryParameter("response_type", "code")
+                .appendQueryParameter("client_id", HIKARINAGI_ANDROID_CLIENT_ID)
+                .appendQueryParameter("redirect_uri", HIKARINAGI_OAUTH_REDIRECT_URI)
+                .appendQueryParameter("scope", HIKARINAGI_OAUTH_SCOPE)
+                .appendQueryParameter("state", state)
+                .appendQueryParameter("nonce", nonce)
+                .appendQueryParameter("code_challenge", challenge)
+                .appendQueryParameter("code_challenge_method", "S256")
+                .build();
+        startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE));
+    } catch (Throwable t) {
+        Toast.makeText(this, "无法打开 Hikarinagi 绑定页面：" + emptyText(t.getMessage(), "请检查浏览器"), Toast.LENGTH_LONG).show();
     }
 }
 
@@ -2850,6 +2930,7 @@ private void logoutLocalOnly() {
             .remove(KEY_AUTH_AVATAR)
             .remove(KEY_AUTH_STATUS)
             .remove(KEY_KUN_BOUND)
+            .remove(KEY_HIKARINAGI_BOUND)
             .remove("server_last_sync_hash")
             .remove(KEY_LAST_SYNC_AT)
             .remove("needs_initial_sync")
@@ -2976,6 +3057,7 @@ private boolean refreshAccessToken() {
             if (avatar != null && !avatar.isEmpty()) editor.putString(KEY_AUTH_AVATAR, avatar);
             if (!uid.isEmpty()) editor.putString(KEY_AUTH_UID, uid);
             editor.putBoolean(KEY_KUN_BOUND, user.optBoolean("kungalBound", false));
+            editor.putBoolean(KEY_HIKARINAGI_BOUND, user.optBoolean("hikarinagiBound", false));
         }
         editor.putString(KEY_AUTH_STATUS, AUTH_STATUS_ONLINE);
         editor.apply();
@@ -3055,6 +3137,7 @@ private void saveAuthSession(JSONObject resp, String emailFallback, String nickn
             .putString(KEY_AUTH_AVATAR, avatar == null ? "" : avatar)
             .putString(KEY_AUTH_STATUS, AUTH_STATUS_ONLINE)
             .putBoolean(KEY_KUN_BOUND, user != null && user.optBoolean("kungalBound", false))
+            .putBoolean(KEY_HIKARINAGI_BOUND, user != null && user.optBoolean("hikarinagiBound", false))
             .putBoolean(KEY_CLOUD_SYNC_ENABLED, false)
             .apply();
 }
@@ -5668,8 +5751,8 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(disclaimerTitle);
         TextView disclaimerInfo = new TextView(this);
         disclaimerInfo.setText("本应用为开源项目，旨在帮助用户管理与启动自己拥有权限的游戏/应用资源。" +
-                "使用者需自行确认所添加内容、账号、同步服务及第三方组件的合法性与可用性。\n\n" +
-                "程序不提供任何游戏资源、破解资源或绕过授权的能力；Shizuku、GameHub、WebDAV、VNDB、Bangumi、月幕 Gal 等第三方服务/应用均由其各自规则与可用性决定。\n\n" +
+                "使用者需自行确认所添加内容、账号、第三方登录（鲲 / Hikarinagi）、同步服务及第三方组件的合法性与可用性。\n\n" +
+                "程序不提供任何游戏资源、破解资源或绕过授权的能力；Shizuku、GameHub、WebDAV、VNDB、Bangumi、月幕 Gal、Hikarinagi、KIRIKIRI2、Tyranno、Winlator 等第三方服务/应用均由其各自规则与可用性决定。\n\n" +
                 "若你不同意上述内容，请不要继续使用相关功能。" );
         disclaimerInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
         disclaimerInfo.setTextSize(11);
@@ -5704,12 +5787,17 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(updateOnStartupCheck);
 
         LinearLayout githubButton = linkCardButton("GitHub 仓库", R.drawable.ic_github);
+        LinearLayout gitcodeButton = linkCardButton("GitCode 仓库", R.drawable.ic_gitcode);
         LinearLayout websiteButton = linkCardButton("官方网站", android.R.drawable.ic_menu_view);
         LinearLayout groupButton = linkCardButton("QQ 交流群", android.R.drawable.ic_dialog_email);
         githubButton.setOnClickListener(v -> openExternalUrl("https://github.com/xm486/YukiHub"));
+        gitcodeButton.setOnClickListener(v -> openExternalUrl("https://gitcode.com/xm486/YukiHub"));
         websiteButton.setOnClickListener(v -> openExternalUrl("https://yukihub.kesug.com/"));
         groupButton.setOnClickListener(v -> openExternalUrl("https://qun.qq.com/universal-share/share?ac=1&authKey=nZMa0s3mxxG1A0f%2BY0nAWmBYpul7FWTEDI6UWrzqb2IgKC4aDkUhvkV2AekAkW%2F1&busi_data=eyJncm91cENvZGUiOiIxNjM2MDM2MzUiLCJ0b2tlbiI6Im93eFRyY0tqNDdxK3FGQXlVZ0lhMEZGbWZWemphZnpYYW1kWWpPN1ViL3A0SkRUd1dEclMwZkM1bWI0UEYxME4iLCJ1aW4iOiIzMDg2Njc4NzU1In0%3D&data=bwoLG7XAPzqsvtfneNCQUUlu-HpX1yCn-6dkgd8ubDeBJKEPgd7wKYa6ym-EbW07Vapc3xm_o-iy0GbFHhZk5Q&svctype=4&tempid=h5_group_info"));
         root.addView(githubButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+        LinearLayout.LayoutParams gitcodeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        gitcodeLp.topMargin = dp(8);
+        root.addView(gitcodeButton, gitcodeLp);
         LinearLayout.LayoutParams websiteLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
         websiteLp.topMargin = dp(8);
         root.addView(websiteButton, websiteLp);
@@ -6594,12 +6682,15 @@ private void checkUpdateOnStartupIfEnabled() {
 
     private void showDisclaimerDialog() {
         String text = "免责声明\n\n" +
-                "1. 本应用为开源项目，仅用于管理、整理和启动用户本人有权使用的游戏与应用。\n\n" +
-                "2. 用户应自行确保所添加资源、账号、同步内容以及第三方服务的合法性、完整性与可用性。\n\n" +
-                "3. 本应用不提供任何游戏本体、破解资源、绕过授权或规避版权/平台规则的能力。\n\n" +
-                "4. Shizuku、GameHub、WebDAV、VNDB、Bangumi、系统存储权限等能力均依赖第三方应用、系统环境或外部服务，可能因设备、系统版本、权限状态或服务变更而不可用。\n\n" +
-                "5. 因第三方服务、系统限制、用户误操作或资源本身问题造成的数据丢失、同步异常、启动失败、兼容性问题或其他损失，开发者不承担额外责任。\n\n" +
-                "6. 如果你不同意以上说明，请停止使用相关功能。";
+                "1. 本应用为开源项目，仅用于管理、整理和启动用户本人有权使用的游戏与应用，不提供任何游戏本体、破解资源、绕过授权或规避版权/平台规则的能力。\n\n" +
+                "2. 用户应自行确保所添加资源、账号、同步内容、社区内容以及第三方服务的合法性、完整性与可用性；因使用这些内容产生的责任由用户自行承担。\n\n" +
+                "3. 第三方登录（鲲 Galgame、Hikarinagi 等账号体系）仅用于身份关联与云同步，账号数据、头像与资料由其对应平台的规则决定；请妥善保管你的账号与授权，避免在不可信设备上登录。\n\n" +
+                "4. 云同步（WebDAV / 服务器）、好友聊天、在线状态与社区功能依赖外部服务与网络环境，可能因服务变更、网络状况或账号状态而不可用或产生数据差异。\n\n" +
+                "5. 游戏启动依赖 KIRIKIRI2、Tyranno、Artemis、ONScripter、Winlator、盖世等第三方引擎与应用；启动文件的自动选择、快速/兼容扫描模式等仅提供尽力而为的适配，不保证所有资源均可正确启动。\n\n" +
+                "6. 游戏资料刮削（VNDB、Bangumi、月幕 Gal、Hikarinagi 等）获取的封面、简介与标签来自第三方元数据服务，可能不准确或不完整，仅供整理与参考。\n\n" +
+                "7. 系统存储权限、Shizuku、GameHub 等能力依赖系统环境与第三方应用，可能因设备、系统版本、权限状态或服务变更而不可用。\n\n" +
+                "8. 因第三方服务、系统限制、用户误操作或资源本身问题造成的数据丢失、同步异常、启动失败、兼容性问题或其他损失，开发者不承担额外责任。\n\n" +
+                "9. 如果你不同意以上说明，请停止使用相关功能。";
         TextView tv = new TextView(this);
         int pad = dp(18);
         tv.setPadding(pad, pad, pad, pad);

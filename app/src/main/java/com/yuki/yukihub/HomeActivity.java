@@ -1,7 +1,9 @@
 package com.yuki.yukihub;
 
 import android.content.Intent;
+import android.content.ComponentName;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -27,6 +29,7 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import android.util.Log;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.yuki.yukihub.data.GameRepository;
@@ -55,6 +58,11 @@ public class HomeActivity extends AppCompatActivity {
     private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
     private static final String KEY_AUTH_NICKNAME = "auth_nickname";
     private static final String KEY_AUTH_AVATAR = "auth_avatar";
+    private static final String KEY_APP_ICON = "app_icon"; // new=新图标(默认) / classic=经典图标
+    private static final String APP_ICON_NEW = "new";
+    private static final String APP_ICON_CLASSIC = "classic";
+    private static final String ALIAS_ICON_NEW = "com.yuki.yukihub.YukiIcon";
+    private static final String ALIAS_ICON_CLASSIC = "com.yuki.yukihub.YukiIconClassic";
 
     private GameRepository repository;
     private SharedPreferences prefs;
@@ -94,6 +102,7 @@ public class HomeActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         applyImmersive();
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        syncAppIconState(); // 校验应用图标 prefs 与系统 alias 状态一致
 
         // 从 MainActivity 导航栏回来时强制显示首页
         boolean forceHome = getIntent().getBooleanExtra("force_home", false);
@@ -444,6 +453,47 @@ public class HomeActivity extends AppCompatActivity {
         }
         root.addView(startupGroup);
 
+        // 应用图标选择
+        TextView appIconTitle = new TextView(this);
+        appIconTitle.setText("\n应用图标");
+        appIconTitle.setTextColor(0xFFFFFFFF);
+        appIconTitle.setTextSize(14);
+        appIconTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(appIconTitle);
+
+        LinearLayout appIconRow = new LinearLayout(this);
+        appIconRow.setOrientation(LinearLayout.HORIZONTAL);
+        appIconRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        appIconRow.setPadding(0, dp(8), 0, dp(4));
+
+        ImageView appIconPreview = new ImageView(this);
+        appIconPreview.setImageResource(currentIconRes());
+        appIconPreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        appIconRow.addView(appIconPreview, new LinearLayout.LayoutParams(dp(40), dp(40)));
+
+        String savedIcon = prefs == null ? APP_ICON_NEW : prefs.getString(KEY_APP_ICON, APP_ICON_NEW);
+        TextView appIconLabel = new TextView(this);
+        appIconLabel.setText("当前：" + (APP_ICON_NEW.equals(savedIcon) ? "新图标" : "经典图标"));
+        appIconLabel.setTextColor(0xAAFFFFFF);
+        appIconLabel.setTextSize(13);
+        appIconLabel.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        labelLp.setMargins(dp(10), 0, 0, 0);
+        appIconRow.addView(appIconLabel, labelLp);
+
+        Button appIconBtn = new Button(this);
+        appIconBtn.setText("更改");
+        appIconBtn.setTextColor(0xFFFFFFFF);
+        appIconBtn.setTextSize(12);
+        android.graphics.drawable.GradientDrawable iconBtnBg = new android.graphics.drawable.GradientDrawable();
+        iconBtnBg.setColor(0x3310183A);
+        iconBtnBg.setStroke(dp(1), 0x554A6A9A);
+        iconBtnBg.setCornerRadius(dp(8));
+        appIconBtn.setBackground(iconBtnBg);
+        appIconBtn.setOnClickListener(v -> showAppIconDialog());
+        appIconRow.addView(appIconBtn, new LinearLayout.LayoutParams(dp(72), dp(34)));
+        root.addView(appIconRow);
+
         // 高级设置入口
         TextView advancedHint = new TextView(this);
         advancedHint.setText("\n扫描目录、引擎配置、背景、WebDAV 同步、账号管理等高级设置请进入游戏库设置页面。");
@@ -495,6 +545,115 @@ public class HomeActivity extends AppCompatActivity {
             Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });
+    }
+
+    // ========== 应用图标切换（activity-alias） ==========
+
+    private int currentIconRes() {
+        String id = prefs == null ? APP_ICON_NEW : prefs.getString(KEY_APP_ICON, APP_ICON_NEW);
+        return APP_ICON_NEW.equals(id) ? R.mipmap.ic_launcher_new : R.mipmap.ic_launcher;
+    }
+
+    private void showAppIconDialog() {
+        String current = prefs == null ? APP_ICON_NEW : prefs.getString(KEY_APP_ICON, APP_ICON_NEW);
+
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setBackgroundResource(R.drawable.bg_dialog);
+        list.setPadding(dp(16), dp(8), dp(16), dp(8));
+
+        androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("选择应用图标")
+                .setView(list)
+                .setNegativeButton("取消", null)
+                .create();
+
+        addAppIconOption(list, "新图标", R.mipmap.ic_launcher_new, APP_ICON_NEW, current, dialog);
+        addAppIconOption(list, "经典图标", R.mipmap.ic_launcher, APP_ICON_CLASSIC, current, dialog);
+
+        dialog.show();
+        // 窗口背景统一为深色，避免标题栏/按钮栏露出系统浅色
+        if (dialog.getWindow() != null) {
+            android.graphics.drawable.GradientDrawable winBg = new android.graphics.drawable.GradientDrawable();
+            winBg.setColor(0xFF10172A);
+            winBg.setCornerRadius(dp(14));
+            dialog.getWindow().setBackgroundDrawable(winBg);
+        }
+    }
+
+    private void addAppIconOption(LinearLayout list, String name, int iconRes, String id, String current, androidx.appcompat.app.AlertDialog dialog) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setClickable(true);
+
+        // 选中项高亮，非选中项轻微深色底
+        boolean selected = id.equals(current);
+        android.graphics.drawable.GradientDrawable rowBg = new android.graphics.drawable.GradientDrawable();
+        rowBg.setColor(selected ? 0x334A6A9A : 0x11000000);
+        if (selected) rowBg.setStroke(dp(1), 0x664A6A9A);
+        rowBg.setCornerRadius(dp(8));
+        row.setBackground(rowBg);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, dp(4), 0, dp(4));
+        list.addView(row, rowLp);
+
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(iconRes);
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        row.addView(iv, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        TextView tv = new TextView(this);
+        tv.setText(selected ? "✓ " + name + "（当前）" : name);
+        tv.setTextColor(selected ? 0xFFFFFFFF : 0xBFFFFFFF);
+        tv.setTextSize(15);
+        LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        tvLp.setMargins(dp(14), 0, 0, 0);
+        row.addView(tv, tvLp);
+
+        row.setOnClickListener(v -> {
+            prefs.edit().putString(KEY_APP_ICON, id).apply();
+            switchAppIcon(id);
+            Toast.makeText(this, "图标已切换，桌面图标可能需要稍后刷新", Toast.LENGTH_SHORT).show();
+            if (dialog != null) dialog.dismiss();
+        });
+    }
+
+    private void switchAppIcon(String id) {
+        boolean useNew = APP_ICON_NEW.equals(id);
+        try {
+            PackageManager pm = getPackageManager();
+            pm.setComponentEnabledSetting(
+                    new ComponentName(this, ALIAS_ICON_NEW),
+                    useNew ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP);
+            pm.setComponentEnabledSetting(
+                    new ComponentName(this, ALIAS_ICON_CLASSIC),
+                    useNew ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
+        } catch (Throwable t) {
+            Log.w("YukiHub", "switch app icon failed", t);
+            Toast.makeText(this, "图标切换失败：" + (t.getMessage() == null ? "请稍后重试" : t.getMessage()), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** 启动时校验 prefs 与系统组件状态一致，防止清除数据/重装后错乱 */
+    private void syncAppIconState() {
+        if (prefs == null) return;
+        try {
+            String saved = prefs.getString(KEY_APP_ICON, APP_ICON_NEW);
+            PackageManager pm = getPackageManager();
+            int st = pm.getComponentEnabledSetting(new ComponentName(this, ALIAS_ICON_NEW));
+            boolean actualNew = (st == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                    || st == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
+            boolean wantNew = APP_ICON_NEW.equals(saved);
+            if (actualNew != wantNew) {
+                switchAppIcon(saved);
+            }
+        } catch (Throwable t) {
+            Log.w("YukiHub", "sync app icon state failed", t);
+        }
     }
 
     private void openMainTarget(String target) {

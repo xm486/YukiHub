@@ -75,7 +75,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="• 本应用为开源项目，仅用于管理和启动你有权使用的游戏/应用。\n• 你需要自行确认资源、账号、同步服务与第三方组件的合法性。\n• 本应用不提供游戏本体、破解资源或绕过授权的能力。\n• 第三方服务、系统权限和外部组件的可用性不由本应用保证。"
+                android:text="• 本应用为开源项目，仅用于管理和启动你有权使用的游戏/应用。\n• 你需要自行确认资源、账号、第三方登录（鲲 / Hikarinagi）、同步服务与第三方组件的合法性。\n• 本应用不提供游戏本体、破解资源或绕过授权的能力。\n• 游戏启动、资料刮削、云同步、社区等功能依赖第三方引擎与服务，可用性由其决定。"
                 android:textColor="@color/yh_text_muted"
                 android:textSize="12sp"
                 android:lineSpacingExtra="3dp" />

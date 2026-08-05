@@ -66,13 +66,23 @@ public class AuthActivity extends AppCompatActivity {
     private static final String KEY_KUN_OAUTH_CODE_VERIFIER = "kun_oauth_code_verifier";
     private static final String KEY_KUN_OAUTH_STARTED_AT = "kun_oauth_started_at";
 
+    // Hikarinagi quick login. Fill HIKARINAGI_ANDROID_CLIENT_ID after the OAuth app is issued in console.
+    private static final String HIKARINAGI_ANDROID_CLIENT_ID = "hkn_qtmXMJfBoxcNLA-a";
+    private static final String HIKARINAGI_OAUTH_AUTHORIZE_URL = "https://id.hikarinagi.org/oidc/auth";
+    private static final String HIKARINAGI_OAUTH_REDIRECT_URI = "yukihub://hikarinagi/callback";
+    private static final String HIKARINAGI_OAUTH_SCOPE = "openid user:read";
+    private static final String KEY_HIKARINAGI_OAUTH_STATE = "hikarinagi_oauth_state";
+    private static final String KEY_HIKARINAGI_OAUTH_CODE_VERIFIER = "hikarinagi_oauth_code_verifier";
+    private static final String KEY_HIKARINAGI_OAUTH_NONCE = "hikarinagi_oauth_nonce";
+    private static final String KEY_HIKARINAGI_OAUTH_STARTED_AT = "hikarinagi_oauth_started_at";
+
     private boolean registerMode = false;
 private SharedPreferences prefs;
 
 private TextView tabLogin, tabRegister, tvFormTitle, tvFormHint, tvAuthStatus;
 private LinearLayout rowNickname, rowConfirmPassword, rowVerifyCode;
 private EditText etNickname, etEmail, etPassword, etConfirmPassword, etVerifyCode;
-private Button btnSubmit, btnSendCode, btnKungalLogin;
+private Button btnSubmit, btnSendCode, btnKungalLogin, btnHikarinagiLogin;
 private TextView tvContinueLocal;
 
 // 发送验证码倒计时
@@ -133,6 +143,7 @@ protected void onDestroy() {
     btnSubmit = findViewById(R.id.btnSubmit);
     btnSendCode = findViewById(R.id.btnSendCode);
     btnKungalLogin = findViewById(R.id.btnKungalLogin);
+    btnHikarinagiLogin = findViewById(R.id.btnHikarinagiLogin);
     // 限制鲲站图标尺寸，防止撑满按钮
     if (btnKungalLogin != null) {
         Drawable[] drawables = btnKungalLogin.getCompoundDrawablesRelative();
@@ -140,6 +151,15 @@ protected void onDestroy() {
             int size = dp(28);
             drawables[0].setBounds(0, 0, size, size);
             btnKungalLogin.setCompoundDrawablesRelative(drawables[0], null, null, null);
+        }
+    }
+    // 限制 Hikarinagi 图标尺寸，防止撑满按钮
+    if (btnHikarinagiLogin != null) {
+        Drawable[] drawables = btnHikarinagiLogin.getCompoundDrawablesRelative();
+        if (drawables[0] != null) {
+            int size = dp(28);
+            drawables[0].setBounds(0, 0, size, size);
+            btnHikarinagiLogin.setCompoundDrawablesRelative(drawables[0], null, null, null);
         }
     }
     tvContinueLocal = findViewById(R.id.tvContinueLocal);
@@ -152,6 +172,7 @@ protected void onDestroy() {
     btnSubmit.setOnClickListener(v -> onSubmit());
     btnSendCode.setOnClickListener(v -> onSendCode());
     if (btnKungalLogin != null) btnKungalLogin.setOnClickListener(v -> startKungalQuickLogin());
+    if (btnHikarinagiLogin != null) btnHikarinagiLogin.setOnClickListener(v -> startHikarinagiQuickLogin());
 
     // 长按标题测试API连接
     tvFormTitle.setOnLongClickListener(v -> {
@@ -276,6 +297,45 @@ private void startKungalQuickLogin() {
     } catch (Throwable t) {
         Log.w("YukiHub", "start KUN quick login failed", t);
         showStatus("无法打开鲲站快捷登录：" + (t.getMessage() == null ? "请检查浏览器" : t.getMessage()), 0xFFFF3B30);
+    }
+}
+
+private void startHikarinagiQuickLogin() {
+    if (HIKARINAGI_ANDROID_CLIENT_ID.startsWith("TODO_")) {
+        showStatus("Hikarinagi 快捷登录还没有配置 client_id，稍后在 AuthActivity.java 中填写", 0xFFFF9500);
+        return;
+    }
+    try {
+        String state = randomUrlSafe(32);
+        String verifier = randomUrlSafe(64);
+        String challenge = pkceS256(verifier);
+        String nonce = randomUrlSafe(16);
+
+        prefs.edit()
+                .putString(KEY_HIKARINAGI_OAUTH_STATE, state)
+                .putString(KEY_HIKARINAGI_OAUTH_CODE_VERIFIER, verifier)
+                .putString(KEY_HIKARINAGI_OAUTH_NONCE, nonce)
+                .putLong(KEY_HIKARINAGI_OAUTH_STARTED_AT, System.currentTimeMillis())
+                .apply();
+
+        Uri uri = Uri.parse(HIKARINAGI_OAUTH_AUTHORIZE_URL).buildUpon()
+                .appendQueryParameter("response_type", "code")
+                .appendQueryParameter("client_id", HIKARINAGI_ANDROID_CLIENT_ID)
+                .appendQueryParameter("redirect_uri", HIKARINAGI_OAUTH_REDIRECT_URI)
+                .appendQueryParameter("scope", HIKARINAGI_OAUTH_SCOPE)
+                .appendQueryParameter("state", state)
+                .appendQueryParameter("nonce", nonce)
+                .appendQueryParameter("code_challenge", challenge)
+                .appendQueryParameter("code_challenge_method", "S256")
+                .build();
+
+        showStatus("正在打开 Hikarinagi 授权页面...", 0xFF8E9AB5);
+        Intent i = new Intent(Intent.ACTION_VIEW, uri);
+        i.addCategory(Intent.CATEGORY_BROWSABLE);
+        startActivity(i);
+    } catch (Throwable t) {
+        Log.w("YukiHub", "start Hikarinagi quick login failed", t);
+        showStatus("无法打开 Hikarinagi 快捷登录：" + (t.getMessage() == null ? "请检查浏览器" : t.getMessage()), 0xFFFF3B30);
     }
 }
 

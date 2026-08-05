@@ -27,8 +27,13 @@ Developers are also welcome to actively build different branch versions. As the 
 
 ## Features
 
-- Supports adding, editing, and deleting game entries
-- Integrates game metadata sources from VNDB and Bangumi
+- Multiple import methods: manual add, batch folder import, and migration from third-party platforms (such as <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>, <a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>, <a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>, <a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>).
+- Steam-like social online service: enjoy Gal with friends, record playtime like Steam, and view friends' play activity and what they are currently playing.
+- Supports quick login & binding with third-party accounts (Kungal Galgame, Hikarinagi).
+- Social features: friend chat, play activity, online presence, etc.
+- Integrates game metadata scraping sources: VNDB, Bangumi, Ymgal, Hikarinagi.
+- Includes a relatively complete OCR translation feature, reducing the pain of reading untranslated games. Multiple translation APIs are available, with highly customizable API settings. (Original project from <a href="https://github.com/murangogo/MoeTranslate">MoeTranslate</a>)
+- Supports adding, editing, and deleting game entries, plus multi-select and one-click clear
 - Supports game entries with empty directories
   - Suitable for Android app-style games, external programs, and custom launch entries
 - Supports importing GameHub shortcuts
@@ -40,6 +45,9 @@ Developers are also welcome to actively build different branch versions. As the 
   - Supports game entry synchronization
   - Supports play record synchronization
   - Supports matching and restoring empty-directory entries
+- Supports fast / compatibility dual scan modes (selectable in Settings)
+- Supports app icon switching (selectable in Settings, new icon by default)
+- Supports built-in Web community (posts, comments, game reviews, follow & favorites)
 - Supports viewing the complete disclaimer in Settings
 - Requires agreeing to the disclaimer on first launch before entering
 - Dark-style interface, suitable for landscape use
@@ -103,6 +111,14 @@ For empty-directory entries, title matching is prioritized.
 - The full disclaimer can be viewed in Settings
 - The disclaimer must be accepted on first launch before entering
 - Helps with open-source release and clarifies usage boundaries
+
+### 6. Game Metadata Scraping
+
+Supports fetching covers, synopses, tags, and character info from VNDB, Bangumi, Ymgal, Hikarinagi, and other sources. You can choose the source and display priority in Settings; scraped results are cached locally for offline viewing.
+
+### 7. App Icon Switching
+
+You can switch the desktop icon (new / classic) in the "App Icon" section of the Home settings. The desktop icon may need a moment to refresh after switching. This is a local personalization setting and is not included in cloud sync.
 
 ---
 
@@ -194,6 +210,8 @@ This project does not provide:
 - Landscape experience is better
 - Requires partial file access permissions
 - Some features may depend on system compatibility or third-party component support
+- Some features (third-party login, community, metadata scraping) require network access
+- Game launching depends on third-party engines and system compatibility
 
 ---
 
