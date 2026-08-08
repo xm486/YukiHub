@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 public class YukiDatabaseHelper extends SQLiteOpenHelper {
     public static final String DB_NAME = "yukihub.db";
-    public static final int DB_VERSION = 12;
+    public static final int DB_VERSION = 13;
 
     public YukiDatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -57,6 +57,7 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 ")");
         db.execSQL("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)");
         createMetadataCacheTable(db);
+        createChatCacheTables(db);
         try { db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_play_sessions_uuid ON play_sessions(session_uuid)"); } catch (Exception ignored) { }
     }
 
@@ -98,6 +99,9 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
         if (oldVersion < 12) {
             upgradeMetadataCachePrimaryKey(db);
         }
+        if (oldVersion < 13) {
+            createChatCacheTables(db);
+        }
     }
 
     private void createMetadataCacheTable(SQLiteDatabase db) {
@@ -109,6 +113,42 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
                 "updated_at INTEGER NOT NULL," +
                 "PRIMARY KEY(game_id, source)" +
                 ")");
+    }
+
+    /**
+     * 聊天记录本地缓存表（好友私聊 + 群聊）。
+     * 仅用于离线查看与减少服务器请求，不参与备份与云同步。
+     */
+    private void createChatCacheTables(SQLiteDatabase db) {
+        // 好友私聊缓存
+        db.execSQL("CREATE TABLE IF NOT EXISTS friend_messages (" +
+                "id INTEGER PRIMARY KEY," +          // 服务端消息 id
+                "friend_id TEXT NOT NULL," +          // 对方用户 id
+                "sender_id TEXT," +
+                "receiver_id TEXT," +
+                "content TEXT," +
+                "msg_type TEXT," +
+                "created_at TEXT," +
+                "is_mine INTEGER DEFAULT 0" +
+                ")");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_friend_messages ON friend_messages(friend_id, id)");
+
+        // 群聊消息缓存（含渲染所需发送者信息）
+        db.execSQL("CREATE TABLE IF NOT EXISTS group_messages_cache (" +
+                "id INTEGER PRIMARY KEY," +           // 服务端消息 id
+                "group_id INTEGER NOT NULL," +
+                "sender_id TEXT," +
+                "sender_nickname TEXT," +
+                "sender_avatar TEXT," +
+                "sender_uid INTEGER DEFAULT 0," +
+                "sender_is_admin INTEGER DEFAULT 0," +
+                "content TEXT," +
+                "msg_type TEXT," +
+                "created_at TEXT," +
+                "recalled INTEGER DEFAULT 0," +
+                "is_mine INTEGER DEFAULT 0" +
+                ")");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_group_messages_cache ON group_messages_cache(group_id, id)");
     }
 
     private void upgradeMetadataCachePrimaryKey(SQLiteDatabase db) {
