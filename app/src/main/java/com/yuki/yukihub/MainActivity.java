@@ -184,6 +184,8 @@ public class MainActivity extends AppCompatActivity {
     private GameAdapter adapter;
     private final List<Game> allGames = new ArrayList<>();
     private String filter = "ALL";
+    /** 本地游戏分类的安装检测缓存（key=rootUri，进入分类时清空重查，分类内搜索/排序复用）。 */
+    private final java.util.Map<String, Boolean> localInstalledCache = new java.util.HashMap<>();
 private String query = "";
 private String developerFilter = "";
     // 多选删除栏
@@ -663,6 +665,7 @@ pendingScanRootReplaceIndex = -2;
                     ArrayAdapter<String> adapter = krSpinnerAdapter(options.toArray(new String[0]));
                     launchSp.setAdapter(adapter);
                     ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(emptyText(pendingCoverUri, "未选择封面"));
+                    updateClearDirButton(pendingEditDialog.findViewById(R.id.btnClearDir), pendingDirUri);
                 }
             }
         });
@@ -1821,7 +1824,7 @@ if (profilePanel != null) {
     profilePanel.setOnClickListener(v -> { clickFeedback(v); showProfileDialog(); });
 }
         setupDeveloperToggle();
-bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "RECENT");
+bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "LOCAL");
 bindFilter(R.id.filterPlaying, "PLAYING"); bindFilter(R.id.filterCompleted, "COMPLETED"); bindFilter(R.id.filterUnplayed, "UNPLAYED");
         updateFilterSelection();
         ((EditText)findViewById(R.id.etSearch)).addTextChangedListener(new TextWatcher() {
@@ -4318,6 +4321,7 @@ private void bindFilter(int id, String value) {
             playUiSound(UI_SOUND_CLICK);
             filter = value;
             developerFilter = "";
+            if ("LOCAL".equals(value)) localInstalledCache.clear(); // 进入本地游戏分类：重新检测最新文件状态
             updateFilterSelection();
             applyFilter();
         });
@@ -4326,7 +4330,7 @@ private void bindFilter(int id, String value) {
     private void updateFilterSelection() {
         updateFilterItem(R.id.filterAll, "ALL");
         updateFilterItem(R.id.filterFavorite, "FAVORITE");
-        updateFilterItem(R.id.filterRecent, "RECENT");
+        updateFilterItem(R.id.filterRecent, "LOCAL");
         updateFilterItem(R.id.filterPlaying, "PLAYING");
         updateFilterItem(R.id.filterCompleted, "COMPLETED");
         updateFilterItem(R.id.filterUnplayed, "UNPLAYED");
@@ -4364,6 +4368,38 @@ repairMissingMetadataCoversIfNeeded();
 scanMissingCoversIfNeeded();
 }
 
+    /** 判断游戏是否已安装：rootUri 对应的目录/文件真实存在（兼容 file:// 与 content://）。带缓存，避免分类内重复查询。 */
+    private boolean isGameInstalled(Game g) {
+        if (g == null) return false;
+        if (g.engine == EngineType.ANDROID) {
+            String pkg = g.emulatorPackage == null ? "" : g.emulatorPackage.trim();
+            if (pkg.isEmpty()) return false;
+            String key = "android:" + pkg;
+            Boolean cached = localInstalledCache.get(key);
+            if (cached != null) return cached;
+            boolean installed = false;
+            try { installed = getPackageManager().getLaunchIntentForPackage(pkg) != null; } catch (Throwable ignored) { }
+            localInstalledCache.put(key, installed);
+            return installed;
+        }
+        String rootUri = g.rootUri == null ? "" : g.rootUri.trim();
+        if (rootUri.isEmpty()) return false;
+        Boolean cached = localInstalledCache.get(rootUri);
+        if (cached != null) return cached;
+        boolean installed = checkRootExists(rootUri);
+        localInstalledCache.put(rootUri, installed);
+        return installed;
+    }
+
+    private boolean checkRootExists(String rootUri) {
+        try {
+            DocumentFile dir = documentDir(rootUri);
+            return dir != null && dir.exists();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private void applyFilter() {
         List<Game> shown = new ArrayList<>();
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT).trim();
@@ -4371,7 +4407,7 @@ scanMissingCoversIfNeeded();
         for (Game g : allGames) {
             total += g.totalPlayTime;
             if (!q.isEmpty() && (g.title == null || !g.title.toLowerCase(Locale.ROOT).contains(q))) continue;
-            if ("RECENT".equals(filter) && g.lastPlayedAt <= 0) continue;
+            if ("LOCAL".equals(filter) && !isGameInstalled(g)) continue;
             if ("FAVORITE".equals(filter) && !g.favorite) continue;
             if ("PLAYING".equals(filter) && !"playing".equals(normalizePlayStatus(g.playStatus))) continue;
             if ("COMPLETED".equals(filter) && !"completed".equals(normalizePlayStatus(g.playStatus))) continue;
@@ -4383,6 +4419,7 @@ scanMissingCoversIfNeeded();
         if ("WINLATOR".equals(filter) && g.engine != EngineType.WINLATOR) continue;
         if ("GAMEHUB".equals(filter) && g.engine != EngineType.GAMEHUB) continue;
         if ("PSP".equals(filter) && g.engine != EngineType.PSP) continue;
+        if ("ANDROID".equals(filter) && g.engine != EngineType.ANDROID) continue;
         if ("UNKNOWN".equals(filter) && g.engine != EngineType.UNKNOWN) continue;
             if (developerFilter != null && !developerFilter.isEmpty()) {
                 String dev = developerOf(g);
@@ -7547,7 +7584,7 @@ private void showDetailDialog(Game game) {
         }
     }
 
-    private void showInstalledAppPicker(EditText target) {
+    private void showInstalledAppPicker(EditText target, EditText titleTarget) {
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setContentView(R.layout.dialog_app_picker);
@@ -7581,6 +7618,9 @@ private void showDetailDialog(Game game) {
                 final AppPickerAdapter[] adapterRef = new AppPickerAdapter[1];
                 adapterRef[0] = new AppPickerAdapter(items, item -> {
                     target.setText(item.packageName);
+                    if (titleTarget != null && (titleTarget.getText() == null || titleTarget.getText().toString().trim().isEmpty())) {
+                        titleTarget.setText(item.label);
+                    }
                     dialog.dismiss();
                 });
                 rv.setAdapter(adapterRef[0]);
@@ -7804,17 +7844,38 @@ private String displayPath(String value) {
         Button btnArtemisCompat = d.findViewById(R.id.btnArtemisCompat);
         Button btnArtemisCompatV2 = d.findViewById(R.id.btnArtemisCompatV2);
         TextView tvPlayTimeInfo = d.findViewById(R.id.tvPlayTimeInfo);
+        View btnClearDir = d.findViewById(R.id.btnClearDir);
+        btnClearDir.setOnClickListener(v -> {
+            pendingDirUri = null;
+            if (pendingEditDialog != null) {
+                ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedDir)).setText("未选择游戏目录");
+                List<String> options = buildLaunchOptions(null);
+                launchSp.setAdapter(krSpinnerAdapter(options.toArray(new String[0])));
+                updateClearDirButton(btnClearDir, pendingDirUri);
+            }
+            Toast.makeText(MainActivity.this, "已清除游戏目录", Toast.LENGTH_SHORT).show();
+        });
         View btnPickEmulatorApp = d.findViewById(R.id.btnPickEmulatorApp);
         View btnResetEmulatorPackage = d.findViewById(R.id.btnResetEmulatorPackage);
         View btnPickGameHubShortcut = d.findViewById(R.id.btnPickGameHubShortcut);
         btnPickGameHubShortcut.setOnClickListener(v -> showGameHubShortcutPicker(title, pkg, gamehubLocalGameId));
-        btnPickEmulatorApp.setOnClickListener(v -> showInstalledAppPicker(pkg));
-        pkg.setOnClickListener(v -> showInstalledAppPicker(pkg));
+        btnPickEmulatorApp.setOnClickListener(v -> showInstalledAppPicker(pkg, title));
+        pkg.setOnClickListener(v -> showInstalledAppPicker(pkg, title));
         Runnable updateWinlatorAdvanced = () -> {
             String engine = sp.getSelectedItem() == null ? "" : sp.getSelectedItem().toString();
             boolean isWinlator = "WINLATOR".equals(engine) || isWinlatorPackageName(pkg.getText() == null ? "" : pkg.getText().toString());
             winlatorAdvancedLayout.setVisibility(isWinlator ? View.VISIBLE : View.GONE);
             gamehubLaunchLayout.setVisibility("GAMEHUB".equals(engine) ? View.VISIBLE : View.GONE);
+        };
+        Runnable updateAndroidVisibility = () -> {
+            boolean isAndroid = "ANDROID".equals(sp.getSelectedItem() == null ? "" : sp.getSelectedItem().toString());
+            View dirRow = d.findViewById(R.id.layoutDirRow);
+            View btnPickDirView = d.findViewById(R.id.btnPickDir);
+            View launchLabel = d.findViewById(R.id.tvLaunchTargetLabel);
+            if (dirRow != null) dirRow.setVisibility(isAndroid ? View.GONE : View.VISIBLE);
+            if (btnPickDirView != null) btnPickDirView.setVisibility(isAndroid ? View.GONE : View.VISIBLE);
+            if (launchLabel != null) launchLabel.setVisibility(isAndroid ? View.GONE : View.VISIBLE);
+            if (launchSp != null) launchSp.setVisibility(isAndroid ? View.GONE : View.VISIBLE);
         };
         btnResetEmulatorPackage.setOnClickListener(v -> {
             String engine = sp.getSelectedItem() == null ? "" : sp.getSelectedItem().toString();
@@ -7831,7 +7892,7 @@ private String displayPath(String value) {
             public void onTextChanged(CharSequence s, int st, int b, int c) { updateWinlatorAdvanced.run(); }
             public void afterTextChanged(Editable e) {}
         });
-        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "PSP", "UNKNOWN"});
+        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "PSP", "ANDROID", "UNKNOWN"});
         sp.setAdapter(spAdapter);
         ArrayAdapter<String> winlatorModeAdapter = krSpinnerAdapter(new String[]{"启动到游戏", "启动到程序"});
         winlatorModeSp.setAdapter(winlatorModeAdapter);
@@ -7860,6 +7921,8 @@ private String displayPath(String value) {
         } else if (pendingDirUri != null) {
             ((TextView)d.findViewById(R.id.tvSelectedDir)).setText(pendingDirUri);
         }
+        updateClearDirButton(btnClearDir, pendingDirUri);
+        updateAndroidVisibility.run();
         sp.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
                 String engine = (String) sp.getSelectedItem();
@@ -7887,6 +7950,7 @@ private String displayPath(String value) {
                     }
                 }
                 updateWinlatorAdvanced.run();
+                updateAndroidVisibility.run();
                 if (isArtemis) updateArtemisVersionButtons(pkg.getText().toString(), btnArtemisAuto, btnArtemisStd, btnArtemisCompat, btnArtemisCompatV2);
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
@@ -7911,6 +7975,7 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
                                 ArrayAdapter<String> adapter = krSpinnerAdapter(options.toArray(new String[0]));
                                 launchSp.setAdapter(adapter);
                                 ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(emptyText(pendingCoverUri, "未选择封面"));
+                                updateClearDirButton(pendingEditDialog.findViewById(R.id.btnClearDir), pendingDirUri);
                             }
                         }
                     })
@@ -7945,9 +8010,17 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
             if (g.engine == EngineType.GAMEHUB && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = guessInstalledGameHubPackage();
             if (g.engine == EngineType.PSP && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = "org.ppsspp.ppsspp";
             if (g.engine != EngineType.GAMEHUB) g.gamehubLocalGameId = "";
+            if (g.engine == EngineType.ANDROID) {
+                String androidPkg = pkg.getText() == null ? "" : pkg.getText().toString().trim();
+                if (androidPkg.isEmpty()) { Toast.makeText(MainActivity.this, "请先选择要启动的安卓应用", Toast.LENGTH_SHORT).show(); return; }
+                g.rootUri = "";
+                g.winlatorLaunchMode = "game";
+                g.gamehubLaunchMode = "game";
+            }
             g.winlatorLaunchMode = (g.engine == EngineType.WINLATOR || isWinlatorPackageName(g.emulatorPackage)) ? winlatorModeValue(winlatorModeSp.getSelectedItemPosition()) : "game";
             g.gamehubLaunchMode = g.engine == EngineType.GAMEHUB ? gamehubModeValue(gamehubModeSp.getSelectedItemPosition()) : "game";
             String selectedLaunchTarget = (String) launchSp.getSelectedItem();
+            if (g.engine == EngineType.ANDROID) selectedLaunchTarget = "";
             if (g.engine == EngineType.ARTEMIS || g.engine == EngineType.TYRANO) selectedLaunchTarget = "[游戏目录]";
             if (g.engine == EngineType.GAMEHUB) selectedLaunchTarget = "[GameHub]";
             g.launchTarget = selectedLaunchTarget;
@@ -7960,6 +8033,12 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
         if (d.getWindow() != null) {
             d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
+    }
+
+    private void updateClearDirButton(View btn, String dirUri) {
+        boolean hasDir = dirUri != null && !dirUri.trim().isEmpty();
+        btn.setEnabled(hasDir);
+        btn.setAlpha(hasDir ? 1f : 0.45f);
     }
 
     private String defaultEmulatorPackageForEngine(String engine) {
@@ -8221,7 +8300,7 @@ private void showEditPlayTimeDialog(Game game) {
         return hours + "h" + remain + "m";
     }
 
-    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.GAMEHUB) return 6; if (e == EngineType.PSP) return 7; if (e == EngineType.UNKNOWN) return 8; return 0; }
+    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.GAMEHUB) return 6; if (e == EngineType.PSP) return 7; if (e == EngineType.ANDROID) return 8; if (e == EngineType.UNKNOWN) return 9; return 0; }
 
     private boolean isWinlatorPackageName(String pkg) {
         if (pkg == null) return false;
@@ -9503,6 +9582,9 @@ return startActivitySafely(intent);
                 return false;
             }
             return startActivitySafely(EmulatorLauncher.buildInternalPspIntent(this, game.rootUri, launchTarget));
+        }
+        if (game.engine == EngineType.ANDROID) {
+            return EmulatorLauncher.launch(this, pkg);
         }
         return EmulatorLauncher.launchGame(this, emulatorPackage, game.rootUri, launchTarget, game.winlatorLaunchMode, game.gamehubLaunchMode, game.gamehubLocalGameId);
     }
