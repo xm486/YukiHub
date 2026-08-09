@@ -224,15 +224,20 @@ public class HikarinagiClient {
 
     /**
      * 解析搜索结果条目（摘要信息）。
+     * 注意：Hikarinagi 搜索接口的 subtitle 字段是发售年份（如 "2019"），不是副标题/中文名。
      */
     private static VnMetadata parseSearchHit(JSONObject o) {
         if (o == null) return null;
         VnMetadata m = new VnMetadata();
         m.id = String.valueOf(o.optLong("id", 0));
         if ("0".equals(m.id)) m.id = o.optString("id", "");
-        m.romanTitle = o.optString("title", "");
-        m.originalTitle = m.romanTitle;
-        m.chineseTitle = MetadataUtils.firstNonEmpty(o.optString("subtitle", ""), m.romanTitle);
+        String title = o.optString("title", "");
+        m.romanTitle = title;
+        m.originalTitle = title;
+        // subtitle 是年份（纯 4 位数字）时放入发售日期，绝不当标题用
+        m.chineseTitle = title;
+        String subtitle = o.optString("subtitle", "");
+        if (subtitle != null && subtitle.matches("\\d{4}")) m.released = subtitle;
         m.developer = o.optString("developer", "");
 
         JSONObject cover = o.optJSONObject("cover");
@@ -291,9 +296,10 @@ public class HikarinagiClient {
         String transIntro = o.optString("trans_intro", "");
         if (!transIntro.isEmpty()) m.translatedDescription = cleanText(transIntro);
 
-        // 发售日期
+        // 发售日期（ISO 时间戳截断为日期，如 2019-08-29）
         String releaseDate = o.optString("release_date", "");
-        if (!releaseDate.isEmpty()) m.released = releaseDate;
+        if (releaseDate != null && releaseDate.length() >= 10) releaseDate = releaseDate.substring(0, 10);
+        if (releaseDate != null && !releaseDate.isEmpty()) m.released = releaseDate;
 
         // 封面（covers 数组取第一个）
         JSONArray covers = o.optJSONArray("covers");

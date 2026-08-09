@@ -605,9 +605,16 @@ public class MetadataController {
 
                 delegate.runOnUiThread(() -> {
                     if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
-                    if (delegate.metadataRepository() != null) saveCurrentSourceMetadata(id, candidate);
-                    applyVndbMetadata(candidate, game);
-                    delegate.showToast("Hikarinagi 详情获取失败，已使用搜索结果", Toast.LENGTH_SHORT);
+                    // 详情拉取失败时：已有完整缓存则保留（避免好数据被搜索摘要降级覆盖），否则才存摘要兜底
+                    VnMetadata existing = delegate.metadataRepository() == null ? null : currentSourceMetadata(id);
+                    if (existing != null && isMetadataComplete(existing)) {
+                        applyVndbMetadata(existing, game);
+                        delegate.showToast("Hikarinagi 详情获取失败，已保留原有资料", Toast.LENGTH_SHORT);
+                    } else {
+                        if (delegate.metadataRepository() != null) saveCurrentSourceMetadata(id, candidate);
+                        applyVndbMetadata(candidate, game);
+                        delegate.showToast("Hikarinagi 详情获取失败，已使用搜索结果", Toast.LENGTH_SHORT);
+                    }
                 });
             }
         });
@@ -882,6 +889,9 @@ public class MetadataController {
                         if (dialogRef[0] != null) dialogRef[0].dismiss();
                         if (usingYmgal()) {
                             fetchAndApplyYmgalDetail(game, chosen);
+                        } else if (usingHikarinagi()) {
+                            // Hikarinagi 搜索摘要缺少简介/标签/截图，必须再拉详情
+                            fetchAndApplyHikarinagiDetail(game, chosen);
                         } else {
                             saveCurrentSourceMetadata(game.id, chosen);
                             applyVndbMetadata(chosen, game);
@@ -1074,8 +1084,15 @@ public class MetadataController {
     public boolean isConfidentMatch(String localTitle, VnMetadata meta) {
         if (meta == null || localTitle == null) return false;
         String a = buildMetadataSearchKeyword(localTitle).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\u4e00-\\u9fa5ぁ-んァ-ン一-龯]", "");
-        String b = (delegate.emptyText(meta.chineseTitle, "") + delegate.emptyText(meta.originalTitle, "") + delegate.emptyText(meta.romanTitle, "")).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\u4e00-\\u9fa5ぁ-んァ-ン一-龯]", "");
-        return !a.isEmpty() && !b.isEmpty() && (b.contains(a) || a.contains(b));
+        if (a.isEmpty()) return false;
+        // 对每个标题单独判断包含关系，避免拼接三个标题导致带前缀的本地名（如 "ty远海咏叹调"）匹配失败
+        String[] titles = {meta.chineseTitle, meta.originalTitle, meta.romanTitle};
+        for (String t : titles) {
+            if (t == null || t.trim().isEmpty()) continue;
+            String b = t.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\u4e00-\\u9fa5ぁ-んァ-ン一-龯]", "");
+            if (!b.isEmpty() && (b.contains(a) || a.contains(b))) return true;
+        }
+        return false;
     }
 
     public String safeCacheName(String input) {
@@ -1161,5 +1178,188 @@ public class MetadataController {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    // ======================== bulk refresh all metadata ========================
+
+    /** 批量重扫相邻两游戏间隔（秒）的 SharedPreferences key，默认 2.5s，范围 0.5~15s。 */
+    public static final String KEY_BULK_REFRESH_INTERVAL_SEC = "bulk_refresh_interval_sec";
+    private static final float DEFAULT_BULK_REFRESH_INTERVAL_SEC = 2.5f;
+
+    private volatile boolean bulkRefreshRunning = false;
+    private volatile boolean bulkRefreshCancelled = false;
+
+    /** 从设置读取批量重扫间隔（毫秒），带范围钳制。 */
+    private long bulkRefreshIntervalMs() {
+        try {
+            SharedPreferences sp = delegate.prefs();
+            float sec = sp == null ? DEFAULT_BULK_REFRESH_INTERVAL_SEC
+                    : sp.getFloat(KEY_BULK_REFRESH_INTERVAL_SEC, DEFAULT_BULK_REFRESH_INTERVAL_SEC);
+            if (sec < 0.5f) sec = 0.5f;
+            if (sec > 15f) sec = 15f;
+            return (long) (sec * 1000L);
+        } catch (Throwable t) {
+            return (long) (DEFAULT_BULK_REFRESH_INTERVAL_SEC * 1000L);
+        }
+    }
+
+    public interface BulkRefreshCallback {
+        /** done = 已处理的游戏数（当前正在处理第 done+1 个）；total = 本次实际要重扫的总数。已在 UI 线程回调。 */
+        void onProgress(int done, int total, String gameTitle, String status);
+
+        /** 全部结束（含取消）。已在 UI 线程回调。 */
+        void onFinished(BulkRefreshResult result);
+    }
+
+    public static class BulkRefreshResult {
+        public int totalGames = 0;   // 库中有效游戏总数
+        public int attempted = 0;    // 实际尝试重扫数
+        public int skipped = 0;      // 跳过数（仅重扫不完整模式下 = 资料已完整的游戏数）
+        public int success = 0;
+        public int failed = 0;
+        public int needConfirm = 0;  // 多候选未自动命中，需人工确认
+        public boolean cancelled = false;
+        public final List<String> details = new ArrayList<>();
+    }
+
+    public boolean isBulkRefreshRunning() {
+        return bulkRefreshRunning;
+    }
+
+    public void cancelBulkRefresh() {
+        bulkRefreshCancelled = true;
+    }
+
+    /**
+     * 一键重扫全部游戏的资料（使用当前选择的资料源）。
+     *
+     * @param onlyIncomplete true 时仅重扫当前源下缓存缺失/不完整的游戏；false 全量重扫。
+     */
+    public void refreshAllMetadata(boolean onlyIncomplete, BulkRefreshCallback callback) {
+        if (bulkRefreshRunning || callback == null) return;
+        bulkRefreshRunning = true;
+        bulkRefreshCancelled = false;
+
+        AppExecutors.runOnIo(() -> {
+            try {
+                List<Game> games = new ArrayList<>();
+                for (Game g : delegate.allGames()) {
+                    if (g != null && g.id > 0 && g.title != null && !g.title.trim().isEmpty()) games.add(g);
+                }
+                List<Game> targets = new ArrayList<>();
+                if (onlyIncomplete) {
+                    for (Game g : games) {
+                        VnMetadata cur = currentSourceMetadata(g.id);
+                        if (cur == null || !isMetadataComplete(cur)) targets.add(g);
+                    }
+                } else {
+                    targets.addAll(games);
+                }
+                final int total = targets.size();
+                BulkRefreshResult result = new BulkRefreshResult();
+                result.totalGames = games.size();
+                result.skipped = games.size() - targets.size();
+                int done = 0;
+                for (Game g : targets) {
+                    if (bulkRefreshCancelled) {
+                        result.cancelled = true;
+                        break;
+                    }
+                    final String title = g.title;
+                    final int current = done;
+                    if (isActivityAlive()) {
+                        delegate.runOnUiThread(() -> callback.onProgress(current, total, title, ""));
+                    }
+                    result.attempted++;
+                    try {
+                        int outcome = refreshSingleMetadataSync(g);
+                        if (outcome == 0) {
+                            result.success++;
+                            result.details.add("✓ " + title);
+                        } else if (outcome == 1) {
+                            result.needConfirm++;
+                            result.details.add("⚠ " + title + "（多候选未自动命中，可手动重扫）");
+                        } else {
+                            result.failed++;
+                            result.details.add("✗ " + title + "（未找到或获取失败）");
+                        }
+                    } catch (Throwable t) {
+                        result.failed++;
+                        String em = t.getMessage();
+                        result.details.add("✗ " + title + "（" + (em == null || em.trim().isEmpty() ? "未知错误" : em) + "）");
+                    }
+                    done++;
+                    if (!bulkRefreshCancelled && done < total) {
+                        try { Thread.sleep(bulkRefreshIntervalMs()); } catch (InterruptedException ignored) { }
+                    }
+                }
+                final BulkRefreshResult fResult = result;
+                if (isActivityAlive()) {
+                    delegate.runOnUiThread(() -> callback.onFinished(fResult));
+                }
+            } finally {
+                bulkRefreshRunning = false;
+            }
+        });
+    }
+
+    /**
+     * 同步重扫单个游戏资料（当前源，不弹候选框，适合批量场景）。
+     *
+     * @return 0 = 成功；1 = 多候选未自动命中（保留原资料）；2 = 未找到或获取失败
+     */
+    private int refreshSingleMetadataSync(Game game) throws Exception {
+        final long id = game.id;
+        final String keyword = buildMetadataSearchKeyword(game.title);
+        if (usingYmgal()) {
+            List<VnMetadata> data = YmgalClient.searchCandidates(keyword, 5);
+            if (data == null || data.isEmpty()) return 2;
+            VnMetadata chosen = data.get(0);
+            if (data.size() > 1 && !isConfidentMatch(game.title, chosen)) return 1;
+            VnMetadata full = YmgalClient.getGame(chosen.id, chosen);
+            saveCurrentSourceMetadata(id, full == null ? chosen : full);
+            return 0;
+        }
+        if (usingHikarinagi()) {
+            List<VnMetadata> data = HikarinagiClient.searchCandidates(keyword, 5);
+            if (data == null || data.isEmpty()) return 2;
+            VnMetadata chosen = data.get(0);
+            if (data.size() > 1 && !isConfidentMatch(game.title, chosen)) return 1;
+            VnMetadata full = HikarinagiClient.getGalgame(chosen.id, chosen);
+            saveCurrentSourceMetadata(id, full == null ? chosen : full);
+            return 0;
+        }
+        if (usingBangumi()) {
+            String token = bangumiToken();
+            if (token == null || token.trim().isEmpty()) throw new Exception("Bangumi未配置 Token");
+            VnMetadata meta = BangumiClient.searchFirst(keyword, token, usingBangumiMirror());
+            if (meta == null) return 2;
+            saveCurrentSourceMetadata(id, meta);
+            return 0;
+        }
+        List<VnMetadata> data = VndbClient.searchCandidates(keyword, 5);
+        if (data == null || data.isEmpty()) return 2;
+        VnMetadata chosen = data.get(0);
+        if (data.size() > 1 && !isConfidentMatch(game.title, chosen)) return 1;
+        saveCurrentSourceMetadata(id, chosen);
+        return 0;
+    }
+
+    /** 判断一份资料是否"完整"（资料卡片核心要素齐全：匹配ID + 标题 + 封面 + 简介 + 至少一项元数据）。 */
+    public boolean isMetadataComplete(VnMetadata m) {
+        if (m == null) return false;
+        if (m.id == null || m.id.trim().isEmpty()) return false;
+        boolean hasTitle = !delegate.emptyText(m.chineseTitle, delegate.emptyText(m.originalTitle, m.romanTitle)).isEmpty();
+        boolean hasCover = m.coverUrl != null && !m.coverUrl.trim().isEmpty();
+        boolean hasDesc = m.description != null && !m.description.trim().isEmpty();
+        boolean hasMeta = !delegate.emptyText(m.developer, delegate.emptyText(m.tagsText, m.released)).isEmpty();
+        return hasTitle && hasCover && hasDesc && hasMeta;
+    }
+
+    /** 当前资料源下，某游戏缓存资料是否完整（无缓存也视为不完整）。 */
+    public boolean isCurrentSourceMetadataComplete(long gameId) {
+        if (delegate.metadataRepository() == null || gameId <= 0) return false;
+        VnMetadata cur = currentSourceMetadata(gameId);
+        return cur != null && isMetadataComplete(cur);
     }
 }

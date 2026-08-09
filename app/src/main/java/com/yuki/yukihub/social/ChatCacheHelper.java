@@ -27,14 +27,21 @@ public class ChatCacheHelper {
     /** 每个会话最多缓存的条数（超出时裁剪最旧的） */
     public static final int MAX_CACHE_PER_PEER = 1000;
 
+    // 全局共享一个 YukiDatabaseHelper（单例），避免多个连接并发 open/close
+    private static YukiDatabaseHelper sHelper = null;
     private final YukiDatabaseHelper helper;
 
     public ChatCacheHelper(Context context) {
-        this.helper = new YukiDatabaseHelper(context.getApplicationContext());
+        if (sHelper == null) {
+            synchronized (ChatCacheHelper.class) {
+                if (sHelper == null) sHelper = new YukiDatabaseHelper(context.getApplicationContext());
+            }
+        }
+        this.helper = sHelper;
     }
 
     public void close() {
-        try { helper.close(); } catch (Throwable ignored) { }
+        // 共享数据库，不在此关闭（由 App 生命周期管理）
     }
 
     // ==================== 好友私聊缓存 ====================
@@ -53,7 +60,6 @@ public class ChatCacheHelper {
             while (c.moveToNext()) list.add(readFriendMessage(c));
         } finally {
             if (c != null) c.close();
-            db.close();
         }
         java.util.Collections.reverse(list);
         return list;
@@ -73,7 +79,6 @@ public class ChatCacheHelper {
             while (c.moveToNext()) list.add(readFriendMessage(c));
         } finally {
             if (c != null) c.close();
-            db.close();
         }
         java.util.Collections.reverse(list);
         return list;
@@ -91,7 +96,6 @@ public class ChatCacheHelper {
             return c.moveToNext() ? c.getInt(0) : 0;
         } finally {
             if (c != null) c.close();
-            db.close();
         }
     }
 
@@ -106,7 +110,6 @@ public class ChatCacheHelper {
             return c.moveToNext() ? c.getInt(0) : 0;
         } finally {
             if (c != null) c.close();
-            db.close();
         }
     }
 
@@ -127,7 +130,6 @@ public class ChatCacheHelper {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
-            db.close();
         }
     }
 
@@ -141,7 +143,6 @@ public class ChatCacheHelper {
                     "(SELECT id FROM friend_messages WHERE friend_id=? ORDER BY id DESC LIMIT ?)",
                     new Object[]{friendId, friendId, MAX_CACHE_PER_PEER});
         } finally {
-            db.close();
         }
     }
 
@@ -173,7 +174,6 @@ public class ChatCacheHelper {
             while (c.moveToNext()) list.add(readGroupMessage(c));
         } finally {
             if (c != null) c.close();
-            db.close();
         }
         java.util.Collections.reverse(list);
         return list;
@@ -194,7 +194,6 @@ public class ChatCacheHelper {
             while (c.moveToNext()) list.add(readGroupMessage(c));
         } finally {
             if (c != null) c.close();
-            db.close();
         }
         java.util.Collections.reverse(list);
         return list;
@@ -212,7 +211,6 @@ public class ChatCacheHelper {
             return c.moveToNext() ? c.getInt(0) : 0;
         } finally {
             if (c != null) c.close();
-            db.close();
         }
     }
 
@@ -226,11 +224,10 @@ public class ChatCacheHelper {
             return c.moveToNext() ? c.getInt(0) : 0;
         } finally {
             if (c != null) c.close();
-            db.close();
         }
     }
 
-    /** 批量写入/更新群聊消息（按服务端 id 去重覆盖，含撤回状态） */
+    /** 批量写入/更新群聊消息（按服务端 id 去重覆盖，含撤回/删除状态） */
     public void upsertGroupMessages(int groupId, List<GroupMessage> msgs) {
         if (msgs == null || msgs.isEmpty()) return;
         SQLiteDatabase db = helper.getWritableDatabase();
@@ -238,19 +235,24 @@ public class ChatCacheHelper {
             db.beginTransaction();
             for (GroupMessage m : msgs) {
                 if (m == null || m.id <= 0) continue;
-                db.execSQL(
-                        "INSERT OR REPLACE INTO group_messages_cache" +
-                        "(id, group_id, sender_id, sender_nickname, sender_avatar, sender_uid, " +
-                        "sender_is_admin, content, msg_type, created_at, recalled, is_mine) " +
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                        new Object[]{m.id, groupId, m.senderId, m.senderNickname, m.senderAvatar,
-                                m.senderUid, m.senderIsAdmin ? 1 : 0, m.content, m.msgType,
-                                m.createdAt, m.recalled ? 1 : 0, m.isMine ? 1 : 0});
+                if (m.deleted) {
+                    // 已删除：从本地缓存移除（保证管理员删除对普通用户缓存生效）
+                    db.execSQL("DELETE FROM group_messages_cache WHERE group_id=? AND id=?",
+                            new Object[]{groupId, m.id});
+                } else {
+                    db.execSQL(
+                            "INSERT OR REPLACE INTO group_messages_cache" +
+                            "(id, group_id, sender_id, sender_nickname, sender_avatar, sender_uid, " +
+                            "sender_is_admin, content, msg_type, created_at, recalled, is_mine) " +
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                            new Object[]{m.id, groupId, m.senderId, m.senderNickname, m.senderAvatar,
+                                    m.senderUid, m.senderIsAdmin ? 1 : 0, m.content, m.msgType,
+                                    m.createdAt, m.recalled ? 1 : 0, m.isMine ? 1 : 0});
+                }
             }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
-            db.close();
         }
     }
 
@@ -263,7 +265,6 @@ public class ChatCacheHelper {
                     "(SELECT id FROM group_messages_cache WHERE group_id=? ORDER BY id DESC LIMIT ?)",
                     new Object[]{groupId, groupId, MAX_CACHE_PER_PEER});
         } finally {
-            db.close();
         }
     }
 
@@ -275,7 +276,6 @@ public class ChatCacheHelper {
             db.execSQL("UPDATE group_messages_cache SET recalled=1, content='' WHERE group_id=? AND id=?",
                     new Object[]{groupId, messageId});
         } finally {
-            db.close();
         }
     }
 
@@ -287,7 +287,6 @@ public class ChatCacheHelper {
             db.execSQL("DELETE FROM group_messages_cache WHERE group_id=? AND id=?",
                     new Object[]{groupId, messageId});
         } finally {
-            db.close();
         }
     }
 

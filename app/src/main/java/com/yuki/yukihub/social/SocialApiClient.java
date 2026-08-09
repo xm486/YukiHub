@@ -497,6 +497,7 @@ public class SocialApiClient {
         msg.msgType = obj.optString("msgType", "text");
         msg.createdAt = obj.optString("createdAt", "");
         msg.recalled = obj.optBoolean("recalled", false);
+        msg.deleted = obj.optBoolean("deleted", false);
         msg.isMine = obj.optBoolean("isMine", false);
         return msg;
     }

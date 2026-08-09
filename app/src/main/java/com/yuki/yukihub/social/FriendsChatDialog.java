@@ -83,6 +83,8 @@ public class FriendsChatDialog {
     private int historyOffset = 0;
     /** 当前已渲染的最老一条消息 id（翻历史时用于查本地缓存） */
     private int oldestLoadedMessageId = 0;
+    /** 当前正在打开的好友会话 id（异步回调校验，防止切换会话后旧回调污染新会话） */
+    private String openingFriendId = null;
 
     // 群组状态
     private List<GroupInfo> groupList = new ArrayList<>();
@@ -95,6 +97,8 @@ public class FriendsChatDialog {
     private int groupHistoryOffset = 0;
     /** 当前已渲染的最老一条群消息 id（翻历史时用于查本地缓存） */
     private int groupOldestLoadedMessageId = 0;
+    /** 当前正在打开的群会话 id（异步回调校验，防止切换会话后旧回调污染新会话） */
+    private int openingGroupId = -1;
 
     // 请求列表
     private JSONArray incomingRequests = new JSONArray();
@@ -622,35 +626,43 @@ public class FriendsChatDialog {
      */
     private void openFriendChat() {
         if (chatFriend == null) return;
+        final String friendId = chatFriend.id;
+        openingFriendId = friendId;
         AppExecutors.runOnIo(() -> {
             // 1. 读本地缓存渲染（先乐观允许翻历史，服务器同步后再修正）
-            List<ChatMessage> cached = chatCache.getFriendMessages(chatFriend.id, RENDER_LIMIT);
+            List<ChatMessage> cached = chatCache.getFriendMessages(friendId, RENDER_LIMIT);
             uiHandler.post(() -> {
+                if (!friendId.equals(openingFriendId)) return; // 会话已切换，丢弃旧回调
                 renderCachedFriendMessages(cached, true);
                 scrollToBottom();
             });
             // 2. 后台同步服务器最近 20 条增量（失败时保留缓存，离线也能用）
             try {
                 boolean[] serverHasMore = new boolean[]{true};
-                boolean refreshed = syncFriendHistoryFromServer(chatFriend.id, serverHasMore);
+                boolean refreshed = syncFriendHistoryFromServer(friendId, serverHasMore);
                 if (refreshed) {
-                    List<ChatMessage> all = chatCache.getFriendMessages(chatFriend.id, RENDER_LIMIT);
+                    List<ChatMessage> all = chatCache.getFriendMessages(friendId, RENDER_LIMIT);
                     uiHandler.post(() -> {
+                        if (!friendId.equals(openingFriendId)) return; // 会话已切换，丢弃旧回调
                         renderCachedFriendMessages(all, serverHasMore[0]);
                         scrollToBottom();
                     });
                 } else {
                     // 没有新消息也要用服务器结果修正 hasMoreHistory（服务器到底时关闭翻页）
                     uiHandler.post(() -> {
+                        if (!friendId.equals(openingFriendId)) return;
                         boolean localMore = oldestLoadedMessageId > 0
-                                && chatCache.countFriendMessagesBefore(chatFriend.id, oldestLoadedMessageId) > 0;
+                                && chatCache.countFriendMessagesBefore(friendId, oldestLoadedMessageId) > 0;
                         hasMoreHistory = localMore || serverHasMore[0];
                     });
                 }
                 startChatPolling();
             } catch (Throwable t) {
                 if (cached.isEmpty()) {
-                    uiHandler.post(() -> showError("加载消息失败", () -> openFriendChat()));
+                    uiHandler.post(() -> {
+                        if (!friendId.equals(openingFriendId)) return;
+                        showError("加载消息失败", () -> openFriendChat());
+                    });
                     return;
                 }
                 startChatPolling();
@@ -712,28 +724,31 @@ public class FriendsChatDialog {
     private void loadMoreHistory() {
         if (chatFriend == null || !hasMoreHistory) return;
         hasMoreHistory = false;
+        final String friendId = chatFriend.id;
         int beforeId = oldestLoadedMessageId;
         int offset = historyOffset;
         AppExecutors.runOnIo(() -> {
             // 1. 本地缓存优先
-            List<ChatMessage> older = chatCache.getFriendMessagesBefore(chatFriend.id, beforeId, 50);
+            List<ChatMessage> older = chatCache.getFriendMessagesBefore(friendId, beforeId, 50);
             if (!older.isEmpty()) {
                 uiHandler.post(() -> {
+                    if (!friendId.equals(openingFriendId)) return;
                     for (int i = older.size() - 1; i >= 0; i--) {
                         chatMessageList.addView(buildMessageBubble(older.get(i)), 0);
                     }
                     oldestLoadedMessageId = older.get(0).id;
                     historyOffset = offset + older.size();
-                    hasMoreHistory = chatCache.countFriendMessagesBefore(chatFriend.id, oldestLoadedMessageId) > 0;
+                    hasMoreHistory = chatCache.countFriendMessagesBefore(friendId, oldestLoadedMessageId) > 0;
                 });
                 return;
             }
             // 2. 本地缓存到底 → 请求服务器
             try {
-                List<ChatMessage> server = apiClient.getChatHistory(chatFriend.id, offset, 50);
-                chatCache.upsertFriendMessages(chatFriend.id, server);
-                chatCache.pruneFriendMessages(chatFriend.id);
+                List<ChatMessage> server = apiClient.getChatHistory(friendId, offset, 50);
+                chatCache.upsertFriendMessages(friendId, server);
+                chatCache.pruneFriendMessages(friendId);
                 uiHandler.post(() -> {
+                    if (!friendId.equals(openingFriendId)) return;
                     for (int i = server.size() - 1; i >= 0; i--) {
                         chatMessageList.addView(buildMessageBubble(server.get(i)), 0);
                     }
@@ -742,7 +757,10 @@ public class FriendsChatDialog {
                     hasMoreHistory = server.size() >= 50;
                 });
             } catch (Throwable t) {
-                hasMoreHistory = true;
+                uiHandler.post(() -> {
+                    if (!friendId.equals(openingFriendId)) return;
+                    hasMoreHistory = true;
+                });
             }
         });
     }
@@ -966,10 +984,13 @@ public class FriendsChatDialog {
      */
     private void openGroupChat() {
         if (chatGroup == null) return;
+        final int groupId = chatGroup.id;
+        openingGroupId = groupId;
         AppExecutors.runOnIo(() -> {
             // 1. 读本地缓存渲染（先乐观允许翻历史，服务器同步后再修正）
-            List<GroupMessage> cached = chatCache.getGroupMessages(chatGroup.id, RENDER_LIMIT);
+            List<GroupMessage> cached = chatCache.getGroupMessages(groupId, RENDER_LIMIT);
             uiHandler.post(() -> {
+                if (openingGroupId != groupId) return; // 会话已切换，丢弃旧回调
                 renderCachedGroupMessages(cached, true);
                 scrollGroupToBottom();
             });
@@ -977,27 +998,35 @@ public class FriendsChatDialog {
             try {
                 int[] online = new int[]{0};
                 boolean[] serverHasMore = new boolean[]{true};
-                boolean refreshed = syncGroupHistoryFromServer(chatGroup.id, online, serverHasMore);
+                boolean refreshed = syncGroupHistoryFromServer(groupId, online, serverHasMore);
                 if (refreshed) {
-                    List<GroupMessage> all = chatCache.getGroupMessages(chatGroup.id, RENDER_LIMIT);
+                    List<GroupMessage> all = chatCache.getGroupMessages(groupId, RENDER_LIMIT);
                     uiHandler.post(() -> {
+                        if (openingGroupId != groupId) return;
                         renderCachedGroupMessages(all, serverHasMore[0]);
                         scrollGroupToBottom();
                     });
                 } else {
                     // 没有新消息也要用服务器结果修正 hasMoreHistory（服务器到底时关闭翻页）
                     uiHandler.post(() -> {
+                        if (openingGroupId != groupId) return;
                         boolean localMore = groupOldestLoadedMessageId > 0
-                                && chatCache.countGroupMessagesBefore(chatGroup.id, groupOldestLoadedMessageId) > 0;
+                                && chatCache.countGroupMessagesBefore(groupId, groupOldestLoadedMessageId) > 0;
                         groupHasMoreHistory = localMore || serverHasMore[0];
                     });
                 }
-                uiHandler.post(() -> updateOnlineCount(online[0]));
+                uiHandler.post(() -> {
+                    if (openingGroupId != groupId) return;
+                    updateOnlineCount(online[0]);
+                });
                 startGroupPolling();
             } catch (Throwable t) {
                 if (cached.isEmpty()) {
                     String err = t.getMessage() != null ? t.getMessage() : "未知错误";
-                    uiHandler.post(() -> showError("加载消息失败：" + err, () -> openGroupChat()));
+                    uiHandler.post(() -> {
+                        if (openingGroupId != groupId) return;
+                        showError("加载消息失败：" + err, () -> openGroupChat());
+                    });
                     return;
                 }
                 startGroupPolling();
@@ -1033,6 +1062,7 @@ public class FriendsChatDialog {
     private boolean syncGroupHistoryFromServer(int groupId, int[] onlineCountOut, boolean[] serverHasMoreOut) throws Exception {
         int cachedMaxId = chatCache.getGroupMaxId(groupId);
         List<GroupMessage> fresh = new ArrayList<>();
+        boolean changed = false;
         int offset = 0;
         boolean serverHasMore = true;
         while (true) {
@@ -1040,7 +1070,15 @@ public class FriendsChatDialog {
             if (onlineCountOut != null) onlineCountOut[0] = result.onlineCount;
             chatCache.upsertGroupMessages(groupId, result.messages);
             for (GroupMessage m : result.messages) {
-                if (cachedMaxId == 0 || m.id > cachedMaxId) fresh.add(m);
+                if (m.deleted) {
+                    // 删除状态变化：需重绘（缓存已移除该条）
+                    changed = true;
+                    continue;
+                }
+                if (cachedMaxId == 0 || m.id > cachedMaxId) {
+                    fresh.add(m);
+                    changed = true;
+                }
             }
             int pageMinId = result.messages.isEmpty() ? 0 : result.messages.get(0).id;
             boolean connected = result.messages.isEmpty() || cachedMaxId == 0 || pageMinId <= cachedMaxId;
@@ -1051,7 +1089,7 @@ public class FriendsChatDialog {
         }
         chatCache.pruneGroupMessages(groupId);
         if (serverHasMoreOut != null) serverHasMoreOut[0] = serverHasMore;
-        return !fresh.isEmpty();
+        return changed;
     }
 
     private void updateOnlineCount(int count) {
@@ -1066,39 +1104,48 @@ public class FriendsChatDialog {
     private void loadMoreGroupHistory() {
         if (chatGroup == null || !groupHasMoreHistory) return;
         groupHasMoreHistory = false;
+        final int groupId = chatGroup.id;
         int beforeId = groupOldestLoadedMessageId;
         int offset = groupHistoryOffset;
         AppExecutors.runOnIo(() -> {
             // 1. 本地缓存优先
-            List<GroupMessage> older = chatCache.getGroupMessagesBefore(chatGroup.id, beforeId, 50);
+            List<GroupMessage> older = chatCache.getGroupMessagesBefore(groupId, beforeId, 50);
             if (!older.isEmpty()) {
                 uiHandler.post(() -> {
+                    if (openingGroupId != groupId) return;
                     for (int i = older.size() - 1; i >= 0; i--) {
                         groupMessageList.addView(buildGroupMessageBubble(older.get(i)), 0);
                     }
                     groupOldestLoadedMessageId = older.get(0).id;
                     groupHistoryOffset = offset + older.size();
-                    groupHasMoreHistory = chatCache.countGroupMessagesBefore(chatGroup.id, groupOldestLoadedMessageId) > 0;
+                    groupHasMoreHistory = chatCache.countGroupMessagesBefore(groupId, groupOldestLoadedMessageId) > 0;
                 });
                 return;
             }
             // 2. 本地缓存到底 → 请求服务器
             try {
-                SocialApiClient.GroupHistoryResult result = apiClient.getGroupMessages(chatGroup.id, offset, 50);
+                SocialApiClient.GroupHistoryResult result = apiClient.getGroupMessages(groupId, offset, 50);
                 List<GroupMessage> server = result.messages;
-                chatCache.upsertGroupMessages(chatGroup.id, server);
-                chatCache.pruneGroupMessages(chatGroup.id);
+                chatCache.upsertGroupMessages(groupId, server);
+                chatCache.pruneGroupMessages(groupId);
                 uiHandler.post(() -> {
+                    if (openingGroupId != groupId) return;
+                    int oldestServerId = 0;
                     for (int i = server.size() - 1; i >= 0; i--) {
+                        if (server.get(i).deleted) continue; // 已删除，跳过显示
                         groupMessageList.addView(buildGroupMessageBubble(server.get(i)), 0);
+                        oldestServerId = server.get(i).id;
                     }
-                    if (!server.isEmpty()) groupOldestLoadedMessageId = server.get(0).id;
+                    if (oldestServerId > 0) groupOldestLoadedMessageId = oldestServerId;
                     groupHistoryOffset = offset + server.size();
                     groupHasMoreHistory = server.size() >= 50;
                     updateOnlineCount(result.onlineCount);
                 });
             } catch (Throwable t) {
-                groupHasMoreHistory = true;
+                uiHandler.post(() -> {
+                    if (openingGroupId != groupId) return;
+                    groupHasMoreHistory = true;
+                });
             }
         });
     }
@@ -1463,6 +1510,12 @@ public class FriendsChatDialog {
                 uiHandler.post(() -> {
                     if (!newMsgs.isEmpty()) {
                         for (GroupMessage msg : newMsgs) {
+                            if (msg.deleted) {
+                                // 已删除：跳过显示（缓存已在 upsert 时移除），但游标照常推进，
+                                // 避免下次轮询用旧 afterId 导致这条消息无限重复返回
+                                if (msg.id > groupMaxMessageId) groupMaxMessageId = msg.id;
+                                continue;
+                            }
                             if (msg.id > groupMaxMessageId) {
                                 // 跳过自己发的（乐观 UI 已展示）
                                 if (!msg.isMine) {

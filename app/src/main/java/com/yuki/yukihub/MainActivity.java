@@ -5193,6 +5193,145 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         }
     }
 
+    // ==================== 批量重扫全部游戏资料 ====================
+
+    /** 保存批量重扫间隔（秒），非法输入回退到已存值。 */
+    private void saveBulkRefreshInterval(EditText input) {
+        if (input == null) return;
+        try {
+            float sec = Float.parseFloat(input.getText().toString().trim());
+            if (sec < 0.5f) sec = 0.5f;
+            if (sec > 15f) sec = 15f;
+            prefs.edit().putFloat(MetadataController.KEY_BULK_REFRESH_INTERVAL_SEC, sec).apply();
+            input.setText(String.valueOf(sec));
+        } catch (Throwable t) {
+            input.setText(String.valueOf(prefs.getFloat(MetadataController.KEY_BULK_REFRESH_INTERVAL_SEC, 2.5f)));
+        }
+    }
+
+    /** 设置页"一键重扫全部游戏资料"入口：确认弹窗。 */
+    private void showBulkMetadataRefreshDialog() {
+        if (metadataController.isBulkRefreshRunning()) {
+            Toast.makeText(this, "批量重扫已在运行中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int count = 0;
+        int incomplete = 0;
+        for (Game g : allGames) {
+            if (g != null && g.id > 0 && g.title != null && !g.title.trim().isEmpty()) {
+                count++;
+                if (!metadataController.isCurrentSourceMetadataComplete(g.id)) incomplete++;
+            }
+        }
+        if (count == 0) {
+            Toast.makeText(this, "没有可重扫的游戏", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(6), dp(20), 0);
+        TextView msg = new TextView(this);
+        float intervalSec = prefs.getFloat(MetadataController.KEY_BULK_REFRESH_INTERVAL_SEC, 2.5f);
+        msg.setText("将使用当前资料源「" + metadataSourceLabel() + "」重新获取 " + count + " 款游戏的资料" + (incomplete > 0 ? "（其中约 " + incomplete + " 款资料不完整）" : "") + "，已缓存内容会被覆盖刷新。\n\n第三方接口有限流，串行重扫且每款间隔约 " + intervalSec + " 秒，期间请保持网络连接。");
+        msg.setTextColor(getColorCompat(R.color.yh_text));
+        msg.setTextSize(12);
+        msg.setLineSpacing(dp(2), 1.0f);
+        box.addView(msg);
+        CheckBox onlyIncomplete = new CheckBox(this);
+        onlyIncomplete.setText("仅重扫资料不完整的游戏（跳过已有完整缓存的，更快更省）");
+        onlyIncomplete.setTextColor(getColorCompat(R.color.yh_text));
+        onlyIncomplete.setTextSize(12);
+        onlyIncomplete.setChecked(true);
+        box.addView(onlyIncomplete);
+        final int totalCount = count;
+        AlertDialog confirmDialog = new AlertDialog.Builder(this)
+                .setTitle("重扫全部游戏资料")
+                .setView(box)
+                .setPositiveButton("开始重扫", (d, w) -> startBulkMetadataRefresh(onlyIncomplete.isChecked(), totalCount))
+                .setNegativeButton("取消", null)
+                .show();
+        styleAlertDialogDark(confirmDialog);
+    }
+
+    /** 执行批量重扫：进度对话框 + 回调。 */
+    private void startBulkMetadataRefresh(boolean onlyIncomplete, int totalGames) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(10), dp(20), dp(10));
+        ProgressBar pb = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        pb.setMax(Math.max(totalGames, 1));
+        pb.setProgress(0);
+        box.addView(pb);
+        TextView status = new TextView(this);
+        status.setText("正在准备…");
+        status.setTextColor(getColorCompat(R.color.yh_text));
+        status.setTextSize(12);
+        status.setLineSpacing(dp(2), 1.0f);
+        status.setPadding(0, dp(8), 0, 0);
+        box.addView(status);
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setTitle("正在重扫游戏资料")
+                .setView(box)
+                .setNegativeButton("停止", (d, w) -> {
+                    metadataController.cancelBulkRefresh();
+                    status.setText("正在停止…（当前游戏处理完后退出）");
+                })
+                .setCancelable(false)
+                .create();
+        progressDialog.show();
+        styleAlertDialogDark(progressDialog);
+
+        metadataController.refreshAllMetadata(onlyIncomplete, new MetadataController.BulkRefreshCallback() {
+            @Override
+            public void onProgress(int done, int total, String gameTitle, String statusText) {
+                if (isFinishing() || isDestroyed()) {
+                    metadataController.cancelBulkRefresh();
+                    return;
+                }
+                pb.setMax(Math.max(total, 1));
+                pb.setProgress(Math.min(done + 1, Math.max(total, 1)));
+                status.setText("正在处理 " + (done + 1) + "/" + total + "：" + gameTitle);
+            }
+
+            @Override
+            public void onFinished(MetadataController.BulkRefreshResult result) {
+                if (isFinishing() || isDestroyed()) {
+                    metadataController.cancelBulkRefresh();
+                    return;
+                }
+                try { progressDialog.dismiss(); } catch (Throwable ignored) { }
+                showBulkRefreshResult(result);
+            }
+        });
+    }
+
+    /** 批量重扫结果汇总。 */
+    private void showBulkRefreshResult(MetadataController.BulkRefreshResult r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(r.cancelled ? "已停止，已完成部分：\n" : "重扫完成：\n");
+        sb.append("· 尝试 ").append(r.attempted).append(" 款\n");
+        if (r.skipped > 0) sb.append("· 跳过（资料已完整）").append(r.skipped).append(" 款\n");
+        sb.append("· 成功 ").append(r.success).append(" 款\n");
+        sb.append("· 失败 ").append(r.failed).append(" 款\n");
+        if (r.needConfirm > 0) sb.append("· 需人工确认 ").append(r.needConfirm).append(" 款\n");
+        StringBuilder detailSb = new StringBuilder();
+        int shown = 0;
+        for (String d : r.details) {
+            if (shown >= 20) break;
+            detailSb.append(d).append("\n");
+            shown++;
+        }
+        if (r.details.size() > shown) detailSb.append("…共 ").append(r.details.size()).append(" 条明细");
+        AlertDialog resultDialog = new AlertDialog.Builder(this)
+                .setTitle(r.cancelled ? "已停止" : "重扫完成")
+                .setMessage(sb.toString() + (detailSb.length() > 0 ? "\n" + detailSb : ""))
+                .setPositiveButton("知道了", null)
+                .show();
+        styleAlertDialogDark(resultDialog);
+        // 当前选中的游戏若刚被重扫，刷新右侧资料卡片
+        if (selectedGame != null) updateSideDetail(selectedGame);
+    }
+
     private void confirmDeleteGame(Game game) {
         if (game == null) return;
         new AlertDialog.Builder(this)
@@ -5841,8 +5980,48 @@ else sourceSpinner.setSelection(0);
         tokenInput.setPadding(dp(10), 0, dp(10), 0);
         root.addView(tokenInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
+        // 一键重扫全部游戏资料（使用当前选择的资料源，串行限速防第三方限流）
+        Button bulkRefreshButton = krButton("↻ 一键重扫全部游戏资料");
+        LinearLayout.LayoutParams bulkRefreshLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        bulkRefreshLp.topMargin = dp(8);
+        root.addView(bulkRefreshButton, bulkRefreshLp);
+
+        // 重扫间隔设置行（秒/款，0.5~15s）
+        LinearLayout intervalRow = new LinearLayout(this);
+        intervalRow.setOrientation(LinearLayout.HORIZONTAL);
+        intervalRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        intervalRow.setPadding(dp(4), dp(6), dp(4), 0);
+        TextView intervalLabel = new TextView(this);
+        intervalLabel.setText("重扫间隔");
+        intervalLabel.setTextColor(getColorCompat(R.color.yh_text));
+        intervalLabel.setTextSize(13);
+        intervalRow.addView(intervalLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        EditText intervalInput = new EditText(this);
+        intervalInput.setSingleLine(true);
+        intervalInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        intervalInput.setText(String.valueOf(prefs.getFloat(MetadataController.KEY_BULK_REFRESH_INTERVAL_SEC, 2.5f)));
+        intervalInput.setTextColor(getColorCompat(R.color.yh_text));
+        intervalInput.setHintTextColor(getColorCompat(R.color.yh_text_muted));
+        intervalInput.setBackgroundResource(R.drawable.bg_input);
+        intervalInput.setGravity(android.view.Gravity.CENTER);
+        intervalInput.setPadding(dp(8), 0, dp(8), 0);
+        LinearLayout.LayoutParams intervalInputLp = new LinearLayout.LayoutParams(dp(72), dp(36));
+        intervalRow.addView(intervalInput, intervalInputLp);
+        TextView intervalUnit = new TextView(this);
+        intervalUnit.setText("秒/款（0.5~15）");
+        intervalUnit.setTextColor(getColorCompat(R.color.yh_text_muted));
+        intervalUnit.setTextSize(12);
+        intervalUnit.setPadding(dp(6), 0, 0, 0);
+        intervalRow.addView(intervalUnit);
+        root.addView(intervalRow);
+
+        bulkRefreshButton.setOnClickListener(v -> {
+            saveBulkRefreshInterval(intervalInput);
+            showBulkMetadataRefreshDialog();
+        });
+
         TextView warn = new TextView(this);
-        warn.setText("提醒：Bangumi API Token 建议使用注册超过三个月的账号申请。月幕 Gal 和 Hikarinagi 使用公开 API，无需 Token。切换资料源后，已有其它源缓存会继续显示；对当前游戏可点“重新匹配”刷新当前源资料。");
+        warn.setText("提醒：Bangumi API Token 建议使用注册超过三个月的账号申请。月幕 Gal 和 Hikarinagi 使用公开 API，无需 Token。切换资料源后，已有其它源缓存会继续显示；对当前游戏可点“重新匹配”刷新，或点上方“一键重扫全部游戏资料”批量刷新当前源资料。");
         warn.setTextColor(getColorCompat(R.color.yh_warning));
         warn.setTextSize(11);
         warn.setPadding(0, dp(8), 0, 0);
