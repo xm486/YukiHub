@@ -118,6 +118,8 @@ public class HomeActivity extends AppCompatActivity {
         }
 
         setContentView(R.layout.activity_home);
+        // 窗口背景铺成首页同款渐变，避免内容延伸/挖孔区域露出默认浅色背景（白边）
+        try { getWindow().setBackgroundDrawableResource(R.drawable.bg_home_gradient); } catch (Throwable ignored) { }
         repository = new GameRepository(this);
         bindViews();
         bindActions();
@@ -415,6 +417,21 @@ public class HomeActivity extends AppCompatActivity {
             @Override public void onStopTrackingTouch(SeekBar seekBar) { }
         });
 
+        // 刘海/挖孔区域（主界面可选，默认开启）
+        TextView cutoutTitle = new TextView(this);
+        cutoutTitle.setText("\n刘海/挖孔区域");
+        cutoutTitle.setTextColor(0xFFFFFFFF);
+        cutoutTitle.setTextSize(14);
+        cutoutTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(cutoutTitle);
+        android.widget.CheckBox cutoutCheck = new android.widget.CheckBox(this);
+        cutoutCheck.setText("允许绘制到刘海/挖孔区域（游戏库/首页背景铺满）");
+        cutoutCheck.setTextColor(0xFFFFFFFF);
+        cutoutCheck.setTextSize(13);
+        cutoutCheck.setPadding(dp(4), dp(4), 0, dp(4));
+        cutoutCheck.setChecked(prefs != null && prefs.getBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, true));
+        root.addView(cutoutCheck);
+
         // 启动页选择
         TextView startupTitle = new TextView(this);
         startupTitle.setText("\n启动页");
@@ -540,6 +557,7 @@ public class HomeActivity extends AppCompatActivity {
                         .putFloat("ui_font_scale", fontScaleValue[0])
                         .putFloat("ui_scale", uiScaleValue[0])
                         .putString("startup_page", selectedStartup)
+                        .putBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, cutoutCheck.isChecked())
                         .apply();
             }
             Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
@@ -1016,6 +1034,9 @@ public class HomeActivity extends AppCompatActivity {
     private void applyImmersiveToWindow(android.view.Window window) {
         if (window == null) return;
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        // 主界面可选：是否绘制到刘海/挖孔区域（首页设置里开关，默认开启）
+        com.yuki.yukihub.util.CutoutCompat.setCutoutMode(window,
+                prefs != null && prefs.getBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, true));
         View decor = window.getDecorView();
         if (decor == null) return;
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -1394,7 +1415,12 @@ public class HomeActivity extends AppCompatActivity {
 
     private void applyImmersive() {
         try {
+            // 主界面可选：是否绘制到刘海/挖孔区域（首页设置里开关，默认开启）
+            com.yuki.yukihub.util.CutoutCompat.setCutoutMode(getWindow(),
+                    prefs != null && prefs.getBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, true));
             if (android.os.Build.VERSION.SDK_INT >= 30) {
+                // 内容延伸到状态栏/刘海区域，避免安全区外露出窗口背景（白边）
+                getWindow().setDecorFitsSystemWindows(false);
                 WindowInsetsController controller = getWindow().getInsetsController();
                 if (controller != null) {
                     controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());

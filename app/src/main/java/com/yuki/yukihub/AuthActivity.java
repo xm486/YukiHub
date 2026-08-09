@@ -97,6 +97,9 @@ protected void onCreate(Bundle savedInstanceState) {
     
     setContentView(R.layout.activity_auth);
 
+    // 窗口背景铺成登录页同款背景，避免内容延伸/挖孔区域露出默认浅色背景（白边）
+    try { getWindow().setBackgroundDrawableResource(R.drawable.bg_auth_dialog); } catch (Throwable ignored) { }
+
     prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
     enterImmersiveMode();
 
@@ -661,7 +664,12 @@ private void startSendCodeCountdown() {
 
     private void enterImmersiveMode() {
         try {
+            // 主界面可选：是否绘制到刘海/挖孔区域（首页设置里开关，默认关闭）
+            com.yuki.yukihub.util.CutoutCompat.setCutoutMode(getWindow(),
+                    getSharedPreferences("yukihub_prefs", MODE_PRIVATE).getBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, true));
             if (android.os.Build.VERSION.SDK_INT >= 30) {
+                // 内容延伸到状态栏/刘海区域，避免安全区外露出窗口背景（白边）
+                getWindow().setDecorFitsSystemWindows(false);
                 WindowInsetsController controller = getWindow().getInsetsController();
                 if (controller != null) {
                     controller.hide(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.navigationBars());

@@ -249,6 +249,12 @@ private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
 private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
 private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
 private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
+/** KRKR 引擎允许绘制刘海/挖孔区域（默认开启）。 */
+public static final String KEY_KR_DRAW_CUTOUT = "kr_draw_cutout";
+/** Artemis 引擎允许绘制刘海/挖孔区域（默认开启）。 */
+public static final String KEY_ARTEMIS_DRAW_CUTOUT = "artemis_draw_cutout";
+/** 主界面（首页/游戏库/登录页）允许绘制刘海/挖孔区域（默认关闭，可在首页设置开启）。 */
+public static final String KEY_MAIN_DRAW_CUTOUT = "main_draw_cutout";
 private static final String KEY_SORT_MODE = "sort_mode";
 private static final String SORT_MODE_RECENT = "recent";
 private static final String SORT_MODE_NAME = "name";
@@ -605,9 +611,11 @@ applyImmersiveToWindow(window);
 }
 
 private void applyImmersiveToWindow(Window window) {
-if (window == null) return;
-window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-View decor = window.getDecorView();
+ if (window == null) return;
+ window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+ // 主界面可选：是否绘制到刘海/挖孔区域（首页设置里开关，默认开启）
+ com.yuki.yukihub.util.CutoutCompat.setCutoutMode(window, prefs != null && prefs.getBoolean(KEY_MAIN_DRAW_CUTOUT, true));
+ View decor = window.getDecorView();
 if (decor == null) return;
 if (android.os.Build.VERSION.SDK_INT >= 30) {
 WindowInsetsController controller = decor.getWindowInsetsController();
@@ -2676,7 +2684,7 @@ private void ensureNotificationPermission() {
             boolean granted = grantResults.length > 0
                     && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
             if (granted) {
-                // 权限已授予，引导用户打开通道详情页（横幅/铃声/锁屏可能默认关闭）
+                // 权限已授予，引导用户打开通道详情页（横幅/铃声/锁屏可能默认开启）
                 showNotificationChannelGuide();
             } else {
                 // 用户拒绝：引导去系统设置手动开启
@@ -6150,9 +6158,13 @@ else sourceSpinner.setSelection(0);
         CheckBox krCompatMode = krCheckBox("KR 启动参数兼容模式", prefs.getBoolean(KEY_KR_COMPAT_MODE, false));
         CheckBox krScopedSaveDir = krCheckBox("KR 独立存档目录（权限异常闪退时开启）", prefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false));
         CheckBox artemisScopedSaveDir = krCheckBox("Artemis 独立存档目录（权限异常闪退时开启）", prefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false));
+        CheckBox krDrawCutout = krCheckBox("KRKR 允许绘制刘海/挖孔区域", prefs.getBoolean(KEY_KR_DRAW_CUTOUT, true));
+        CheckBox artemisDrawCutout = krCheckBox("Artemis 允许绘制刘海/挖孔区域", prefs.getBoolean(KEY_ARTEMIS_DRAW_CUTOUT, true));
         root.addView(krCompatMode);
         root.addView(krScopedSaveDir);
         root.addView(artemisScopedSaveDir);
+        root.addView(krDrawCutout);
+        root.addView(artemisDrawCutout);
 
         Button nativeKrkrButton = krButton("进入原生KRKR");
         nativeKrkrButton.setTextColor(primaryTextColor());
@@ -6287,6 +6299,8 @@ else sourceSpinner.setSelection(0);
                     .putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
                     .putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
                     .putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, artemisScopedSaveDir.isChecked())
+                    .putBoolean(KEY_KR_DRAW_CUTOUT, krDrawCutout.isChecked())
+                    .putBoolean(KEY_ARTEMIS_DRAW_CUTOUT, artemisDrawCutout.isChecked())
                     .putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
                     .putFloat(UiScaleUtil.KEY_UI_SCALE, UiScaleUtil.clampUiScale(UiScaleUtil.MIN_UI_SCALE + uiScaleSeek.getProgress() / 100f))
                     .putInt(KEY_GAME_COLUMNS, Math.max(2, Math.min(10, columnsSeek.getProgress() + 2)))
