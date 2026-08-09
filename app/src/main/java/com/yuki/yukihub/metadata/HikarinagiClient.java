@@ -23,10 +23,11 @@ import retrofit2.Retrofit;
  * 鉴权方式：OAuth 2.0 Client Credentials（Basic 认证获取令牌，令牌有效期 1 小时）。
  * 限速：60 次/分钟/应用。
  * API 文档：https://www.hikarinagi.org/developers/reference
+ * API Base：https://api.hikarinagi.org/v3（原 www.hikarinagi.org/api/v3/open 已弃用，不再走 Nuxt 前端流量）
  */
 public class HikarinagiClient {
 
-    private static final String API_BASE = "https://www.hikarinagi.org";
+    private static final String API_BASE = "https://api.hikarinagi.org/v3";
     private static final String TOKEN_URL = "https://id.hikarinagi.org/oidc/token";
     private static final String CLIENT_ID = "hkn_4poXX7v37j_iM2-o";
     private static final String CLIENT_SECRET = "hks_Wv6tW5O6ev8Mbifvg1tPJ7UexehLATQcKpZJiFhV48Y";
@@ -56,7 +57,7 @@ public class HikarinagiClient {
         if (q.isEmpty()) return out;
 
         int pageSize = Math.max(1, Math.min(20, limit));
-        JSONObject data = apiGet("/api/v3/open/search", new String[][]{
+        JSONObject data = apiGet("/search", new String[][]{
                 {"q", q},
                 {"types", "galgame"},
                 {"page", "1"},
@@ -94,7 +95,7 @@ public class HikarinagiClient {
      */
     public static VnMetadata getGalgame(String id, VnMetadata base) throws Exception {
         if (id == null || id.trim().isEmpty()) return base;
-        JSONObject data = apiGet("/api/v3/open/galgames/" + id.trim(), null, true);
+        JSONObject data = apiGet("/galgames/" + id.trim(), null, true);
         if (data == null) return base;
         return parseGalgame(data, base);
     }
@@ -192,7 +193,7 @@ public class HikarinagiClient {
                                     .header("Accept", "application/json")
                                     .build()))
                             .build();
-                    Retrofit retrofit = HttpClient.retrofit("https://www.hikarinagi.org/", client);
+                    Retrofit retrofit = HttpClient.retrofit("https://api.hikarinagi.org/v3/", client);
                     apiService = retrofit.create(ApiService.class);
                 }
             }
