@@ -1,7 +1,7 @@
 # YukiHub
 
 <p align="center">
-  <img src="app/src/main/res/mipmap-xxhdpi/ic_launcher.png" alt="YukiHub" width="120" />
+  <img src="screenshots/icon_new.png" alt="YukiHub" width="120" />
 </p>
 
 <p align="center">
@@ -126,15 +126,15 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 ### 主界面
 
-<img src="screenshots/main.jpg" width="720" />
+<img src="screenshots/main.webp" width="720" />
 
 ### 同步页面
 
-<img src="screenshots/tongbu.jpg" width="720" />
+<img src="screenshots/tongbu.webp" width="720" />
 
 ### 游戏详情页
 
-<img src="screenshots/game.jpg" width="720" />
+<img src="screenshots/game.webp" width="720" />
 
 ---
 
@@ -170,7 +170,7 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 - 2.华为等手机由于存储读写限制，不能正常游玩krkr，atermis等引擎的游戏。(现在做了外部私有存档选项，可以勾选试试，或许有用?还做了轻量级SAF🤔，就是不知道有没有用了，得看你们测试了)(功能入口如下图↓) ✓ (截止0.12.5+1版本，已修复，如仍有问题请反馈)
 
-<img src="screenshots/save1.jpg" width="720" />
+<img src="screenshots/save1.webp" width="720" />
 
 -以上，欢迎有能力的拉拉pr喵😽😽😽
 

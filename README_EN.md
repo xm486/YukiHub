@@ -1,7 +1,7 @@
 # YukiHub
 
 <p align="center">
-  <img src="app/src/main/res/mipmap-hdpi/ic_launcher.png" alt="YukiHub" width="120" />
+  <img src="screenshots/icon_new.png" alt="YukiHub" width="120" />
 </p>
 
 <p align="center">
@@ -126,15 +126,15 @@ You can switch the desktop icon (new / classic) in the "App Icon" section of the
 
 ### Main Screen
 
-<img src="screenshots/main.jpg" width="720" />
+<img src="screenshots/main.webp" width="720" />
 
 ### Sync Page
 
-<img src="screenshots/tongbu.jpg" width="720" />
+<img src="screenshots/tongbu.webp" width="720" />
 
 ### Game Detail Page
 
-<img src="screenshots/game.jpg" width="720" />
+<img src="screenshots/game.webp" width="720" />
 
 ---
 
@@ -171,7 +171,7 @@ You can switch the desktop icon (new / classic) in the "App Icon" section of the
 
 - 2. Due to storage read/write restrictions on Huawei and some other phones, KRKR, Artemis and other engine games may not play normally. (An external private save option has been added. You can try enabling it; maybe it helps? A lightweight SAF option has also been added 🤔. Whether it works still depends on your testing.) (Feature entry is shown below ↓)
 
-<img src="screenshots/save1.jpg" width="720" />
+<img src="screenshots/save1.webp" width="720" />
 
 - That's all. PRs from capable people are welcome meow 😽😽😽
 
