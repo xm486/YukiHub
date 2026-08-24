@@ -432,6 +432,15 @@ public class HomeActivity extends AppCompatActivity {
         cutoutCheck.setChecked(prefs != null && prefs.getBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, true));
         root.addView(cutoutCheck);
 
+        // NSFW 封面模糊
+        android.widget.CheckBox nsfwBlurCheck = new android.widget.CheckBox(this);
+        nsfwBlurCheck.setText("🔞 NSFW 封面模糊（识别为 R18 的游戏封面自动模糊）");
+        nsfwBlurCheck.setTextColor(0xFFFFFFFF);
+        nsfwBlurCheck.setTextSize(13);
+        nsfwBlurCheck.setPadding(dp(4), dp(4), 0, dp(4));
+        nsfwBlurCheck.setChecked(prefs != null && prefs.getBoolean(MainActivity.KEY_NSFW_BLUR, true));
+        root.addView(nsfwBlurCheck);
+
         // 启动页选择
         TextView startupTitle = new TextView(this);
         startupTitle.setText("\n启动页");
@@ -558,6 +567,7 @@ public class HomeActivity extends AppCompatActivity {
                         .putFloat("ui_scale", uiScaleValue[0])
                         .putString("startup_page", selectedStartup)
                         .putBoolean(MainActivity.KEY_MAIN_DRAW_CUTOUT, cutoutCheck.isChecked())
+                        .putBoolean(MainActivity.KEY_NSFW_BLUR, nsfwBlurCheck.isChecked())
                         .apply();
             }
             Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();

@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 public class YukiDatabaseHelper extends SQLiteOpenHelper {
     public static final String DB_NAME = "yukihub.db";
-    public static final int DB_VERSION = 13;
+    public static final int DB_VERSION = 14;
 
     public YukiDatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -38,7 +38,8 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 "created_at INTEGER NOT NULL," +
                 "updated_at INTEGER NOT NULL," +
                 "hidden INTEGER DEFAULT 0," +
-                "favorite INTEGER DEFAULT 0" +
+                "favorite INTEGER DEFAULT 0," +
+                "nsfw INTEGER DEFAULT 0" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -101,6 +102,9 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
         }
         if (oldVersion < 13) {
             createChatCacheTables(db);
+        }
+        if (oldVersion < 14) {
+            safeAlter(db, "ALTER TABLE games ADD COLUMN nsfw INTEGER DEFAULT 0");
         }
     }
 

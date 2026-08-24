@@ -315,7 +315,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
 private static final String KEY_BACKGROUND_VIDEO_SOUND = "background_video_sound";
 private static final String KEY_BG_THEME_ENABLED = "bg_theme_enabled";
 private static final String KEY_UI_CLICK_SOUND = "ui_click_sound";
-private static final int UI_SOUND_CLICK = 0;
+    public static final String KEY_NSFW_BLUR = "nsfw_blur_enabled";
+    private static final int UI_SOUND_CLICK = 0;
 private static final int UI_SOUND_CONFIRM = 1;
 private static final int UI_SOUND_SWITCH = 2;
     private static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
@@ -1777,6 +1778,7 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
             @Override public void onStatusClick(Game game) { updateSideDetail(game); showPlayStatusDialog(game, null); }
         });
         adapter.setOnSelectionChangedListener(count -> updateMultiSelectBar(count));
+        adapter.setNsfwBlurEnabled(nsfwBlurEnabled());
         int columns = prefs == null ? DEFAULT_GAME_COLUMNS : prefs.getInt(KEY_GAME_COLUMNS, DEFAULT_GAME_COLUMNS);
         columns = Math.max(2, Math.min(10, columns));
         recycler.setLayoutManager(new GridLayoutManager(this, columns));
@@ -4358,6 +4360,7 @@ allGames.clear();
 allGames.addAll(repository.getAll());
 rebuildDeveloperFilters();
 applyFilter();
+if (adapter != null) adapter.setNsfwBlurEnabled(nsfwBlurEnabled());
 runCoverMaintenanceOnceIfNeeded();
     }
 
@@ -5175,9 +5178,12 @@ String rematchItem = "重新匹配" + sourceLabel;
         String syncItem = "同步" + sourceLabel + "到卡片";
         String playTimeItem = "修改游玩时长";
         String favoriteItem = game.favorite ? "取消收藏" : "收藏游戏";
+        String nsfwBlurLabel = "🔞 NSFW 封面模糊";
+        boolean nsfwBlurGameOn = game.nsfw;
+        String nsfwBlurItem = nsfwBlurLabel + "：" + (nsfwBlurGameOn ? "开启" : "关闭");
         String[] items = (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS)
-                ? new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "引擎设置", "详细信息", "删除游戏", "多选删除…"}
-                : new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "详细信息", "删除游戏", "多选删除…"};
+                ? new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem, "引擎设置", "详细信息", "删除游戏", "多选删除…"}
+                : new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem, "详细信息", "删除游戏", "多选删除…"};
         LinearLayout listRoot = new LinearLayout(this);
         listRoot.setOrientation(LinearLayout.VERTICAL);
         listRoot.setBackgroundResource(R.drawable.bg_dialog);
@@ -5216,6 +5222,13 @@ String rematchItem = "重新匹配" + sourceLabel;
 }
 else if (customSearchItem.equals(chosen)) showCurrentSourceCustomSearchDialog(game);
 else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
+                else if (chosen != null && chosen.startsWith(nsfwBlurLabel)) {
+                    boolean newVal = !nsfwBlurGameOn;
+                    game.nsfw = newVal;
+                    repository.update(game);
+                    Toast.makeText(this, "NSFW 封面模糊：" + (newVal ? "开启" : "关闭"), Toast.LENGTH_SHORT).show();
+                    loadGames();
+                }
                 else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game); }
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
                 else if ("删除游戏".equals(chosen)) confirmDeleteGame(game);
@@ -5859,6 +5872,9 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         CheckBox uiClickSoundCheck = krCheckBox("界面点击音效", prefs == null || prefs.getBoolean(KEY_UI_CLICK_SOUND, true));
         root.addView(uiClickSoundCheck);
 
+        CheckBox nsfwBlurCheck = krCheckBox("🔞 NSFW 封面模糊", prefs == null || prefs.getBoolean(KEY_NSFW_BLUR, true));
+        root.addView(nsfwBlurCheck);
+
         TextView accountTitle = new TextView(this);
 accountTitle.setText("\n账户与同步");
 accountTitle.setTextColor(getColorCompat(R.color.yh_text));
@@ -6332,6 +6348,7 @@ else sourceSpinner.setSelection(0);
                 .putBoolean(DynamicTheme.KEY_CUSTOM_COLOR_ENABLED, customColorEnabled.isChecked())
                 .putBoolean(KEY_USE_BUILTIN_FILE_CHOOSER, useBuiltinFileChooser.isChecked())
                     .putBoolean(KEY_UI_CLICK_SOUND, uiClickSoundCheck.isChecked())
+                    .putBoolean(KEY_NSFW_BLUR, nsfwBlurCheck.isChecked())
                     .putString(KEY_KR_ENGINE_VERSION, krEngineVersionFromLabel(String.valueOf(krEngineVersion.getSelectedItem())))
                     .putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
                     .putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
@@ -6589,6 +6606,9 @@ return s.length() > 72 ? "..." + s.substring(s.length() - 72) : s;
 
 private boolean useBuiltinFileChooser() {
         return prefs == null || prefs.getBoolean(KEY_USE_BUILTIN_FILE_CHOOSER, true);
+    }
+    private boolean nsfwBlurEnabled() {
+        return prefs == null || prefs.getBoolean(KEY_NSFW_BLUR, true);
     }
 
     private void launchScanRootPicker(int replaceIndex) {

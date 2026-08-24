@@ -24,6 +24,7 @@ public class Game {
     public long updatedAt;
     public boolean hidden;
     public boolean favorite;
+    public boolean nsfw;
 
     public Game() {
         engine = EngineType.UNKNOWN;

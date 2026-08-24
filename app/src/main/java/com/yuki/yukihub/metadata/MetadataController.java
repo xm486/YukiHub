@@ -947,6 +947,19 @@ public class MetadataController {
             delegate.setSideDescription(delegate.emptyText(game == null ? "" : game.description, metadataSourceLabel() + " 暂未匹配到资料。"));
             return;
         }
+        // NSFW 自动检测：VNDB/Hikarinagi 的 coverSexual 范围 0~2，>0.5 视为 R18
+        // 仅第一次检测时生效，用户手动开关后不再覆盖
+        if (game != null && meta.coverSexual > 0.5 && !game.nsfw) {
+            String detectKey = "nsfw_detected_" + game.id;
+            if (delegate.prefs() == null || !delegate.prefs().getBoolean(detectKey, false)) {
+                game.nsfw = true;
+                delegate.gameRepository().update(game);
+                if (delegate.prefs() != null) {
+                    delegate.prefs().edit().putBoolean(detectKey, true).apply();
+                }
+                delegate.loadGames();
+            }
+        }
         String visibleSourceLabel = metadataSourceLabelForVisibleMetadata(gameId, meta);
         updateSideMetadataSourceBadge(visibleSourceLabel);
         delegate.sideDetailTitle().setText(delegate.emptyText(meta.chineseTitle, delegate.emptyText(game.title, "未命名游戏")));
@@ -1035,6 +1048,16 @@ public class MetadataController {
                             game.coverUri = cover;
                             game.coverPersistUri = cover;
                             game.coverSourceType = 1;
+                        }
+                        // NSFW 自动检测：VNDB/Hikarinagi 的 coverSexual > 0.5 视为 R18
+                        // 仅第一次检测时生效，用户手动开关后不再覆盖
+                        if (meta.coverSexual > 0.5 && !game.nsfw) {
+                            String detectKey = "nsfw_detected_" + game.id;
+                            android.content.SharedPreferences sp = delegate.prefs();
+                            if (sp == null || !sp.getBoolean(detectKey, false)) {
+                                game.nsfw = true;
+                                if (sp != null) sp.edit().putBoolean(detectKey, true).apply();
+                            }
                         }
                         delegate.gameRepository().update(game);
                         delegate.loadGames();

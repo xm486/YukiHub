@@ -318,6 +318,7 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 - **[Rinne Mobile](https://github.com/Weiss-UltimateSavior/RinneMobile)**：Rinne Mobile是本项目的一个分支，主攻移动端竖屏ui，同时，这是一个 YukiHub 重构 开发 的版本，使用更加现代化的技术栈与MVVM架构，目前正在三次重构向kotlin迁移。
 - **[KamiGAL](https://github.com/ruizhishenri-commits/KamiGAL)**：无意间发现的一个YukiHub分支，感觉很有意思，便收录进来，好像还打算做ios版本，不过好像已经停止更新。令人感叹。
+- **[KireiBox](https://github.com/Yukin0a/KireiBox)**：KireiBox 是基于 YukiHub 的 RinneMobile 分支开发。并在ui设计上独具创新，颇有一番风味，个人感觉在横屏模式的ui下，非常好看，值得一用。
 
 感谢以上所有项目的开发者，他们的工作为这个生态增添了更多可能性。同时也希望未来这个生态里能有更出色的项目，这里也会收录。
 

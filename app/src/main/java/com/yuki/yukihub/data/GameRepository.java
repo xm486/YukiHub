@@ -447,6 +447,7 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
                 o.put("updated_at", c.getLong(c.getColumnIndexOrThrow("updated_at")));
                 o.put("hidden", c.getInt(c.getColumnIndexOrThrow("hidden")) == 1);
                 o.put("favorite", c.getInt(c.getColumnIndexOrThrow("favorite")) == 1);
+                o.put("nsfw", getIntOrDefault(c, "nsfw", 0) == 1);
                 arr.put(o);
             }
         } finally {
@@ -524,6 +525,7 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
                 g.playStatus = normalizePlayStatus(o.optString("play_status", g.playStatus));
                 g.hidden = o.optBoolean("hidden", g.hidden);
                 g.favorite = o.optBoolean("favorite", g.favorite);
+                g.nsfw = o.optBoolean("nsfw", g.nsfw);
             } else {
                 // Older card metadata must not overwrite newer local edits, but it may
                 // still fill identity fields that are missing locally.
@@ -741,6 +743,7 @@ v.put("description", g.description);
         v.put("updated_at", g.updatedAt);
         v.put("hidden", g.hidden ? 1 : 0);
         v.put("favorite", g.favorite ? 1 : 0);
+        v.put("nsfw", g.nsfw ? 1 : 0);
         return v;
     }
 
@@ -772,6 +775,8 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.hidden = c.getInt(c.getColumnIndexOrThrow("hidden")) == 1;
         int favoriteIndex = c.getColumnIndex("favorite");
         g.favorite = favoriteIndex >= 0 && !c.isNull(favoriteIndex) && c.getInt(favoriteIndex) == 1;
+        int nsfwIndex = c.getColumnIndex("nsfw");
+        g.nsfw = nsfwIndex >= 0 && !c.isNull(nsfwIndex) && c.getInt(nsfwIndex) == 1;
         return g;
     }
 

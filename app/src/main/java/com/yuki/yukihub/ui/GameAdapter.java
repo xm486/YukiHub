@@ -1,5 +1,6 @@
 package com.yuki.yukihub.ui;
 
+import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.view.HapticFeedbackConstants;
@@ -45,12 +46,15 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
     // 多选模式
     private boolean multiSelectMode = false;
     private final Set<Long> checkedIds = new HashSet<>();
+    // NSFW 封面模糊
+    private boolean nsfwBlurEnabled = true;
 
     public void setOnGameClickListener(OnGameClickListener listener) { this.listener = listener; }
     public void setOnUiFeedbackListener(OnUiFeedbackListener listener) { this.feedbackListener = listener; }
     public void setOnSelectionChangedListener(OnSelectionChangedListener listener) { this.selectionChangedListener = listener; }
     private void emitFeedback(int type) { if (feedbackListener != null) feedbackListener.onUiFeedback(type); }
     public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChanged(); }
+    public void setNsfwBlurEnabled(boolean enabled) { nsfwBlurEnabled = enabled; notifyDataSetChanged(); }
     public void submit(List<Game> newGames) {
         games.clear();
         games.addAll(newGames);
@@ -198,12 +202,51 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         h.playTime.setTextColor(themeActive ? 0xFFB0B8C8 : h.playTime.getContext().getResources().getColor(R.color.yh_text_muted));
         bindStatusBadge(h.statusBadge, g.playStatus);
         String coverUri = chooseSafeCoverUri(g);
+        boolean needBlur = g.nsfw && nsfwBlurEnabled;
         if (coverUri != null && !coverUri.isEmpty()) {
             try {
-                Uri uri = Uri.parse(coverUri);
-                h.cover.setImageURI(uri);
-                h.cover.setVisibility(View.VISIBLE);
-                h.placeholder.setVisibility(View.GONE);
+                final Uri uri = Uri.parse(coverUri);
+                if (needBlur) {
+                    // 高斯模糊：先查缓存，缓存命中直接显示模糊图，零闪烁
+                    final String requestTag = "nsfw_blur:" + g.id;
+                    h.cover.setTag(R.id.tag_remote_image_request, requestTag);
+                    Bitmap cached = BlurUtils.getCached(requestTag);
+                    if (cached != null) {
+                        h.cover.setImageBitmap(cached);
+                        h.cover.setVisibility(View.VISIBLE);
+                        h.placeholder.setVisibility(View.GONE);
+                    } else {
+                        // 加载期间显示纯色占位背景（无文字），与卡片融为一体
+                        h.cover.setImageDrawable(null);
+                        h.cover.setVisibility(View.GONE);
+                        h.placeholder.setVisibility(View.VISIBLE);
+                        h.placeholder.setText("");
+                        // 异步加载并模糊
+                        com.yuki.yukihub.util.AppExecutors.runOnIo(() -> {
+                            try {
+                                android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                                opts.inSampleSize = 2;
+                                Bitmap bitmap = android.graphics.BitmapFactory.decodeStream(
+                                        h.itemView.getContext().getContentResolver().openInputStream(uri), null, opts);
+                                if (bitmap == null) return;
+                                final Bitmap blurred = BlurUtils.blur(h.itemView.getContext(), bitmap, 22f);
+                                if (blurred == null) return;
+                                BlurUtils.putCache(requestTag, blurred);
+                                h.itemView.post(() -> {
+                                    String currentTag = (String) h.cover.getTag(R.id.tag_remote_image_request);
+                                    if (!requestTag.equals(currentTag)) return;
+                                    h.cover.setImageBitmap(blurred);
+                                    h.cover.setVisibility(View.VISIBLE);
+                                    h.placeholder.setVisibility(View.GONE);
+                                });
+                            } catch (Throwable ignored) { }
+                        });
+                    }
+                } else {
+                    h.cover.setImageURI(uri);
+                    h.cover.setVisibility(View.VISIBLE);
+                    h.placeholder.setVisibility(View.GONE);
+                }
             } catch (Throwable e) {
                 h.cover.setImageDrawable(null);
                 h.cover.setVisibility(View.GONE);
