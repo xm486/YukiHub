@@ -244,6 +244,32 @@ public class GameRepository {
         }
     }
 
+    /** 按会话ID查询游玩会话（含 sessionUuid / 游戏标题 / 起止时间），用于游戏经验上报 */
+    public PlayActivity findPlaySession(long sessionId) {
+        if (sessionId <= 0) return null;
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = db.rawQuery(
+                "SELECT ps.id,ps.session_uuid,ps.game_id,g.title,ps.start_time,ps.end_time,ps.duration,ps.launch_type " +
+                        "FROM play_sessions ps JOIN games g ON g.id=ps.game_id " +
+                        "WHERE ps.id=? LIMIT 1", new String[]{String.valueOf(sessionId)});
+        try {
+            if (!c.moveToFirst()) return null;
+            PlayActivity a = new PlayActivity();
+            a.sessionId = c.getLong(0);
+            a.sessionUuid = c.getString(1);
+            a.gameId = c.getLong(2);
+            a.gameTitle = c.getString(3);
+            a.startTime = c.getLong(4);
+            a.endTime = c.getLong(5);
+            a.duration = c.getLong(6);
+            a.launchType = c.getString(7);
+            if (a.gameTitle == null || a.gameTitle.trim().isEmpty()) a.gameTitle = "未命名游戏";
+            return a;
+        } finally {
+            c.close();
+        }
+    }
+
     public int deleteOpenPlaySessions() {
         SQLiteDatabase db = helper.getWritableDatabase();
         return db.delete("play_sessions", "end_time IS NULL", null);

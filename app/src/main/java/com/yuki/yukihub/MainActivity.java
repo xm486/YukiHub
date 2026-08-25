@@ -355,6 +355,8 @@ private ActivityResultLauncher<String> backupCreateLauncher;
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        // 聊天选图 launcher 必须在 STARTED 之前注册（供 FriendsChatDialog 借用）
+        com.yuki.yukihub.social.ChatImagePicker.register(this);
         enterImmersiveMode();
         repository = new GameRepository(this);
 metadataRepository = new MetadataRepository(this);
@@ -485,8 +487,13 @@ private void handleHomeTargetIntent(Intent intent) {
         String target = intent.getStringExtra(EXTRA_HOME_TARGET);
         if (target == null || target.trim().isEmpty()) return;
         long targetGameId = intent.getLongExtra(EXTRA_HOME_GAME_ID, -1L);
+        // 通知点击直达会话（与 HomeActivity 同一套 extra）
+        final String chatFriendId = intent.getStringExtra("chat_friend_id");
+        final int chatGroupId = intent.getIntExtra("chat_group_id", 0);
         intent.removeExtra(EXTRA_HOME_TARGET);
         intent.removeExtra(EXTRA_HOME_GAME_ID);
+        intent.removeExtra("chat_friend_id");
+        intent.removeExtra("chat_group_id");
         getWindow().getDecorView().post(() -> {
             if (isFinishing() || (android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed())) return;
             if (HOME_TARGET_PROFILE.equals(target)) {
@@ -497,7 +504,15 @@ private void handleHomeTargetIntent(Intent intent) {
             } else if (HOME_TARGET_LAUNCH_GAME.equals(target)) {
                 launchGameFromHome(targetGameId);
             } else if (HOME_TARGET_FRIENDS.equals(target)) {
-                showFriendsChatPlaceholder();
+                if (chatFriendId != null && !chatFriendId.isEmpty()) {
+                    new com.yuki.yukihub.social.FriendsChatDialog(this)
+                            .showAndOpenFriendChat(chatFriendId);
+                } else if (chatGroupId > 0) {
+                    new com.yuki.yukihub.social.FriendsChatDialog(this)
+                            .showAndOpenGroupChat(chatGroupId);
+                } else {
+                    showFriendsChatPlaceholder();
+                }
             }
         });
     }
@@ -2006,6 +2021,29 @@ private void showProfileDialog() {
     LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22));
     badgeLp.setMargins(0, dp(5), 0, 0);
     info.addView(accountBadge, badgeLp);
+    // 等级 + 经验（仅登录用户，异步拉取服务器数据）
+    if (isLoggedIn()) {
+        final TextView levelView = new TextView(this);
+        levelView.setText("Lv.1 · 0/100 EXP");
+        levelView.setTextSize(11);
+        levelView.setTextColor(getColorCompat(R.color.yh_text_muted));
+        levelView.setPadding(0, dp(4), 0, 0);
+        info.addView(levelView);
+        AppExecutors.runOnIo(() -> {
+            try {
+                com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(MainActivity.this);
+                org.json.JSONObject lv = client.getMyLevel();
+                final int level = lv.optInt("level", 1);
+                final int levelExp = lv.optInt("levelExp", 0);
+                final int expToNext = lv.optInt("expToNext", 100);
+                final boolean checked = lv.optBoolean("todayCheckedIn", false);
+                runOnUiThread(() -> {
+                    levelView.setText("Lv." + level + " · " + levelExp + "/" + expToNext + " EXP" + (checked ? " · 已签到" : ""));
+                    levelView.setTextColor(levelColorForLevel(level));
+                });
+            } catch (Throwable ignored) {}
+        });
+    }
     info.addView(statsView);
     header.addView(info, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
     root.addView(header);
@@ -2191,6 +2229,22 @@ private void showProfileDialog() {
         dialog.dismiss();
     });
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> profileAvatarLauncher.launch("image/*"));
+}
+
+/** 等级颜色（与社区 Web 端每5级一档一致） */
+private int levelColorForLevel(int level) {
+    String hex = "#B9BCC7";
+    if (level >= 30) hex = "#FFD27A";
+    else if (level >= 25) hex = "#FF9090";
+    else if (level >= 20) hex = "#FFB37A";
+    else if (level >= 15) hex = "#C9A0FF";
+    else if (level >= 10) hex = "#7DB8FF";
+    else if (level >= 5) hex = "#7EE2A0";
+    try {
+        return android.graphics.Color.parseColor(hex);
+    } catch (Throwable t) {
+        return 0xFFB9BCC7;
+    }
 }
 
 /**
@@ -9631,7 +9685,10 @@ return startActivitySafely(intent);
 
     private void finishCurrentPlaySessionIfAny() {
         if (launchedExternal && runningGameId > 0 && runningSessionId > 0 && sessionStart > 0) {
-            repository.finishPlaySession(runningSessionId, System.currentTimeMillis(), MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
+            long end = System.currentTimeMillis();
+            repository.finishPlaySession(runningSessionId, end, MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
+            // 上报游玩时长到服务器（获得游戏经验）
+            reportPlaySessionToServer(runningSessionId, sessionStart, end);
             launchedExternal = false;
             runningGameId = -1;
             runningSessionId = -1;
@@ -9644,6 +9701,28 @@ return startActivitySafely(intent);
             } catch (Throwable ignored) {}
             loadGames();
         }
+    }
+
+    /**
+     * 游戏会话结束 → 上报游玩时长到服务器（获得游戏经验）。
+     * 仅登录用户上报；失败静默忽略（本地 play_sessions 仍保留，后续版本可做云同步补报）。
+     */
+    private void reportPlaySessionToServer(long sessionId, long start, long end) {
+        if (!isLoggedIn()) return;
+        AppExecutors.runOnIo(() -> {
+            try {
+                GameRepository.PlayActivity a = repository.findPlaySession(sessionId);
+                if (a == null || a.sessionUuid == null || a.sessionUuid.isEmpty()) return;
+                com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(MainActivity.this);
+                org.json.JSONObject res = client.reportPlayTime(a.sessionUuid, "", a.gameTitle == null ? "" : a.gameTitle, start, end);
+                int awarded = res.optInt("expAwarded", 0);
+                if (awarded > 0) {
+                    Log.i("YukiHub", "Play session reported: exp +" + awarded + ", level " + res.optInt("level", 1));
+                }
+            } catch (Throwable ignored) {
+                // 静默失败，不影响游戏退出流程
+            }
+        });
     }
 
     private void finishStalePlaySessionsIfAny() {

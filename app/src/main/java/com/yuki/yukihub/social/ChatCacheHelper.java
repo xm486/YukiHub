@@ -54,7 +54,7 @@ public class ChatCacheHelper {
         Cursor c = null;
         try {
             c = db.rawQuery(
-                    "SELECT id, sender_id, receiver_id, content, msg_type, created_at, is_mine " +
+                    "SELECT id, sender_id, receiver_id, content, msg_type, created_at, is_mine, reply_to_id " +
                     "FROM friend_messages WHERE friend_id=? ORDER BY id DESC LIMIT ?",
                     new String[]{friendId, String.valueOf(Math.max(1, limit))});
             while (c.moveToNext()) list.add(readFriendMessage(c));
@@ -73,7 +73,7 @@ public class ChatCacheHelper {
         Cursor c = null;
         try {
             c = db.rawQuery(
-                    "SELECT id, sender_id, receiver_id, content, msg_type, created_at, is_mine " +
+                    "SELECT id, sender_id, receiver_id, content, msg_type, created_at, is_mine, reply_to_id " +
                     "FROM friend_messages WHERE friend_id=? AND id<? ORDER BY id DESC LIMIT ?",
                     new String[]{friendId, String.valueOf(beforeId), String.valueOf(Math.max(1, limit))});
             while (c.moveToNext()) list.add(readFriendMessage(c));
@@ -123,9 +123,9 @@ public class ChatCacheHelper {
                 if (m == null || m.id <= 0) continue;
                 db.execSQL(
                         "INSERT OR REPLACE INTO friend_messages" +
-                        "(id, friend_id, sender_id, receiver_id, content, msg_type, created_at, is_mine) " +
-                        "VALUES(?,?,?,?,?,?,?,?)",
-                        new Object[]{m.id, friendId, m.senderId, m.receiverId, m.content, m.msgType, m.createdAt, m.isMine ? 1 : 0});
+                        "(id, friend_id, sender_id, receiver_id, content, msg_type, created_at, is_mine, reply_to_id) " +
+                        "VALUES(?,?,?,?,?,?,?,?,?)",
+                        new Object[]{m.id, friendId, m.senderId, m.receiverId, m.content, m.msgType, m.createdAt, m.isMine ? 1 : 0, m.replyToId});
             }
             db.setTransactionSuccessful();
         } finally {
@@ -155,6 +155,7 @@ public class ChatCacheHelper {
         m.msgType = c.getString(4);
         m.createdAt = c.getString(5);
         m.isMine = c.getInt(6) != 0;
+        m.replyToId = c.getColumnCount() > 7 ? c.getInt(7) : 0;
         return m;
     }
 
@@ -168,7 +169,7 @@ public class ChatCacheHelper {
         try {
             c = db.rawQuery(
                     "SELECT id, group_id, sender_id, sender_nickname, sender_avatar, sender_uid, " +
-                    "sender_is_admin, content, msg_type, created_at, recalled, is_mine " +
+                    "sender_is_admin, content, msg_type, created_at, recalled, is_mine, reply_to_id " +
                     "FROM group_messages_cache WHERE group_id=? ORDER BY id DESC LIMIT ?",
                     new String[]{String.valueOf(groupId), String.valueOf(Math.max(1, limit))});
             while (c.moveToNext()) list.add(readGroupMessage(c));
@@ -188,7 +189,7 @@ public class ChatCacheHelper {
         try {
             c = db.rawQuery(
                     "SELECT id, group_id, sender_id, sender_nickname, sender_avatar, sender_uid, " +
-                    "sender_is_admin, content, msg_type, created_at, recalled, is_mine " +
+                    "sender_is_admin, content, msg_type, created_at, recalled, is_mine, reply_to_id " +
                     "FROM group_messages_cache WHERE group_id=? AND id<? ORDER BY id DESC LIMIT ?",
                     new String[]{String.valueOf(groupId), String.valueOf(beforeId), String.valueOf(Math.max(1, limit))});
             while (c.moveToNext()) list.add(readGroupMessage(c));
@@ -235,19 +236,25 @@ public class ChatCacheHelper {
             db.beginTransaction();
             for (GroupMessage m : msgs) {
                 if (m == null || m.id <= 0) continue;
-                if (m.deleted) {
-                    // 已删除：从本地缓存移除（保证管理员删除对普通用户缓存生效）
-                    db.execSQL("DELETE FROM group_messages_cache WHERE group_id=? AND id=?",
-                            new Object[]{groupId, m.id});
-                } else {
-                    db.execSQL(
-                            "INSERT OR REPLACE INTO group_messages_cache" +
-                            "(id, group_id, sender_id, sender_nickname, sender_avatar, sender_uid, " +
-                            "sender_is_admin, content, msg_type, created_at, recalled, is_mine) " +
-                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                            new Object[]{m.id, groupId, m.senderId, m.senderNickname, m.senderAvatar,
-                                    m.senderUid, m.senderIsAdmin ? 1 : 0, m.content, m.msgType,
-                                    m.createdAt, m.recalled ? 1 : 0, m.isMine ? 1 : 0});
+                // 单条写入失败不能连累整批：事务一旦回滚，本次拉到的新消息
+                // 全部丢失，界面就会一直停在旧缓存上（曾因此出过严重 bug）
+                try {
+                    if (m.deleted) {
+                        // 已删除：从本地缓存移除（保证管理员删除对普通用户缓存生效）
+                        db.execSQL("DELETE FROM group_messages_cache WHERE group_id=? AND id=?",
+                                new Object[]{groupId, m.id});
+                    } else {
+                        db.execSQL(
+                                "INSERT OR REPLACE INTO group_messages_cache" +
+                                "(id, group_id, sender_id, sender_nickname, sender_avatar, sender_uid, " +
+                                "sender_is_admin, content, msg_type, created_at, recalled, is_mine, reply_to_id) " +
+                                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                new Object[]{m.id, groupId, m.senderId, m.senderNickname, m.senderAvatar,
+                                        m.senderUid, m.senderIsAdmin ? 1 : 0, m.content, m.msgType,
+                                        m.createdAt, m.recalled ? 1 : 0, m.isMine ? 1 : 0, m.replyToId});
+                    }
+                } catch (Throwable perRow) {
+                    // 跳过这一条，继续写后面的
                 }
             }
             db.setTransactionSuccessful();
@@ -303,6 +310,74 @@ public class ChatCacheHelper {
         m.createdAt = c.getString(9);
         m.recalled = c.getInt(10) != 0;
         m.isMine = c.getInt(11) != 0;
+        m.replyToId = c.getColumnCount() > 12 ? c.getInt(12) : 0;
+        // senderLevel 不入缓存：等级会变，缓存值必然过期，一律用服务端实时值
         return m;
+    }
+
+    // ==================== 会话已读锚点（跳到未读起点） ====================
+
+    /** 好友会话 key */
+    private static String friendKey(String friendId) { return "f:" + friendId; }
+
+    /** 群会话 key */
+    private static String groupKey(int groupId) { return "g:" + groupId; }
+
+    /**
+     * 读取会话上次离开时读到的消息 id（0 = 无记录，视为全部已读）。
+     */
+    public int getLastReadId(String peerKey) {
+        if (peerKey == null || peerKey.isEmpty()) return 0;
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT last_read_id FROM chat_read_marks WHERE peer_key=?",
+                    new String[]{peerKey});
+            return c.moveToNext() ? c.getInt(0) : 0;
+        } catch (Throwable t) {
+            return 0;
+        } finally {
+            if (c != null) c.close();
+        }
+    }
+
+    public int getFriendLastReadId(String friendId) {
+        return friendId == null ? 0 : getLastReadId(friendKey(friendId));
+    }
+
+    public int getGroupLastReadId(int groupId) {
+        return getLastReadId(groupKey(groupId));
+    }
+
+    /**
+     * 更新会话已读锚点（只前进不后退，避免翻历史时把锚点拉回去）。
+     */
+    public void setLastReadId(String peerKey, int messageId) {
+        if (peerKey == null || peerKey.isEmpty() || messageId <= 0) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        try {
+            db.execSQL(
+                    "INSERT INTO chat_read_marks(peer_key, last_read_id, updated_at) VALUES(?,?,?) " +
+                    "ON CONFLICT(peer_key) DO UPDATE SET " +
+                    "last_read_id = MAX(last_read_id, excluded.last_read_id), " +
+                    "updated_at = excluded.updated_at",
+                    new Object[]{peerKey, messageId, System.currentTimeMillis()});
+        } catch (Throwable t) {
+            // 兼容不支持 UPSERT 的老 SQLite（Android 10 以下部分设备）
+            try {
+                int current = getLastReadId(peerKey);
+                if (messageId <= current) return;
+                db.execSQL("INSERT OR REPLACE INTO chat_read_marks(peer_key, last_read_id, updated_at) VALUES(?,?,?)",
+                        new Object[]{peerKey, messageId, System.currentTimeMillis()});
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    public void setFriendLastReadId(String friendId, int messageId) {
+        if (friendId != null) setLastReadId(friendKey(friendId), messageId);
+    }
+
+    public void setGroupLastReadId(int groupId, int messageId) {
+        setLastReadId(groupKey(groupId), messageId);
     }
 }

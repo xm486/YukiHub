@@ -85,6 +85,22 @@ public class FriendsChatDialog {
     private int oldestLoadedMessageId = 0;
     /** 当前正在打开的好友会话 id（异步回调校验，防止切换会话后旧回调污染新会话） */
     private String openingFriendId = null;
+    /** 私聊：回到底部悬浮按钮 + 未读定位按钮 */
+    private ScrollView chatScrollView;
+    private View chatJumpBottomBtn;
+    private View chatUnreadJumpBtn;
+    /** 私聊：本次进入会话前的已读锚点（用于"跳到未读起点"） */
+    private int chatUnreadAnchorId = 0;
+    /**
+     * 私聊已读锚点闸门。
+     * 首屏渲染会调 scrollToBottom()，进而触发滚动监听里的 markChatRead()，
+     * 若不加闸门会把刚读出的锚点立刻冲到最新，"N 条新消息"就永远不显示。
+     * 只有用户真实交互过（上翻/点跳转/发消息）才开闸；离开会话走 forceMarkChatRead。
+     */
+    private boolean chatReadGateOpen = false;
+    /** 私聊：待回复的消息（长按→回复时设置） */
+    private ChatMessage pendingReplyChat;
+    private View chatReplyBar;
 
     // 群组状态
     private List<GroupInfo> groupList = new ArrayList<>();
@@ -99,6 +115,24 @@ public class FriendsChatDialog {
     private int groupOldestLoadedMessageId = 0;
     /** 当前正在打开的群会话 id（异步回调校验，防止切换会话后旧回调污染新会话） */
     private int openingGroupId = -1;
+    /** 群聊：回到底部悬浮按钮 + 未读定位按钮 */
+    private ScrollView groupScrollView;
+    private View groupJumpBottomBtn;
+    private View groupUnreadJumpBtn;
+    /** 群聊：本次进入会话前的已读锚点 */
+    private int groupUnreadAnchorId = 0;
+    /** 群聊已读锚点闸门，语义同 chatReadGateOpen */
+    private boolean groupReadGateOpen = false;
+    /**
+     * 群聊成员等级表（senderId -> level）。
+     * 等级不进 SQLite 缓存（会过期），改用这张内存表：
+     * 只要本次会话里见过某人的等级，他所有气泡（包括从缓存渲染的）都能立刻显示。
+     */
+    private final java.util.Map<String, Integer> groupLevelMap = new java.util.HashMap<>();
+
+    /** 群聊：待回复的消息 */
+    private GroupMessage pendingReplyGroup;
+    private View groupReplyBar;
 
     // 请求列表
     private JSONArray incomingRequests = new JSONArray();
@@ -114,11 +148,36 @@ public class FriendsChatDialog {
     private int currentView = VIEW_FRIEND_LIST;
     private int viewBeforeProfile = VIEW_FRIEND_LIST;
 
+    /** 通知点击直达：待打开的私聊好友 id（show() 后消费一次） */
+    private String pendingOpenFriendId = null;
+    /** 通知点击直达：待打开的群 id（>0 有效） */
+    private int pendingOpenGroupId = 0;
+
     public FriendsChatDialog(Activity activity) {
         this.activity = activity;
         this.appContext = activity.getApplicationContext();
         this.apiClient = new SocialApiClient(appContext);
         this.chatCache = new ChatCacheHelper(appContext);
+    }
+
+    /**
+     * 打开弹窗并直达指定私聊会话（通知点击用）。
+     * @param friendId 好友 user id
+     */
+    public void showAndOpenFriendChat(String friendId) {
+        pendingOpenFriendId = friendId;
+        pendingOpenGroupId = 0;
+        show();
+    }
+
+    /**
+     * 打开弹窗并直达指定群聊（通知点击用）。
+     * @param groupId 群 id
+     */
+    public void showAndOpenGroupChat(int groupId) {
+        pendingOpenGroupId = groupId;
+        pendingOpenFriendId = null;
+        show();
     }
 
     public void show() {
@@ -196,7 +255,11 @@ public class FriendsChatDialog {
         dialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         dialog.setContentView(root);
         dialog.setCancelable(true);
-        dialog.setOnDismissListener(d -> stopAllPolling());
+        dialog.setOnDismissListener(d -> {
+            forceMarkChatRead();
+            ChatNotifier.clearActiveConversation();
+            stopAllPolling();
+        });
 
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawableResource(R.drawable.bg_social_panel);
@@ -208,7 +271,50 @@ public class FriendsChatDialog {
                     | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
         dialog.show();
+        // 待直达的会话在 renderFriendList 末尾消费，
+        // 避免列表渲染的异步回调把已打开的会话页重绘掉（并发 IO 池顺序不确定）
         showFriendList();
+    }
+
+    /**
+     * 消费"直达会话"请求：好友列表加载完成后自动进入目标会话。
+     * 好友对象需要从服务器列表里取（要昵称、在线状态等），因此走 IO 线程。
+     */
+    private void consumePendingOpen(List<FriendInfo> loadedFriends, List<GroupInfo> loadedGroups) {
+        final String targetFriendId = pendingOpenFriendId;
+        final int targetGroupId = pendingOpenGroupId;
+        pendingOpenFriendId = null;
+        pendingOpenGroupId = 0;
+        if ((targetFriendId == null || targetFriendId.isEmpty()) && targetGroupId <= 0) return;
+        if (dialog == null || !dialog.isShowing()) return;
+
+        // 复用列表页刚拉到的数据，不再额外发请求，从根上消除两个异步任务抢渲染的竞态
+        if (targetFriendId != null && !targetFriendId.isEmpty()) {
+            FriendInfo hit = null;
+            if (loadedFriends != null) {
+                for (FriendInfo f : loadedFriends) {
+                    if (f != null && targetFriendId.equals(f.id)) { hit = f; break; }
+                }
+            }
+            if (hit != null) {
+                showChatView(hit);
+            } else {
+                Toast.makeText(activity, "找不到该好友，可能已被删除", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        GroupInfo ghit = null;
+        if (loadedGroups != null) {
+            for (GroupInfo g : loadedGroups) {
+                if (g != null && g.id == targetGroupId) { ghit = g; break; }
+            }
+        }
+        if (ghit != null) {
+            showGroupChatView(ghit);
+        } else {
+            Toast.makeText(activity, "找不到该群聊，可能你已退群", Toast.LENGTH_SHORT).show();
+        }
     }
 
     /**
@@ -237,6 +343,9 @@ public class FriendsChatDialog {
     // ==================== 好友列表 ====================
 
     private void showFriendList() {
+        // 离开会话：强制落盘已读锚点 + 解除通知抑制
+        forceMarkChatRead();
+        ChatNotifier.clearActiveConversation();
         titleBar.setText("好友 / 聊天");
         backButton.setVisibility(View.GONE);
         chatFriend = null;
@@ -324,6 +433,8 @@ public class FriendsChatDialog {
             }
         }
         startPolling();
+        // 列表渲染完成，此时才安全地进入通知指定的会话
+        consumePendingOpen(loaded, groups);
     }
 
     private View buildFriendItem(FriendInfo friend) {
@@ -537,6 +648,22 @@ public class FriendsChatDialog {
         chatFriend = friend;
         chatGroup = null;
         currentView = VIEW_CHAT;
+        pendingReplyChat = null;
+        pendingReplyGroup = null;
+        chatReadGateOpen = false;
+        chatUnreadAnchorId = 0;
+        // 已读锚点走 IO 线程读：主线程查 SQLite 有 ANR 风险。读到后回主线程刷未读提示
+        if (friend != null) {
+            final String fid0 = friend.id;
+            AppExecutors.runOnIo(() -> {
+                final int anchor = chatCache.getFriendLastReadId(fid0);
+                uiHandler.post(() -> {
+                    if (!fid0.equals(openingFriendId)) return;
+                    chatUnreadAnchorId = anchor;
+                    refreshChatUnreadState();
+                });
+            });
+        }
         maxMessageId = 0;
         historyOffset = 0;
         hasMoreHistory = true;
@@ -550,7 +677,7 @@ public class FriendsChatDialog {
 
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
-        scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        chatScrollView = scrollView;
 
         chatMessageList = new LinearLayout(activity);
         chatMessageList.setOrientation(LinearLayout.VERTICAL);
@@ -561,8 +688,35 @@ public class FriendsChatDialog {
             if (scrollView.getScrollY() == 0 && hasMoreHistory && chatMessagesCount() >= 20) {
                 loadMoreHistory();
             }
+            updateChatFloatingButtons();
         });
-        contentContainer.addView(scrollView);
+
+        // 消息区外面包一层 FrameLayout，用来叠放"回到底部""跳到未读"两个悬浮按钮
+        FrameLayout msgArea = new FrameLayout(activity);
+        msgArea.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        msgArea.addView(scrollView, new FrameLayout.LayoutParams(-1, -1));
+
+        chatJumpBottomBtn = buildJumpBottomButton(v -> {
+            chatReadGateOpen = true;   // 用户明确操作，此后允许推进已读锚点
+            scrollToBottom();
+            markChatRead();
+        });
+        FrameLayout.LayoutParams jbLp = new FrameLayout.LayoutParams(dp(38), dp(38));
+        jbLp.gravity = Gravity.END | Gravity.BOTTOM;
+        jbLp.setMargins(0, 0, dp(10), dp(12));
+        msgArea.addView(chatJumpBottomBtn, jbLp);
+
+        chatUnreadJumpBtn = buildUnreadJumpButton(v -> jumpToChatUnread());
+        FrameLayout.LayoutParams ujLp = new FrameLayout.LayoutParams(-2, dp(28));
+        ujLp.gravity = Gravity.END | Gravity.TOP;
+        ujLp.setMargins(0, dp(8), dp(10), 0);
+        msgArea.addView(chatUnreadJumpBtn, ujLp);
+
+        contentContainer.addView(msgArea);
+
+        // 回复引用条（选择"回复"后出现在输入栏上方）
+        chatReplyBar = buildReplyBar(v -> clearPendingReply());
+        contentContainer.addView(chatReplyBar);
 
         // 输入栏
         LinearLayout inputRow = new LinearLayout(activity);
@@ -583,9 +737,20 @@ public class FriendsChatDialog {
             }
         });
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        elp.setMargins(0, 0, dp(4), 0);
+        elp.setMargins(0, 0, dp(2), 0);
         emojiBtn.setLayoutParams(elp);
         inputRow.addView(emojiBtn);
+
+        // 图片按钮
+        TextView imgBtn = new TextView(activity);
+        imgBtn.setText("🖼");
+        imgBtn.setTextSize(20);
+        imgBtn.setGravity(Gravity.CENTER);
+        imgBtn.setOnClickListener(v -> pickAndSendImage(false));
+        LinearLayout.LayoutParams ilp0 = new LinearLayout.LayoutParams(dp(36), dp(40));
+        ilp0.setMargins(0, 0, dp(2), 0);
+        imgBtn.setLayoutParams(ilp0);
+        inputRow.addView(imgBtn);
 
         chatInput = new EditText(activity);
         chatInput.setHint("输入消息...");
@@ -628,6 +793,8 @@ public class FriendsChatDialog {
         if (chatFriend == null) return;
         final String friendId = chatFriend.id;
         openingFriendId = friendId;
+        // 当前会话内不弹通知
+        ChatNotifier.setActiveConversation(ChatNotifier.friendKey(friendId));
         AppExecutors.runOnIo(() -> {
             // 1. 读本地缓存渲染（先乐观允许翻历史，服务器同步后再修正）
             List<ChatMessage> cached = chatCache.getFriendMessages(friendId, RENDER_LIMIT);
@@ -648,12 +815,14 @@ public class FriendsChatDialog {
                         scrollToBottom();
                     });
                 } else {
-                    // 没有新消息也要用服务器结果修正 hasMoreHistory（服务器到底时关闭翻页）
+                    // 没有新消息也要用服务器结果修正 hasMoreHistory（服务器到底时关闭翻页）。
+                    // 已在 IO 线程，这里直接查库，避免 post 到主线程再查（会卡 UI）。
+                    final int oldestSnapshot = oldestLoadedMessageId;
+                    final boolean localMoreCalc = oldestSnapshot > 0
+                            && chatCache.countFriendMessagesBefore(friendId, oldestSnapshot) > 0;
                     uiHandler.post(() -> {
                         if (!friendId.equals(openingFriendId)) return;
-                        boolean localMore = oldestLoadedMessageId > 0
-                                && chatCache.countFriendMessagesBefore(friendId, oldestLoadedMessageId) > 0;
-                        hasMoreHistory = localMore || serverHasMore[0];
+                        hasMoreHistory = localMoreCalc || serverHasMore[0];
                     });
                 }
                 startChatPolling();
@@ -683,10 +852,21 @@ public class FriendsChatDialog {
                 if (msg.id > maxMessageId) maxMessageId = msg.id;
             }
             oldestLoadedMessageId = msgs.get(0).id;
-            boolean localMore = chatCache.countFriendMessagesBefore(chatFriend.id, oldestLoadedMessageId) > 0;
-            hasMoreHistory = localMore || serverHasMore;
+            // 先乐观允许翻页，再异步查本地缓存补正（避免主线程查 SQLite 卡 UI）
+            hasMoreHistory = true;
+            final String fidSnap = chatFriend.id;
+            final int oldestSnap = oldestLoadedMessageId;
+            final boolean serverMoreSnap = serverHasMore;
+            AppExecutors.runOnIo(() -> {
+                final boolean localMore = chatCache.countFriendMessagesBefore(fidSnap, oldestSnap) > 0;
+                uiHandler.post(() -> {
+                    if (!fidSnap.equals(openingFriendId)) return;
+                    hasMoreHistory = localMore || serverMoreSnap;
+                });
+            });
         }
         historyOffset = msgs == null ? 0 : msgs.size();
+        refreshChatUnreadState();
     }
 
     /**
@@ -731,14 +911,17 @@ public class FriendsChatDialog {
             // 1. 本地缓存优先
             List<ChatMessage> older = chatCache.getFriendMessagesBefore(friendId, beforeId, 50);
             if (!older.isEmpty()) {
+                // 已在 IO 线程：先把"是否还有更早"算完，再一次性 post 回主线程
+                final int nextOldest = older.get(0).id;
+                final boolean stillMore = chatCache.countFriendMessagesBefore(friendId, nextOldest) > 0;
                 uiHandler.post(() -> {
                     if (!friendId.equals(openingFriendId)) return;
                     for (int i = older.size() - 1; i >= 0; i--) {
                         chatMessageList.addView(buildMessageBubble(older.get(i)), 0);
                     }
-                    oldestLoadedMessageId = older.get(0).id;
+                    oldestLoadedMessageId = nextOldest;
                     historyOffset = offset + older.size();
-                    hasMoreHistory = chatCache.countFriendMessagesBefore(friendId, oldestLoadedMessageId) > 0;
+                    hasMoreHistory = stillMore;
                 });
                 return;
             }
@@ -776,6 +959,13 @@ public class FriendsChatDialog {
             LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(96), dp(96));
             elp.gravity = msg.isMine ? Gravity.END : Gravity.START;
             wrapper.addView(emojiView, elp);
+            emojiView.setOnLongClickListener(v -> { showChatMsgOptions(msg); return true; });
+        } else if ("image".equals(msg.msgType)) {
+            View imgView = buildImageContentView(msg.content);
+            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(150), dp(150));
+            ilp.gravity = msg.isMine ? Gravity.END : Gravity.START;
+            wrapper.addView(imgView, ilp);
+            imgView.setOnLongClickListener(v -> { showChatMsgOptions(msg); return true; });
         } else {
             TextView bubble = new TextView(activity);
             bubble.setText(msg.content);
@@ -789,6 +979,7 @@ public class FriendsChatDialog {
             LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
             bl.gravity = msg.isMine ? Gravity.END : Gravity.START;
             wrapper.addView(bubble, bl);
+            bubble.setOnLongClickListener(v -> { showChatMsgOptions(msg); return true; });
         }
 
         TextView time = new TextView(activity);
@@ -798,7 +989,54 @@ public class FriendsChatDialog {
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(-2, -2);
         tl.gravity = msg.isMine ? Gravity.END : Gravity.START;
         wrapper.addView(time, tl);
+        // 未读定位需要知道每条气泡对应的消息 id 与归属
+        wrapper.setTag("msg:" + msg.id + ":" + (msg.isMine ? 1 : 0));
         return wrapper;
+    }
+
+    /**
+     * 私聊消息长按菜单（普通用户）：复制 / 回复 / 举报。
+     * 与群聊管理员菜单区分开——私聊没有撤回删除权限。
+     */
+    private void showChatMsgOptions(ChatMessage msg) {
+        if (msg == null) return;
+        LinearLayout menuRoot = new LinearLayout(activity);
+        menuRoot.setOrientation(LinearLayout.VERTICAL);
+        menuRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        boolean isText = msg.msgType == null || "text".equals(msg.msgType);
+        if (isText) {
+            menuRoot.addView(menuButton("复制", v -> {
+                dismissOptionDialog();
+                copyToClipboard(msg.content);
+            }));
+        }
+
+        menuRoot.addView(menuButton("回复", v -> {
+            dismissOptionDialog();
+            startReplyToChat(msg);
+        }));
+
+        // 只能举报别人的消息；乐观 UI 气泡（id=0）还没入库也不能举报
+        if (!msg.isMine && msg.id > 0) {
+            Button reportBtn = new Button(activity);
+            reportBtn.setText("举报");
+            reportBtn.setTextColor(0xFFFF6B6B);
+            reportBtn.setTextSize(13);
+            reportBtn.setBackgroundResource(R.drawable.bg_input);
+            reportBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+            rlp.setMargins(0, 0, 0, dp(4));
+            reportBtn.setLayoutParams(rlp);
+            reportBtn.setOnClickListener(v -> {
+                dismissOptionDialog();
+                showReportReasonDialog("chat", msg.id, 0);
+            });
+            menuRoot.addView(reportBtn);
+        }
+
+        menuRoot.addView(menuButton("取消", v -> dismissOptionDialog()));
+        showOptionDialog("消息操作", menuRoot);
     }
 
     private void sendMessage() {
@@ -806,6 +1044,15 @@ public class FriendsChatDialog {
         String content = chatInput.getText().toString().trim();
         if (content.isEmpty()) return;
         chatInput.setText("");
+        chatReadGateOpen = true;
+
+        // 引用回复：把 "> 昵称: 原文" 拼在正文前（纯文本引用方案，对端无需新版本也能看懂）
+        final int replyToId = pendingReplyChat == null ? 0 : pendingReplyChat.id;
+        if (pendingReplyChat != null) {
+            String who = pendingReplyChat.isMine ? getMyNicknameOrDefault() : chatFriend.nickname;
+            content = buildQuotePrefix(who, previewOfChat(pendingReplyChat)) + content;
+            clearPendingReply();
+        }
         final String msgContent = content;
 
         // 乐观 UI
@@ -818,7 +1065,7 @@ public class FriendsChatDialog {
 
         AppExecutors.runOnIo(() -> {
             try {
-                ChatMessage sent = apiClient.sendMessage(chatFriend.id, msgContent);
+                ChatMessage sent = apiClient.sendMessage(chatFriend.id, msgContent, "text", replyToId);
                 // 发送成功写入本地缓存
                 chatCache.upsertFriendMessages(chatFriend.id, java.util.Collections.singletonList(sent));
                 chatCache.pruneFriendMessages(chatFriend.id);
@@ -857,6 +1104,7 @@ public class FriendsChatDialog {
                             }
                         }
                         scrollToBottom();
+                        markChatRead();
                     });
                 }
             } catch (Throwable t) {
@@ -875,6 +1123,22 @@ public class FriendsChatDialog {
         chatGroup = group;
         chatFriend = null;
         currentView = VIEW_GROUP_CHAT;
+        pendingReplyChat = null;
+        pendingReplyGroup = null;
+        groupReadGateOpen = false;
+        groupUnreadAnchorId = 0;
+        groupLevelMap.clear();   // 换群重新收集，避免串号
+        if (group != null) {
+            final int gid0 = group.id;
+            AppExecutors.runOnIo(() -> {
+                final int anchor = chatCache.getGroupLastReadId(gid0);
+                uiHandler.post(() -> {
+                    if (openingGroupId != gid0) return;
+                    groupUnreadAnchorId = anchor;
+                    refreshGroupUnreadState();
+                });
+            });
+        }
         groupMaxMessageId = 0;
         groupHistoryOffset = 0;
         groupHasMoreHistory = true;
@@ -888,7 +1152,7 @@ public class FriendsChatDialog {
 
         ScrollView scrollView = new ScrollView(activity);
         scrollView.setFillViewport(true);
-        scrollView.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        groupScrollView = scrollView;
 
         groupMessageList = new LinearLayout(activity);
         groupMessageList.setOrientation(LinearLayout.VERTICAL);
@@ -899,8 +1163,33 @@ public class FriendsChatDialog {
             if (scrollView.getScrollY() == 0 && groupHasMoreHistory && groupMessagesCount() >= 20) {
                 loadMoreGroupHistory();
             }
+            updateGroupFloatingButtons();
         });
-        contentContainer.addView(scrollView);
+
+        FrameLayout gMsgArea = new FrameLayout(activity);
+        gMsgArea.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        gMsgArea.addView(scrollView, new FrameLayout.LayoutParams(-1, -1));
+
+        groupJumpBottomBtn = buildJumpBottomButton(v -> {
+            groupReadGateOpen = true;
+            scrollGroupToBottom();
+            markGroupRead();
+        });
+        FrameLayout.LayoutParams gjbLp = new FrameLayout.LayoutParams(dp(38), dp(38));
+        gjbLp.gravity = Gravity.END | Gravity.BOTTOM;
+        gjbLp.setMargins(0, 0, dp(10), dp(12));
+        gMsgArea.addView(groupJumpBottomBtn, gjbLp);
+
+        groupUnreadJumpBtn = buildUnreadJumpButton(v -> jumpToGroupUnread());
+        FrameLayout.LayoutParams gujLp = new FrameLayout.LayoutParams(-2, dp(28));
+        gujLp.gravity = Gravity.END | Gravity.TOP;
+        gujLp.setMargins(0, dp(8), dp(10), 0);
+        gMsgArea.addView(groupUnreadJumpBtn, gujLp);
+
+        contentContainer.addView(gMsgArea);
+
+        groupReplyBar = buildReplyBar(v -> clearPendingReply());
+        contentContainer.addView(groupReplyBar);
 
         // 输入栏
         LinearLayout inputRow = new LinearLayout(activity);
@@ -927,9 +1216,23 @@ public class FriendsChatDialog {
             }
         });
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        elp.setMargins(0, 0, dp(4), 0);
+        elp.setMargins(0, 0, dp(2), 0);
         emojiBtn.setLayoutParams(elp);
         inputRow.addView(emojiBtn);
+
+        // 图片按钮
+        TextView gImgBtn = new TextView(activity);
+        gImgBtn.setText("🖼");
+        gImgBtn.setTextSize(20);
+        gImgBtn.setGravity(Gravity.CENTER);
+        gImgBtn.setOnClickListener(v -> {
+            if (canSpeak) pickAndSendImage(true);
+            else Toast.makeText(activity, "公告版仅管理员可发言", Toast.LENGTH_SHORT).show();
+        });
+        LinearLayout.LayoutParams gIlp = new LinearLayout.LayoutParams(dp(36), dp(40));
+        gIlp.setMargins(0, 0, dp(2), 0);
+        gImgBtn.setLayoutParams(gIlp);
+        inputRow.addView(gImgBtn);
 
         groupChatInput = new EditText(activity);
         groupChatInput.setTextColor(0xFFF5F7FF);
@@ -986,6 +1289,7 @@ public class FriendsChatDialog {
         if (chatGroup == null) return;
         final int groupId = chatGroup.id;
         openingGroupId = groupId;
+        ChatNotifier.setActiveConversation(ChatNotifier.groupKey(groupId));
         AppExecutors.runOnIo(() -> {
             // 1. 读本地缓存渲染（先乐观允许翻历史，服务器同步后再修正）
             List<GroupMessage> cached = chatCache.getGroupMessages(groupId, RENDER_LIMIT);
@@ -1008,11 +1312,13 @@ public class FriendsChatDialog {
                     });
                 } else {
                     // 没有新消息也要用服务器结果修正 hasMoreHistory（服务器到底时关闭翻页）
+                    // 已在 IO 线程，直接查库后再 post（避免主线程 SQLite 查询）
+                    final int gOldestSnapshot = groupOldestLoadedMessageId;
+                    final boolean gLocalMoreCalc = gOldestSnapshot > 0
+                            && chatCache.countGroupMessagesBefore(groupId, gOldestSnapshot) > 0;
                     uiHandler.post(() -> {
                         if (openingGroupId != groupId) return;
-                        boolean localMore = groupOldestLoadedMessageId > 0
-                                && chatCache.countGroupMessagesBefore(groupId, groupOldestLoadedMessageId) > 0;
-                        groupHasMoreHistory = localMore || serverHasMore[0];
+                        groupHasMoreHistory = gLocalMoreCalc || serverHasMore[0];
                     });
                 }
                 uiHandler.post(() -> {
@@ -1047,10 +1353,21 @@ public class FriendsChatDialog {
                 if (msg.id > groupMaxMessageId) groupMaxMessageId = msg.id;
             }
             groupOldestLoadedMessageId = msgs.get(0).id;
-            boolean localMore = chatCache.countGroupMessagesBefore(chatGroup.id, groupOldestLoadedMessageId) > 0;
-            groupHasMoreHistory = localMore || serverHasMore;
+            // 先乐观允许翻页，异步补正（同私聊）
+            groupHasMoreHistory = true;
+            final int gidSnap = chatGroup.id;
+            final int gOldestSnap = groupOldestLoadedMessageId;
+            final boolean gServerMoreSnap = serverHasMore;
+            AppExecutors.runOnIo(() -> {
+                final boolean localMore = chatCache.countGroupMessagesBefore(gidSnap, gOldestSnap) > 0;
+                uiHandler.post(() -> {
+                    if (openingGroupId != gidSnap) return;
+                    groupHasMoreHistory = localMore || gServerMoreSnap;
+                });
+            });
         }
         groupHistoryOffset = msgs == null ? 0 : msgs.size();
+        refreshGroupUnreadState();
     }
 
     /**
@@ -1061,6 +1378,9 @@ public class FriendsChatDialog {
      */
     private boolean syncGroupHistoryFromServer(int groupId, int[] onlineCountOut, boolean[] serverHasMoreOut) throws Exception {
         int cachedMaxId = chatCache.getGroupMaxId(groupId);
+        // 等级只从服务端来，拿到就立刻记进等级表，
+        // 这样接下来渲染缓存消息时也能带上等级（不必等第二次进会话）
+        final boolean[] lvChanged = new boolean[]{false};
         List<GroupMessage> fresh = new ArrayList<>();
         boolean changed = false;
         int offset = 0;
@@ -1069,6 +1389,7 @@ public class FriendsChatDialog {
             SocialApiClient.GroupHistoryResult result = apiClient.getGroupMessages(groupId, offset, 20);
             if (onlineCountOut != null) onlineCountOut[0] = result.onlineCount;
             chatCache.upsertGroupMessages(groupId, result.messages);
+            if (recordGroupLevels(result.messages)) lvChanged[0] = true;
             for (GroupMessage m : result.messages) {
                 if (m.deleted) {
                     // 删除状态变化：需重绘（缓存已移除该条）
@@ -1088,6 +1409,14 @@ public class FriendsChatDialog {
             if (offset >= 200) break; // 安全上限：最多拉 10 页
         }
         chatCache.pruneGroupMessages(groupId);
+        // 等级有更新 → 原地刷新已渲染气泡上的徽章（不必整屏重绘）
+        if (lvChanged[0]) {
+            final int gidLv = groupId;
+            uiHandler.post(() -> {
+                if (openingGroupId != gidLv) return;
+                refreshRenderedLevelBadges();
+            });
+        }
         if (serverHasMoreOut != null) serverHasMoreOut[0] = serverHasMore;
         return changed;
     }
@@ -1111,14 +1440,17 @@ public class FriendsChatDialog {
             // 1. 本地缓存优先
             List<GroupMessage> older = chatCache.getGroupMessagesBefore(groupId, beforeId, 50);
             if (!older.isEmpty()) {
+                // 已在 IO 线程：先算完再 post
+                final int gNextOldest = older.get(0).id;
+                final boolean gStillMore = chatCache.countGroupMessagesBefore(groupId, gNextOldest) > 0;
                 uiHandler.post(() -> {
                     if (openingGroupId != groupId) return;
                     for (int i = older.size() - 1; i >= 0; i--) {
                         groupMessageList.addView(buildGroupMessageBubble(older.get(i)), 0);
                     }
-                    groupOldestLoadedMessageId = older.get(0).id;
+                    groupOldestLoadedMessageId = gNextOldest;
                     groupHistoryOffset = offset + older.size();
-                    groupHasMoreHistory = chatCache.countGroupMessagesBefore(groupId, groupOldestLoadedMessageId) > 0;
+                    groupHasMoreHistory = gStillMore;
                 });
                 return;
             }
@@ -1150,16 +1482,14 @@ public class FriendsChatDialog {
         });
     }
 
-    /** 递归查找 wrapper 中带 "group_bubble" tag 的 TextView 并绑定长按事件 */
+    /** 递归查找 wrapper 中带 group_bubble / group_bubble_media tag 的 View 并绑定长按事件 */
     private void bindLongClickToBubble(View container, GroupMessage msg) {
-        if (container instanceof TextView) {
-            Object tag = container.getTag();
-            if ("group_bubble".equals(tag)) {
-                container.setOnLongClickListener(v -> {
-                    showGroupMsgManageOptions(msg);
-                    return true;
-                });
-            }
+        Object tag = container.getTag();
+        if ("group_bubble".equals(tag) || "group_bubble_media".equals(tag)) {
+            container.setOnLongClickListener(v -> {
+                showGroupMsgOptions(msg);
+                return true;
+            });
         }
         if (container instanceof android.view.ViewGroup) {
             android.view.ViewGroup group = (android.view.ViewGroup) container;
@@ -1167,6 +1497,172 @@ public class FriendsChatDialog {
                 bindLongClickToBubble(group.getChildAt(i), msg);
             }
         }
+    }
+
+    /**
+     * 群聊消息长按菜单。普通用户：复制 / 回复 / 举报；管理员额外有撤回 / 删除。
+     */
+    private void showGroupMsgOptions(GroupMessage msg) {
+        if (msg == null) return;
+        LinearLayout menuRoot = new LinearLayout(activity);
+        menuRoot.setOrientation(LinearLayout.VERTICAL);
+        menuRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        boolean isText = msg.msgType == null || "text".equals(msg.msgType);
+        if (isText) {
+            menuRoot.addView(menuButton("复制", v -> {
+                dismissOptionDialog();
+                copyToClipboard(msg.content);
+            }));
+        }
+
+        menuRoot.addView(menuButton("回复", v -> {
+            dismissOptionDialog();
+            startReplyToGroup(msg);
+        }));
+
+        if (!msg.isMine && msg.id > 0) {
+            Button reportBtn = new Button(activity);
+            reportBtn.setText("举报");
+            reportBtn.setTextColor(0xFFFF6B6B);
+            reportBtn.setTextSize(13);
+            reportBtn.setBackgroundResource(R.drawable.bg_input);
+            reportBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+            rlp.setMargins(0, 0, 0, dp(4));
+            reportBtn.setLayoutParams(rlp);
+            reportBtn.setOnClickListener(v -> {
+                dismissOptionDialog();
+                showReportReasonDialog("group", msg.id, chatGroup == null ? 0 : chatGroup.id);
+            });
+            menuRoot.addView(reportBtn);
+        }
+
+        // 管理员专属
+        if (chatGroup != null && chatGroup.isAdmin() && msg.id > 0) {
+            menuRoot.addView(divider());
+            menuRoot.addView(menuButton("撤回消息（管理）", v -> {
+                dismissOptionDialog();
+                doManageGroupMessage(msg, "recall");
+            }));
+            Button deleteBtn = new Button(activity);
+            deleteBtn.setText("删除消息（管理）");
+            deleteBtn.setTextColor(0xFFFF6B6B);
+            deleteBtn.setTextSize(13);
+            deleteBtn.setBackgroundResource(R.drawable.bg_input);
+            deleteBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
+            dlp.setMargins(0, 0, 0, dp(4));
+            deleteBtn.setLayoutParams(dlp);
+            deleteBtn.setOnClickListener(v -> {
+                dismissOptionDialog();
+                doManageGroupMessage(msg, "delete");
+            });
+            menuRoot.addView(deleteBtn);
+        }
+
+        menuRoot.addView(menuButton("取消", v -> dismissOptionDialog()));
+        showOptionDialog("消息操作", menuRoot);
+    }
+
+    /**
+     * 记录一批消息里的等级信息。
+     * @return true = 有等级发生变化（需要刷新已渲染的气泡）
+     */
+    private boolean recordGroupLevels(List<GroupMessage> msgs) {
+        if (msgs == null || msgs.isEmpty()) return false;
+        boolean changed = false;
+        for (GroupMessage m : msgs) {
+            if (m == null || m.senderLevel <= 0) continue;
+            String key = m.senderId == null ? "" : m.senderId;
+            if (key.isEmpty()) continue;
+            Integer old = groupLevelMap.get(key);
+            if (old == null || old != m.senderLevel) {
+                groupLevelMap.put(key, m.senderLevel);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /** 取某人的等级：消息自带值优先，其次查会话内的等级表 */
+    private int levelOf(GroupMessage msg) {
+        if (msg == null) return 0;
+        if (msg.senderLevel > 0) return msg.senderLevel;
+        if (msg.senderId == null || msg.senderId.isEmpty()) return 0;
+        Integer v = groupLevelMap.get(msg.senderId);
+        return v == null ? 0 : v;
+    }
+
+    /**
+     * 原地刷新已渲染气泡上的等级徽章，无需整屏重绘、也不用退出重进。
+     * 徽章的 tag 存的是 "lvbadge:<senderId>"，据此定位并更新。
+     */
+    private void refreshRenderedLevelBadges() {
+        if (groupMessageList == null) return;
+        for (int i = 0; i < groupMessageList.getChildCount(); i++) {
+            applyLevelBadgeIn(groupMessageList.getChildAt(i));
+        }
+    }
+
+    /** 递归查找并更新某个气泡子树里的等级徽章 */
+    private void applyLevelBadgeIn(View v) {
+        if (v == null) return;
+        Object tag = v.getTag();
+        if (tag instanceof String && ((String) tag).startsWith("lvbadge:")) {
+            String sid = ((String) tag).substring("lvbadge:".length());
+            Integer lv = groupLevelMap.get(sid);
+            if (v instanceof TextView) {
+                TextView badge = (TextView) v;
+                if (lv != null && lv > 0) {
+                    badge.setText("Lv." + lv);
+                    badge.setTextColor(levelColor(lv));
+                    badge.setBackgroundResource(levelBadgeBg(lv));
+                    badge.setPadding(dp(5), dp(1), dp(5), dp(1));
+                    badge.setVisibility(View.VISIBLE);
+                } else {
+                    badge.setVisibility(View.GONE);
+                }
+            }
+            return;
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                applyLevelBadgeIn(g.getChildAt(i));
+            }
+        }
+    }
+
+    /**
+     * 群聊气泡昵称行的等级徽章（比资料页的更小，不带点击）。
+     * level <= 0 表示服务端未返回（例如乐观 UI 的本地占位），此时返回 null 不显示，
+     * 避免闪出错误的 Lv.1。
+     */
+    private TextView buildGroupLevelBadge(GroupMessage msg) {
+        int level = levelOf(msg);
+        TextView badge = new TextView(activity);
+        badge.setTextSize(8);
+        badge.setTypeface(null, android.graphics.Typeface.BOLD);
+        badge.setGravity(Gravity.CENTER);
+        badge.setIncludeFontPadding(false);
+        badge.setSingleLine(true);
+        // 打 tag：等级晚到时能按 senderId 找回来原地更新，不必退出重进
+        badge.setTag("lvbadge:" + (msg == null || msg.senderId == null ? "" : msg.senderId));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(15));
+        lp.setMargins(dp(5), 0, 0, 0);
+        lp.gravity = Gravity.CENTER_VERTICAL;
+        badge.setLayoutParams(lp);
+        if (level > 0) {
+            badge.setText("Lv." + level);
+            badge.setTextColor(levelColor(level));
+            badge.setBackgroundResource(levelBadgeBg(level));
+            badge.setPadding(dp(5), dp(1), dp(5), dp(1));
+        } else {
+            // 等级还不知道：占位但不显示，等 recordGroupLevels 收到值后原地填上
+            badge.setVisibility(View.GONE);
+        }
+        return badge;
     }
 
     /** 构建管理员标识小标签 */
@@ -1199,6 +1695,7 @@ public class FriendsChatDialog {
             recalled.setGravity(Gravity.CENTER);
             recalled.setPadding(dp(8), dp(4), dp(8), dp(4));
             wrapper.addView(recalled);
+            wrapper.setTag("msg:" + msg.id + ":" + (msg.isMine ? 1 : 0));
             return wrapper;
         }
 
@@ -1232,6 +1729,8 @@ public class FriendsChatDialog {
             nickView.setTextSize(11);
             myNickRow.addView(nickView);
 
+            // 等级徽章紧跟昵称，管理标识在最后
+            myNickRow.addView(buildGroupLevelBadge(msg));
             if (msg.senderIsAdmin) {
                 myNickRow.addView(buildAdminBadge());
             }
@@ -1243,6 +1742,13 @@ public class FriendsChatDialog {
                 LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(dp(96), dp(96));
                 elp.gravity = Gravity.END;
                 leftCol.addView(emojiView, elp);
+                emojiView.setTag("group_bubble_media");
+            } else if ("image".equals(msg.msgType)) {
+                View imgView = buildImageContentView(msg.content);
+                LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(150), dp(150));
+                ilp.gravity = Gravity.END;
+                leftCol.addView(imgView, ilp);
+                imgView.setTag("group_bubble_media");
             } else {
                 TextView bubble = new TextView(activity);
                 bubble.setText(msg.content);
@@ -1322,6 +1828,8 @@ public class FriendsChatDialog {
                     final int sUid = msg.senderUid;
                     avatarImg.setOnClickListener(v -> showUserProfile(sUid));
                 }
+                // 长按头像 → @ 对方（QQ 式），只对他人生效
+                avatarImg.setOnLongClickListener(v -> { mentionInGroup(msg); return true; });
                 loadAvatarInto(msg.senderAvatar, avatarImg, avatarText);
             }
             // 点击头像查看资料（文字头像兜底）
@@ -1329,6 +1837,7 @@ public class FriendsChatDialog {
                 final int sUid = msg.senderUid;
                 avatarText.setOnClickListener(v -> showUserProfile(sUid));
             }
+            avatarText.setOnLongClickListener(v -> { mentionInGroup(msg); return true; });
 
             // 右侧：昵称 + 气泡
             LinearLayout rightCol = new LinearLayout(activity);
@@ -1347,6 +1856,8 @@ public class FriendsChatDialog {
             nickView.setTextSize(11);
             nickRow.addView(nickView);
 
+            // 等级徽章紧跟昵称，管理标识在最后
+            nickRow.addView(buildGroupLevelBadge(msg));
             if (msg.senderIsAdmin) {
                 nickRow.addView(buildAdminBadge());
             }
@@ -1356,6 +1867,11 @@ public class FriendsChatDialog {
                 // 表情包：只显示图片
                 View emojiView = buildEmojiContentView(msg.content);
                 rightCol.addView(emojiView);
+                emojiView.setTag("group_bubble_media");
+            } else if ("image".equals(msg.msgType)) {
+                View imgView = buildImageContentView(msg.content);
+                rightCol.addView(imgView, new LinearLayout.LayoutParams(dp(150), dp(150)));
+                imgView.setTag("group_bubble_media");
             } else {
                 TextView bubble = new TextView(activity);
                 bubble.setText(msg.content);
@@ -1380,45 +1896,15 @@ public class FriendsChatDialog {
             wrapper.addView(row);
         }
 
-        // 管理员长按：撤回/删除（绑定到气泡而非整个 wrapper，避免和头像点击冲突）
-        if (chatGroup != null && chatGroup.isAdmin() && msg.id > 0 && !msg.recalled) {
-            final GroupMessage fMsg = msg;
-            // 找到 wrapper 内的 bubble 并绑定长按
-            bindLongClickToBubble(wrapper, fMsg);
+        // 所有人都能长按气泡：普通用户 = 复制/回复/举报，管理员 = 额外撤回/删除。
+        // 绑定到气泡而非整个 wrapper，避免和头像点击冲突。
+        if (!msg.recalled) {
+            bindLongClickToBubble(wrapper, msg);
         }
-
-        // 管理员模式下让气泡可长按
-        if (chatGroup != null && chatGroup.isAdmin()) {
-            wrapper.setLongClickable(false); // wrapper 本身不拦截长按
-        }
+        wrapper.setLongClickable(false); // wrapper 本身不拦截长按
+        wrapper.setTag("msg:" + msg.id + ":" + (msg.isMine ? 1 : 0));
 
         return wrapper;
-    }
-
-    private void showGroupMsgManageOptions(GroupMessage msg) {
-        LinearLayout menuRoot = new LinearLayout(activity);
-        menuRoot.setOrientation(LinearLayout.VERTICAL);
-        menuRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
-
-        Button recallBtn = menuButton("撤回消息", v -> {
-            dismissOptionDialog();
-            doManageGroupMessage(msg, "recall");
-        });
-        menuRoot.addView(recallBtn);
-
-        Button deleteBtn = new Button(activity);
-        deleteBtn.setText("删除消息");
-        deleteBtn.setTextColor(0xFFFF6B6B);
-        deleteBtn.setTextSize(13);
-        deleteBtn.setBackgroundResource(R.drawable.bg_input);
-        deleteBtn.setPadding(dp(10), dp(8), dp(10), dp(8));
-        deleteBtn.setOnClickListener(v -> {
-            dismissOptionDialog();
-            doManageGroupMessage(msg, "delete");
-        });
-        menuRoot.addView(deleteBtn);
-
-        showOptionDialog("消息管理", menuRoot);
     }
 
     private void doManageGroupMessage(GroupMessage msg, String action) {
@@ -1456,6 +1942,16 @@ public class FriendsChatDialog {
         String content = groupChatInput.getText().toString().trim();
         if (content.isEmpty()) return;
         groupChatInput.setText("");
+        groupReadGateOpen = true;
+
+        // 引用回复：服务端据 replyToId 给被回复者入队提醒（群聊只有被回复才推通知）
+        final int replyToId = pendingReplyGroup == null ? 0 : pendingReplyGroup.id;
+        if (pendingReplyGroup != null) {
+            String who = pendingReplyGroup.senderNickname == null || pendingReplyGroup.senderNickname.isEmpty()
+                    ? "对方" : pendingReplyGroup.senderNickname;
+            content = buildQuotePrefix(who, previewOfGroup(pendingReplyGroup)) + content;
+            clearPendingReply();
+        }
         final String msgContent = content;
 
         // 乐观 UI
@@ -1473,7 +1969,7 @@ public class FriendsChatDialog {
 
         AppExecutors.runOnIo(() -> {
             try {
-                GroupMessage sent = apiClient.sendGroupMessage(chatGroup.id, msgContent);
+                GroupMessage sent = apiClient.sendGroupMessage(chatGroup.id, msgContent, "text", replyToId);
                 // 发送成功写入本地缓存
                 chatCache.upsertGroupMessages(chatGroup.id, java.util.Collections.singletonList(sent));
                 chatCache.pruneGroupMessages(chatGroup.id);
@@ -1482,6 +1978,10 @@ public class FriendsChatDialog {
                     // 用服务器返回的过滤后内容替换乐观气泡（敏感词修正）
                     if (!msgContent.equals(sent.content)) {
                         updateBubbleContent(bubbleView, sent.content);
+                    }
+                    // 服务端响应带自己的等级：记下后补上乐观气泡缺的徽章
+                    if (recordGroupLevels(java.util.Collections.singletonList(sent))) {
+                        refreshRenderedLevelBadges();
                     }
                 });
             } catch (Throwable t) {
@@ -1502,11 +2002,15 @@ public class FriendsChatDialog {
             try {
                 SocialApiClient.GroupPollResult result = apiClient.pollGroupMessages(chatGroup.id, groupMaxMessageId);
                 List<GroupMessage> newMsgs = result.messages;
+                boolean lvChanged = false;
                 if (!newMsgs.isEmpty()) {
                     // 轮询到的新消息写入本地缓存（含撤回状态同步）
                     chatCache.upsertGroupMessages(chatGroup.id, newMsgs);
                     chatCache.pruneGroupMessages(chatGroup.id);
+                    // 等级变化（升级 / 首次见到这个人）也在这里同步
+                    lvChanged = recordGroupLevels(newMsgs);
                 }
+                final boolean lvChangedFinal = lvChanged;
                 uiHandler.post(() -> {
                     if (!newMsgs.isEmpty()) {
                         for (GroupMessage msg : newMsgs) {
@@ -1525,7 +2029,10 @@ public class FriendsChatDialog {
                             }
                         }
                         scrollGroupToBottom();
+                        markGroupRead();
                     }
+                    // 等级实时刷新：有人升级或首次见到某人的等级，原地更新徽章
+                    if (lvChangedFinal) refreshRenderedLevelBadges();
                     // 更新在线人数
                     updateOnlineCount(result.onlineCount);
                 });
@@ -1557,11 +2064,7 @@ public class FriendsChatDialog {
     }
 
     private void scrollGroupToBottom() {
-        if (groupMessageList == null) return;
-        groupMessageList.post(() -> {
-            View parent = (View) groupMessageList.getParent();
-            if (parent != null) parent.scrollTo(0, groupMessageList.getHeight());
-        });
+        scrollToBottomReliably(groupScrollView, groupMessageList);
     }
 
     // ==================== 添加好友 ====================
@@ -1927,7 +2430,11 @@ public class FriendsChatDialog {
         infoCol.setOrientation(LinearLayout.VERTICAL);
         infoCol.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
 
-        // 昵称
+        // 昵称行（昵称 + 等级徽章）
+        LinearLayout nameRow = new LinearLayout(activity);
+        nameRow.setOrientation(LinearLayout.HORIZONTAL);
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView nameView = new TextView(activity);
         nameView.setText(nickname);
         nameView.setTextColor(0xFFF5F7FF);
@@ -1935,7 +2442,15 @@ public class FriendsChatDialog {
         nameView.setTypeface(null, android.graphics.Typeface.BOLD);
         nameView.setMaxLines(1);
         nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        infoCol.addView(nameView);
+        // 昵称占满剩余空间但给徽章留位（weight=1 + 徽章 wrap）
+        nameRow.addView(nameView, new LinearLayout.LayoutParams(-2, -2));
+
+        // 等级徽章：profile.php 已返回 level / exp
+        int userLevel = profile.optInt("level", 1);
+        if (userLevel > 0) {
+            nameRow.addView(buildLevelBadge(userLevel, profile.optInt("exp", 0)));
+        }
+        infoCol.addView(nameRow);
 
         // 封禁标识
         boolean isDisabled = profile.optBoolean("isDisabled", false);
@@ -2876,11 +3391,40 @@ public class FriendsChatDialog {
     }
 
     private void scrollToBottom() {
-        if (chatMessageList == null) return;
-        chatMessageList.post(() -> {
-            View parent = (View) chatMessageList.getParent();
-            if (parent != null) parent.scrollTo(0, chatMessageList.getHeight());
-        });
+        scrollToBottomReliably(chatScrollView, chatMessageList);
+    }
+
+    /**
+     * 可靠地滚到列表底部。
+     *
+     * 原来的写法是 list.post(() -> parent.scrollTo(0, list.getHeight()))，
+     * post 只等一帧，而首屏可能一次性塞进 200 条气泡（还有异步加载的图片），
+     * 一帧内布局没测量完，getHeight() 偏小，结果就停在聊天记录中间。
+     *
+     * 这里改成三重保障：
+     *   1. fullScroll(FOCUS_DOWN) —— 由 ScrollView 自己算底部，不依赖外部取高度
+     *   2. 连续几帧重试 —— 覆盖气泡陆续测量完的过程
+     *   3. OnLayoutChangeListener —— 图片等异步内容撑高后再兜一次
+     */
+    private void scrollToBottomReliably(final ScrollView sv, final LinearLayout list) {
+        if (sv == null || list == null) return;
+
+        // 每次调用只保留最新一个兜底监听，避免重复叠加
+        final View.OnLayoutChangeListener[] holder = new View.OnLayoutChangeListener[1];
+        holder[0] = (v, l, t, r, b, ol, ot, or_, ob) -> {
+            if (b != ob) sv.fullScroll(View.FOCUS_DOWN);
+        };
+        list.addOnLayoutChangeListener(holder[0]);
+        // 内容高度稳定后撤掉监听，防止干扰用户手动上翻
+        sv.postDelayed(() -> {
+            try { list.removeOnLayoutChangeListener(holder[0]); } catch (Throwable ignored) {}
+        }, 1200);
+
+        // 连续几帧重试：气泡是逐帧测量完的，单次 post 往往还没到位
+        sv.post(() -> sv.fullScroll(View.FOCUS_DOWN));
+        sv.postDelayed(() -> sv.fullScroll(View.FOCUS_DOWN), 60);
+        sv.postDelayed(() -> sv.fullScroll(View.FOCUS_DOWN), 200);
+        sv.postDelayed(() -> sv.fullScroll(View.FOCUS_DOWN), 450);
     }
 
     private View divider() {
@@ -2967,7 +3511,11 @@ public class FriendsChatDialog {
         return btn;
     }
 
-    /** 显示选项弹窗 */
+    /**
+     * 显示选项弹窗。
+     * 内容区包 ScrollView：横屏或选项较多时（如举报理由 7 项）不会被裁切且能滑动。
+     * 弹窗最大高度限制为屏幕 80%，避免顶到状态栏。
+     */
     private void showOptionDialog(String title, View content) {
         dismissOptionDialog();
         LinearLayout root = new LinearLayout(activity);
@@ -2984,18 +3532,34 @@ public class FriendsChatDialog {
         titleView.setPadding(0, 0, 0, dp(6));
         root.addView(titleView);
 
-        root.addView(content);
+        // 内容包一层 ScrollView，超出可滑动
+        ScrollView contentScroll = new ScrollView(activity);
+        contentScroll.setFillViewport(false);
+        contentScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        contentScroll.addView(content, new FrameLayout.LayoutParams(-1, -2));
+        root.addView(contentScroll, new LinearLayout.LayoutParams(-1, -2));
 
         optionDialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         optionDialog.setContentView(root);
         optionDialog.setCancelable(true);
         if (optionDialog.getWindow() != null) {
             optionDialog.getWindow().setBackgroundDrawableResource(R.drawable.bg_social_panel);
-            optionDialog.getWindow().setLayout(
-                    (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.65f),
-                    -2);
+            int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+            int screenH = activity.getResources().getDisplayMetrics().heightPixels;
+            // 横屏时 0.65 宽度太窄，按屏幕比例自适应
+            float widthRatio = screenW > screenH ? 0.5f : 0.75f;
+            optionDialog.getWindow().setLayout((int) (screenW * widthRatio), -2);
         }
         optionDialog.show();
+
+        // 限制最大高度为屏幕 80%（show 之后才能拿到测量结果）
+        root.post(() -> {
+            int maxH = (int) (activity.getResources().getDisplayMetrics().heightPixels * 0.8f);
+            if (root.getHeight() > maxH && optionDialog != null && optionDialog.getWindow() != null) {
+                optionDialog.getWindow().setLayout(
+                        optionDialog.getWindow().getAttributes().width, maxH);
+            }
+        });
     }
 
     /** 关闭选项弹窗 */
@@ -3284,5 +3848,691 @@ public class FriendsChatDialog {
                 handleApiError(t);
             }
         });
+    }
+
+    // ==================== 悬浮按钮 / 未读定位 ====================
+
+    /** "回到底部"圆形按钮（默认隐藏，离底部较远时淡入） */
+    private View buildJumpBottomButton(View.OnClickListener listener) {
+        TextView btn = new TextView(activity);
+        btn.setText("↓");
+        btn.setTextColor(0xFFF5F7FF);
+        btn.setTextSize(17);
+        btn.setGravity(Gravity.CENTER);
+        btn.setBackgroundResource(R.drawable.bg_social_button);
+        btn.setAlpha(0f);
+        btn.setVisibility(View.GONE);
+        btn.setOnClickListener(listener);
+        return btn;
+    }
+
+    /** "N 条新消息 ↑"胶囊按钮：点击跳到未读起点 */
+    private View buildUnreadJumpButton(View.OnClickListener listener) {
+        TextView btn = new TextView(activity);
+        btn.setTextColor(0xFFFFFFFF);
+        btn.setTextSize(11);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(10), dp(4), dp(10), dp(4));
+        btn.setBackgroundResource(R.drawable.bg_social_button);
+        btn.setVisibility(View.GONE);
+        btn.setOnClickListener(listener);
+        return btn;
+    }
+
+    /** 回复引用条（输入栏上方，显示"回复 xxx：内容" + 关闭按钮） */
+    private View buildReplyBar(View.OnClickListener onClose) {
+        LinearLayout bar = new LinearLayout(activity);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackgroundResource(R.drawable.bg_input);
+        bar.setPadding(dp(8), dp(5), dp(6), dp(5));
+        bar.setVisibility(View.GONE);
+
+        TextView text = new TextView(activity);
+        text.setTextColor(0xFF9AA4BF);
+        text.setTextSize(11);
+        text.setMaxLines(2);
+        text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        text.setTag("reply_bar_text");
+        bar.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView close = new TextView(activity);
+        close.setText("✕");
+        close.setTextColor(0xFF8AB4FF);
+        close.setTextSize(13);
+        close.setPadding(dp(8), dp(2), dp(4), dp(2));
+        close.setOnClickListener(onClose);
+        bar.addView(close);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(dp(2), dp(2), dp(2), 0);
+        bar.setLayoutParams(lp);
+        return bar;
+    }
+
+    /** 距底部超过一屏的 1/3 就显示"回到底部" */
+    private void updateChatFloatingButtons() {
+        if (chatScrollView == null || chatMessageList == null || chatJumpBottomBtn == null) return;
+        int contentH = chatMessageList.getHeight();
+        int viewH = chatScrollView.getHeight();
+        int scrollY = chatScrollView.getScrollY();
+        int distanceToBottom = contentH - viewH - scrollY;
+        boolean show = distanceToBottom > Math.max(dp(120), viewH / 3);
+        setFloatingVisible(chatJumpBottomBtn, show);
+        // 用户往上翻过 → 认定为真实交互，此后允许推进已读锚点
+        if (show) chatReadGateOpen = true;
+        if (distanceToBottom <= dp(24)) markChatRead();
+    }
+
+    private void updateGroupFloatingButtons() {
+        if (groupScrollView == null || groupMessageList == null || groupJumpBottomBtn == null) return;
+        int contentH = groupMessageList.getHeight();
+        int viewH = groupScrollView.getHeight();
+        int scrollY = groupScrollView.getScrollY();
+        int distanceToBottom = contentH - viewH - scrollY;
+        boolean show = distanceToBottom > Math.max(dp(120), viewH / 3);
+        setFloatingVisible(groupJumpBottomBtn, show);
+        if (show) groupReadGateOpen = true;
+        if (distanceToBottom <= dp(24)) markGroupRead();
+    }
+
+    private void setFloatingVisible(View v, boolean show) {
+        if (v == null) return;
+        boolean visible = v.getVisibility() == View.VISIBLE && v.getAlpha() > 0.5f;
+        if (show == visible) return;
+        if (show) {
+            v.setVisibility(View.VISIBLE);
+            v.animate().alpha(1f).setDuration(150).start();
+        } else {
+            v.animate().alpha(0f).setDuration(150)
+                    .withEndAction(() -> v.setVisibility(View.GONE)).start();
+        }
+    }
+
+    /**
+     * 计算私聊未读条数并决定是否显示"跳到未读"胶囊。
+     * 依据是进入会话前落盘的已读锚点，与 QQ 的"N 条新消息"体验一致。
+     */
+    private void refreshChatUnreadState() {
+        if (chatUnreadJumpBtn == null || chatMessageList == null) return;
+        int unread = countUnreadInList(chatMessageList, chatUnreadAnchorId);
+        if (unread <= 0) {
+            chatUnreadJumpBtn.setVisibility(View.GONE);
+            return;
+        }
+        ((TextView) chatUnreadJumpBtn).setText(unread + " 条新消息 ↑");
+        chatUnreadJumpBtn.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshGroupUnreadState() {
+        if (groupUnreadJumpBtn == null || groupMessageList == null) return;
+        int unread = countUnreadInList(groupMessageList, groupUnreadAnchorId);
+        if (unread <= 0) {
+            groupUnreadJumpBtn.setVisibility(View.GONE);
+            return;
+        }
+        ((TextView) groupUnreadJumpBtn).setText(unread + " 条新消息 ↑");
+        groupUnreadJumpBtn.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * 数一下列表里 id > anchorId 的「别人发的」消息条数。
+     * 气泡在 build 时用 setTag(R.id...) 不方便，这里用另一套办法：
+     * 渲染时把消息 id 写进 wrapper 的 tag（"msg:<id>:<mine>"），这里解析。
+     */
+    private int countUnreadInList(LinearLayout list, int anchorId) {
+        if (anchorId <= 0) return 0;
+        int count = 0;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            long[] meta = parseBubbleMeta(list.getChildAt(i));
+            if (meta == null) continue;
+            if (meta[0] > anchorId && meta[1] == 0) count++;
+        }
+        return count;
+    }
+
+    /** @return [messageId, isMine ? 1 : 0]，非消息气泡返回 null */
+    private long[] parseBubbleMeta(View v) {
+        if (v == null) return null;
+        Object tag = v.getTag();
+        if (!(tag instanceof String)) return null;
+        String t = (String) tag;
+        if (!t.startsWith("msg:")) return null;
+        try {
+            String[] parts = t.split(":");
+            return new long[]{Long.parseLong(parts[1]), Long.parseLong(parts[2])};
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** 滚到第一条未读消息处（略微上移，让未读分界看得见） */
+    private void jumpToChatUnread() {
+        if (chatScrollView == null || chatMessageList == null) return;
+        View target = findFirstUnreadView(chatMessageList, chatUnreadAnchorId);
+        if (target == null) {
+            scrollToBottom();
+        } else {
+            final int y = Math.max(0, target.getTop() - dp(40));
+            chatScrollView.post(() -> chatScrollView.smoothScrollTo(0, y));
+        }
+        chatReadGateOpen = true;   // 已看过未读起点，之后可推进锚点
+        if (chatUnreadJumpBtn != null) chatUnreadJumpBtn.setVisibility(View.GONE);
+    }
+
+    private void jumpToGroupUnread() {
+        if (groupScrollView == null || groupMessageList == null) return;
+        View target = findFirstUnreadView(groupMessageList, groupUnreadAnchorId);
+        if (target == null) {
+            scrollGroupToBottom();
+        } else {
+            final int y = Math.max(0, target.getTop() - dp(40));
+            groupScrollView.post(() -> groupScrollView.smoothScrollTo(0, y));
+        }
+        groupReadGateOpen = true;
+        if (groupUnreadJumpBtn != null) groupUnreadJumpBtn.setVisibility(View.GONE);
+    }
+
+    private View findFirstUnreadView(LinearLayout list, int anchorId) {
+        if (anchorId <= 0) return null;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View child = list.getChildAt(i);
+            long[] meta = parseBubbleMeta(child);
+            if (meta == null) continue;
+            if (meta[0] > anchorId && meta[1] == 0) return child;
+        }
+        return null;
+    }
+
+    /**
+     * 落盘私聊已读锚点（推进到当前已知最新消息）。
+     * 闸门未开时直接返回——避免首屏自动滚动把未读锚点冲掉。
+     */
+    private void markChatRead() {
+        if (!chatReadGateOpen) return;
+        if (chatFriend == null || maxMessageId <= 0) return;
+        final String fid = chatFriend.id;
+        final int mid = maxMessageId;
+        AppExecutors.runOnIo(() -> chatCache.setFriendLastReadId(fid, mid));
+    }
+
+    private void markGroupRead() {
+        if (!groupReadGateOpen) return;
+        if (chatGroup == null || groupMaxMessageId <= 0) return;
+        final int gid = chatGroup.id;
+        final int mid = groupMaxMessageId;
+        AppExecutors.runOnIo(() -> chatCache.setGroupLastReadId(gid, mid));
+    }
+
+    /**
+     * 离开会话时强制落盘已读锚点（绕过闸门）。
+     * 用户可能只是打开看一眼就退出，这时也应该算已读，否则下次进来还提示未读。
+     */
+    private void forceMarkChatRead() {
+        if (chatFriend != null && maxMessageId > 0) {
+            final String fid = chatFriend.id;
+            final int mid = maxMessageId;
+            AppExecutors.runOnIo(() -> chatCache.setFriendLastReadId(fid, mid));
+        }
+        if (chatGroup != null && groupMaxMessageId > 0) {
+            final int gid = chatGroup.id;
+            final int mid = groupMaxMessageId;
+            AppExecutors.runOnIo(() -> chatCache.setGroupLastReadId(gid, mid));
+        }
+    }
+
+    // ==================== 复制 / 回复 / 举报 ====================
+
+    private void copyToClipboard(String text) {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    activity.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null) return;
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("YukiHub", text == null ? "" : text));
+            Toast.makeText(activity, "已复制", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Toast.makeText(activity, "复制失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 引用前缀：`> 昵称: 摘要\n\n`，服务端 parseQuotedReply 能解析这个格式 */
+    private String buildQuotePrefix(String who, String preview) {
+        String w = (who == null || who.trim().isEmpty()) ? "对方" : who.trim();
+        // 昵称里的冒号会干扰服务端解析，替换掉
+        w = w.replace(":", " ").replace("：", " ");
+        String p = preview == null ? "" : preview.replace("\n", " ");
+        if (p.length() > 40) p = p.substring(0, 40) + "…";
+        return "> " + w + ": " + p + "\n\n";
+    }
+
+    private String previewOfChat(ChatMessage m) {
+        if (m == null) return "";
+        if ("image".equals(m.msgType)) return "[图片]";
+        if ("emoji".equals(m.msgType)) return "[表情]";
+        return stripQuote(m.content);
+    }
+
+    private String previewOfGroup(GroupMessage m) {
+        if (m == null) return "";
+        if ("image".equals(m.msgType)) return "[图片]";
+        if ("emoji".equals(m.msgType)) return "[表情]";
+        return stripQuote(m.content);
+    }
+
+    /** 回复套娃时只取正文，避免引用无限叠加 */
+    private String stripQuote(String content) {
+        if (content == null) return "";
+        String c = content.trim();
+        if (!c.startsWith(">")) return c;
+        int nl = c.indexOf('\n');
+        if (nl < 0) return c;
+        String rest = c.substring(nl).trim();
+        return rest.isEmpty() ? c : rest;
+    }
+
+    private String getMyNicknameOrDefault() {
+        String n = getMyNickname();
+        return (n == null || n.trim().isEmpty()) ? "我" : n.trim();
+    }
+
+    private void startReplyToChat(ChatMessage msg) {
+        pendingReplyChat = msg;
+        pendingReplyGroup = null;
+        String who = msg.isMine ? getMyNicknameOrDefault()
+                : (chatFriend == null ? "对方" : chatFriend.nickname);
+        showReplyBar(chatReplyBar, who, previewOfChat(msg));
+        if (chatInput != null) chatInput.requestFocus();
+    }
+
+    private void startReplyToGroup(GroupMessage msg) {
+        pendingReplyGroup = msg;
+        pendingReplyChat = null;
+        String who = (msg.senderNickname == null || msg.senderNickname.isEmpty())
+                ? "对方" : msg.senderNickname;
+        showReplyBar(groupReplyBar, who, previewOfGroup(msg));
+        if (groupChatInput != null) groupChatInput.requestFocus();
+    }
+
+    private void showReplyBar(View bar, String who, String preview) {
+        if (bar == null) return;
+        View tv = bar.findViewWithTag("reply_bar_text");
+        if (tv instanceof TextView) {
+            String p = preview == null ? "" : preview.replace("\n", " ");
+            if (p.length() > 50) p = p.substring(0, 50) + "…";
+            ((TextView) tv).setText("回复 " + who + "：" + p);
+        }
+        bar.setVisibility(View.VISIBLE);
+    }
+
+    private void clearPendingReply() {
+        pendingReplyChat = null;
+        pendingReplyGroup = null;
+        if (chatReplyBar != null) chatReplyBar.setVisibility(View.GONE);
+        if (groupReplyBar != null) groupReplyBar.setVisibility(View.GONE);
+    }
+
+    /** 举报理由选择弹窗 */
+    private void showReportReasonDialog(String scene, int messageId, int groupId) {
+        final String[] reasons = {"垃圾广告", "色情低俗", "人身攻击", "违法违规", "诈骗欺诈"};
+        LinearLayout menuRoot = new LinearLayout(activity);
+        menuRoot.setOrientation(LinearLayout.VERTICAL);
+        menuRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        TextView hint = new TextView(activity);
+        hint.setText("请选择举报理由，管理员会人工审核");
+        hint.setTextColor(0xFF9AA4BF);
+        hint.setTextSize(11);
+        hint.setPadding(dp(2), 0, dp(2), dp(6));
+        menuRoot.addView(hint);
+
+        for (String reason : reasons) {
+            menuRoot.addView(menuButton(reason, v -> {
+                dismissOptionDialog();
+                doReport(scene, messageId, groupId, reason);
+            }));
+        }
+
+        // 自定义理由：输入框 + 提交按钮
+        menuRoot.addView(divider());
+
+        TextView customLabel = new TextView(activity);
+        customLabel.setText("其他理由（自行填写）");
+        customLabel.setTextColor(0xFF9AA4BF);
+        customLabel.setTextSize(11);
+        customLabel.setPadding(dp(2), dp(4), dp(2), dp(4));
+        menuRoot.addView(customLabel);
+
+        final EditText customInput = new EditText(activity);
+        customInput.setHint("简要描述问题（50 字内）");
+        customInput.setTextColor(0xFFF5F7FF);
+        customInput.setHintTextColor(0x889AA4BF);
+        customInput.setTextSize(13);
+        customInput.setBackgroundResource(R.drawable.bg_chat_input);
+        customInput.setPadding(dp(10), dp(8), dp(10), dp(8));
+        customInput.setMaxLines(3);
+        customInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        // 服务端 reason 字段上限 50 字符，前端同步限制避免被静默截断
+        customInput.setFilters(new android.text.InputFilter[]{
+                new android.text.InputFilter.LengthFilter(50)});
+        LinearLayout.LayoutParams ciLp = new LinearLayout.LayoutParams(-1, -2);
+        ciLp.setMargins(0, 0, 0, dp(6));
+        menuRoot.addView(customInput, ciLp);
+
+        menuRoot.addView(menuButton("提交自定义理由", v -> {
+            String custom = customInput.getText().toString().trim();
+            if (custom.isEmpty()) {
+                Toast.makeText(activity, "请先填写举报理由", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            dismissOptionDialog();
+            doReport(scene, messageId, groupId, custom);
+        }));
+
+        menuRoot.addView(menuButton("取消", v -> dismissOptionDialog()));
+        showOptionDialog("举报消息", menuRoot);
+    }
+
+    private void doReport(String scene, int messageId, int groupId, String reason) {
+        AppExecutors.runOnIo(() -> {
+            try {
+                String msg = apiClient.reportMessage(scene, messageId, groupId, reason);
+                uiHandler.post(() -> Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show());
+            } catch (Throwable t) {
+                uiHandler.post(() -> Toast.makeText(activity,
+                        "举报失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
+                handleApiError(t);
+            }
+        });
+    }
+
+    // ==================== 聊天图片 ====================
+
+    /** 构建图片消息 View（点击看大图） */
+    private View buildImageContentView(String relativeUrl) {
+        ImageView iv = new ImageView(activity);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        iv.setBackgroundResource(R.drawable.bg_input);
+        final String full = absoluteChatImageUrl(relativeUrl);
+        loadEmojiInto(full, iv, dp(300));  // 复用带缓存的图片加载
+        iv.setOnClickListener(v -> showImageViewer(full));
+        return iv;
+    }
+
+    private String absoluteChatImageUrl(String url) {
+        if (url == null || url.isEmpty()) return "";
+        if (url.startsWith("http")) return url;
+        return "https://yukihub.zh.kg" + url;
+    }
+
+    /** 全屏看大图（点击任意处关闭） */
+    private void showImageViewer(String url) {
+        if (url == null || url.isEmpty()) return;
+        FrameLayout root = new FrameLayout(activity);
+        root.setBackgroundColor(0xEE0A0E1A);
+
+        ImageView big = new ImageView(activity);
+        big.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-1, -1);
+        lp.setMargins(dp(8), dp(8), dp(8), dp(8));
+        root.addView(big, lp);
+        loadEmojiInto(url, big, dp(900));
+
+        Dialog viewer = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        viewer.setContentView(root);
+        viewer.setCancelable(true);
+        root.setOnClickListener(v -> viewer.dismiss());
+        if (viewer.getWindow() != null) {
+            viewer.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+        }
+        viewer.show();
+    }
+
+    /**
+     * 选图 → 压缩 → 上传 → 发送。
+     * @param isGroupChat true = 群聊，false = 私聊
+     */
+    private void pickAndSendImage(boolean isGroupChat) {
+        boolean ok = ChatImagePicker.pick(activity, uri -> {
+            if (uri == null) return;
+            Toast.makeText(activity, "处理图片中...", Toast.LENGTH_SHORT).show();
+            AppExecutors.runOnIo(() -> {
+                ChatImagePicker.Compressed c = ChatImagePicker.compress(appContext, uri);
+                if (c == null) {
+                    uiHandler.post(() -> Toast.makeText(activity,
+                            "图片处理失败，请换一张（需 500KB 以内可压缩的 jpg/png/webp）",
+                            Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                try {
+                    String url = apiClient.uploadChatImage(c.data, c.mimeType);
+                    if (isGroupChat) sendImageGroupMessage(url);
+                    else sendImageMessage(url);
+                } catch (Throwable t) {
+                    uiHandler.post(() -> Toast.makeText(activity,
+                            "上传失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
+                    handleApiError(t);
+                }
+            });
+        });
+        if (!ok) {
+            Toast.makeText(activity, "当前页面不支持选图，请从首页进入聊天", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 发送图片消息（私聊）。在 IO 线程调用 */
+    private void sendImageMessage(String url) {
+        final FriendInfo friend = chatFriend;
+        if (friend == null) return;
+        try {
+            ChatMessage sent = apiClient.sendMessage(friend.id, url, "image", 0);
+            chatCache.upsertFriendMessages(friend.id, java.util.Collections.singletonList(sent));
+            chatCache.pruneFriendMessages(friend.id);
+            uiHandler.post(() -> {
+                if (chatFriend == null || !friend.id.equals(chatFriend.id)) return;
+                if (sent.id > maxMessageId) maxMessageId = sent.id;
+                chatMessageList.addView(buildMessageBubble(sent));
+                scrollToBottom();
+            });
+        } catch (Throwable t) {
+            uiHandler.post(() -> Toast.makeText(activity,
+                    "发送失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
+            handleApiError(t);
+        }
+    }
+
+    /** 发送图片消息（群聊）。在 IO 线程调用 */
+    private void sendImageGroupMessage(String url) {
+        final GroupInfo group = chatGroup;
+        if (group == null) return;
+        try {
+            GroupMessage sent = apiClient.sendGroupMessage(group.id, url, "image", 0);
+            chatCache.upsertGroupMessages(group.id, java.util.Collections.singletonList(sent));
+            chatCache.pruneGroupMessages(group.id);
+            uiHandler.post(() -> {
+                if (chatGroup == null || chatGroup.id != group.id) return;
+                if (sent.id > groupMaxMessageId) groupMaxMessageId = sent.id;
+                groupMessageList.addView(buildGroupMessageBubble(sent));
+                scrollGroupToBottom();
+            });
+        } catch (Throwable t) {
+            uiHandler.post(() -> Toast.makeText(activity,
+                    "发送失败：" + t.getMessage(), Toast.LENGTH_SHORT).show());
+            handleApiError(t);
+        }
+    }
+
+    // ==================== 等级徽章 / @提及 ====================
+
+    /**
+     * 等级文字配色，色值与网页端 community.css 的 .level-badge.lv-* 逐一对齐：
+     * Lv.1-4 灰 #b9bcc7 / 5-9 绿 #7ee2a0 / 10-14 蓝 #7db8ff / 15-19 紫 #c9a0ff
+     * 20-24 橙 #ffb37a / 25-29 红 #ff9090 / 30+ 金 #ffd27a
+     */
+    private int levelColor(int level) {
+        if (level >= 30) return 0xFFFFD27A;
+        if (level >= 25) return 0xFFFF9090;
+        if (level >= 20) return 0xFFFFB37A;
+        if (level >= 15) return 0xFFC9A0FF;
+        if (level >= 10) return 0xFF7DB8FF;
+        if (level >= 5)  return 0xFF7EE2A0;
+        return 0xFFB9BCC7;
+    }
+
+    /**
+     * 等级徽章底图（背景色 + 边框色），与网页端同档同色。
+     * 分档规则与 levelColor 完全一致。
+     */
+    private int levelBadgeBg(int level) {
+        if (level >= 30) return R.drawable.bg_level_gold;
+        if (level >= 25) return R.drawable.bg_level_red;
+        if (level >= 20) return R.drawable.bg_level_orange;
+        if (level >= 15) return R.drawable.bg_level_purple;
+        if (level >= 10) return R.drawable.bg_level_blue;
+        if (level >= 5)  return R.drawable.bg_level_green;
+        return R.drawable.bg_level_gray;
+    }
+
+    /**
+     * 构建等级徽章（资料页昵称右侧）。
+     * 点击弹出经验详情，与社区端点击徽章看进度的交互对齐。
+     */
+    private TextView buildLevelBadge(int level, int exp) {
+        TextView badge = new TextView(activity);
+        badge.setText("Lv." + level);
+        badge.setTextColor(levelColor(level));
+        badge.setTextSize(10);
+        badge.setTypeface(null, android.graphics.Typeface.BOLD);
+        badge.setGravity(Gravity.CENTER);
+        badge.setIncludeFontPadding(false);   // 去掉字体自带的上下留白
+        badge.setSingleLine(true);
+        // 按等级取对应底图（背景+边框与网页端同色）。
+        // 不能用 bg_input，它的 shape 自带 14dp/8dp padding 会覆盖 setPadding 把徽章撑大。
+        badge.setBackgroundResource(levelBadgeBg(level));
+        badge.setPadding(dp(7), dp(1), dp(7), dp(1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(18));
+        lp.setMargins(dp(7), 0, 0, 0);
+        lp.gravity = Gravity.CENTER_VERTICAL;
+        badge.setLayoutParams(lp);
+        badge.setOnClickListener(v -> showLevelDetail(level, exp));
+        return badge;
+    }
+
+    /** 等级曲线：与服务端 expForLevel 完全一致（1→2:100, 2→3:200, 3→4:400, 4→5:800, 之后 400*(lv-2)） */
+    private int expForLevel(int level) {
+        int lv = Math.max(1, level);
+        switch (lv) {
+            case 1: return 100;
+            case 2: return 200;
+            case 3: return 400;
+            case 4: return 800;
+            default: return 400 * (lv - 2);
+        }
+    }
+
+    /** 累计到某等级所需总经验 */
+    private int totalExpForLevel(int level) {
+        int sum = 0;
+        for (int i = 1; i < Math.max(1, level); i++) sum += expForLevel(i);
+        return sum;
+    }
+
+    /** 等级详情弹窗：当前等级 + 本级进度 + 距下一级还需多少 */
+    private void showLevelDetail(int level, int exp) {
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(6), dp(4), dp(6), dp(4));
+
+        int base = totalExpForLevel(level);
+        int need = expForLevel(level);
+        int cur = Math.max(0, exp - base);
+        int remain = Math.max(0, need - cur);
+
+        TextView lv = new TextView(activity);
+        lv.setText("Lv." + level);
+        lv.setTextColor(levelColor(level));
+        lv.setTextSize(22);
+        lv.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(lv);
+
+        TextView progress = new TextView(activity);
+        progress.setText(cur + " / " + need + " EXP");
+        progress.setTextColor(0xFFF5F7FF);
+        progress.setTextSize(13);
+        progress.setPadding(0, dp(6), 0, dp(2));
+        root.addView(progress);
+
+        // 进度条
+        FrameLayout barBg = new FrameLayout(activity);
+        barBg.setBackgroundResource(R.drawable.bg_input);
+        LinearLayout.LayoutParams bgLp = new LinearLayout.LayoutParams(-1, dp(8));
+        bgLp.setMargins(0, dp(4), 0, dp(8));
+        barBg.setLayoutParams(bgLp);
+
+        View barFill = new View(activity);
+        barFill.setBackgroundColor(levelColor(level));
+        float ratio = need > 0 ? Math.min(1f, cur / (float) need) : 0f;
+        barBg.addView(barFill, new FrameLayout.LayoutParams(0, -1));
+        root.addView(barBg);
+        // 宽度要等父容器测量完才能算
+        barBg.post(() -> {
+            FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) barFill.getLayoutParams();
+            fl.width = Math.max(dp(2), (int) (barBg.getWidth() * ratio));
+            barFill.setLayoutParams(fl);
+        });
+
+        TextView remainView = new TextView(activity);
+        remainView.setText("距 Lv." + (level + 1) + " 还需 " + remain + " EXP  ·  总经验 " + exp);
+        remainView.setTextColor(0xFF9AA4BF);
+        remainView.setTextSize(11);
+        root.addView(remainView);
+
+        root.addView(menuButton("关闭", v -> dismissOptionDialog()));
+        showOptionDialog("等级详情", root);
+    }
+
+    /**
+     * 群聊 @ 某人：把 "@昵称 " 插入输入框光标处。
+     * 服务端 sendMentionNotifications 会解析 @昵称 并发通知，所以纯文本方案就够了。
+     */
+    private void mentionInGroup(GroupMessage msg) {
+        if (msg == null || groupChatInput == null) return;
+        if (chatGroup != null && !chatGroup.canSpeak()) {
+            Toast.makeText(activity, "公告版仅管理员可发言", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // @自己没意义
+        if (msg.isMine) return;
+
+        String nick = msg.senderNickname == null ? "" : msg.senderNickname.trim();
+        if (nick.isEmpty()) {
+            Toast.makeText(activity, "无法获取对方昵称", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String mention = "@" + nick + " ";
+        String current = groupChatInput.getText().toString();
+        // 已经 @ 过就不重复插入
+        if (current.contains(mention)) {
+            groupChatInput.requestFocus();
+            return;
+        }
+
+        int start = Math.max(0, groupChatInput.getSelectionStart());
+        StringBuilder sb = new StringBuilder(current);
+        sb.insert(Math.min(start, sb.length()), mention);
+        groupChatInput.setText(sb.toString());
+        groupChatInput.setSelection(Math.min(start + mention.length(), sb.length()));
+        groupChatInput.requestFocus();
+
+        // 唤起软键盘，省一次点击
+        try {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager)
+                            activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(groupChatInput,
+                    android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        } catch (Throwable ignored) {}
+
+        Toast.makeText(activity, "已 @" + nick, Toast.LENGTH_SHORT).show();
     }
 }

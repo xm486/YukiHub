@@ -118,6 +118,8 @@ public class HomeActivity extends AppCompatActivity {
         }
 
         setContentView(R.layout.activity_home);
+        // 聊天选图 launcher 必须在 STARTED 之前注册（供 FriendsChatDialog 借用）
+        com.yuki.yukihub.social.ChatImagePicker.register(this);
         // 窗口背景铺成首页同款渐变，避免内容延伸/挖孔区域露出默认浅色背景（白边）
         try { getWindow().setBackgroundDrawableResource(R.drawable.bg_home_gradient); } catch (Throwable ignored) { }
         repository = new GameRepository(this);
@@ -138,11 +140,24 @@ public class HomeActivity extends AppCompatActivity {
         if (intent == null) return;
         String target = intent.getStringExtra("home_target");
         if (!"friends".equals(target)) return;
+        // 通知点击可能带上要直达的会话
+        final String chatFriendId = intent.getStringExtra("chat_friend_id");
+        final int chatGroupId = intent.getIntExtra("chat_group_id", 0);
         intent.removeExtra("home_target");
+        intent.removeExtra("chat_friend_id");
+        intent.removeExtra("chat_group_id");
         getWindow().getDecorView().post(() -> {
             if (isFinishing()) return;
             try {
-                new com.yuki.yukihub.social.FriendsChatDialog(this).show();
+                com.yuki.yukihub.social.FriendsChatDialog d =
+                        new com.yuki.yukihub.social.FriendsChatDialog(this);
+                if (chatFriendId != null && !chatFriendId.isEmpty()) {
+                    d.showAndOpenFriendChat(chatFriendId);
+                } else if (chatGroupId > 0) {
+                    d.showAndOpenGroupChat(chatGroupId);
+                } else {
+                    d.show();
+                }
             } catch (Throwable ignored) {}
         });
     }

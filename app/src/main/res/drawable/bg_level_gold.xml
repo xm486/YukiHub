@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 等级徽章底 Lv.30+（与网页端 .level-badge.lv-gold 同色，135deg 渐变） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:startColor="#29FFBE50"
+        android:endColor="#1AFF9632"
+        android:angle="315" />
+    <stroke android:width="1dp" android:color="#8CFFB950" />
+    <corners android:radius="20dp" />
+</shape>

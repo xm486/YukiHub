@@ -6,7 +6,14 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 public class YukiDatabaseHelper extends SQLiteOpenHelper {
     public static final String DB_NAME = "yukihub.db";
-    public static final int DB_VERSION = 14;
+    /**
+     * 数据库版本。
+     * 【重要】这个数字只能往上加，绝对不能改小。
+     * 一旦有用户装过更高版本，库里记录的就是那个高版本号；
+     * 版本号改小会触发 onDowngrade，默认实现直接抛异常导致打开数据库就闪退。
+     * 历史：15 = 聊天回复引用 + 未读锚点；16 = 曾短暂加过群聊等级列（已废弃，等级改为不入缓存）
+     */
+    public static final int DB_VERSION = 17;
 
     public YukiDatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -106,6 +113,40 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
         if (oldVersion < 14) {
             safeAlter(db, "ALTER TABLE games ADD COLUMN nsfw INTEGER DEFAULT 0");
         }
+        if (oldVersion < 15) {
+            // 聊天：回复引用 + 未读锚点（跳到最后已读位置）
+            safeAlter(db, "ALTER TABLE friend_messages ADD COLUMN reply_to_id INTEGER DEFAULT 0");
+            safeAlter(db, "ALTER TABLE group_messages_cache ADD COLUMN reply_to_id INTEGER DEFAULT 0");
+            createChatReadMarkTable(db);
+        }
+        if (oldVersion < 17) {
+            // 无结构变更。
+            // 16 版曾给 group_messages_cache 加过 sender_level 列，
+            // 后来改成等级不入缓存（等级会变，缓存值必然过期），该列不再使用。
+            // 多余的列留着无害，SQLite 也不支持简单地删列，因此不做处理。
+            // 这里保留分支只为把版本号推进到 17，修复此前误将版本改小导致的闪退。
+            ensureChatCacheTables(db);
+        }
+    }
+
+    /**
+     * 版本降级兜底。
+     * 默认实现会抛异常导致闪退，这里改成不破坏数据的安全处理：
+     * 只确保当前代码需要的表和列都存在，多余的结构留着不管。
+     */
+    @Override
+    public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        ensureChatCacheTables(db);
+    }
+
+    /**
+     * 确保聊天相关表与列齐全（幂等，可重复调用）。
+     * 供升级、降级两条路径共用，避免任一方向缺表缺列。
+     */
+    private void ensureChatCacheTables(SQLiteDatabase db) {
+        createChatCacheTables(db);
+        safeAlter(db, "ALTER TABLE friend_messages ADD COLUMN reply_to_id INTEGER DEFAULT 0");
+        safeAlter(db, "ALTER TABLE group_messages_cache ADD COLUMN reply_to_id INTEGER DEFAULT 0");
     }
 
     private void createMetadataCacheTable(SQLiteDatabase db) {
@@ -133,7 +174,8 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
                 "content TEXT," +
                 "msg_type TEXT," +
                 "created_at TEXT," +
-                "is_mine INTEGER DEFAULT 0" +
+                "is_mine INTEGER DEFAULT 0," +
+                "reply_to_id INTEGER DEFAULT 0" +
                 ")");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_friend_messages ON friend_messages(friend_id, id)");
 
@@ -150,9 +192,24 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
                 "msg_type TEXT," +
                 "created_at TEXT," +
                 "recalled INTEGER DEFAULT 0," +
-                "is_mine INTEGER DEFAULT 0" +
+                "is_mine INTEGER DEFAULT 0," +
+                "reply_to_id INTEGER DEFAULT 0" +
                 ")");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_group_messages_cache ON group_messages_cache(group_id, id)");
+        createChatReadMarkTable(db);
+    }
+
+    /**
+     * 会话已读锚点：记录每个会话「上次离开时读到哪条消息」。
+     * 用于重进会话时提供「跳到未读起点」的定位（QQ 式体验），避免漏看消息。
+     * peer_key 格式：好友 = "f:<friendId>"，群聊 = "g:<groupId>"。
+     */
+    private void createChatReadMarkTable(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS chat_read_marks (" +
+                "peer_key TEXT PRIMARY KEY," +
+                "last_read_id INTEGER DEFAULT 0," +
+                "updated_at INTEGER DEFAULT 0" +
+                ")");
     }
 
     private void upgradeMetadataCachePrimaryKey(SQLiteDatabase db) {

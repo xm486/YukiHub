@@ -34,6 +34,7 @@ public class PresenceService extends Service {
 
     private PresenceManager presenceManager;
     private FriendNotifier friendNotifier;
+    private ChatNotifier chatNotifier;
     private SocialApiClient apiClient;
     private ScheduledFuture<?> friendPollFuture;
     private final AtomicBoolean started = new AtomicBoolean(false);
@@ -46,7 +47,9 @@ public class PresenceService extends Service {
         SharedPreferences prefs = app.getSharedPreferences(PresenceManager.PREFS_NAME, Context.MODE_PRIVATE);
         String token = prefs.getString(PresenceManager.KEY_AUTH_ACCESS_TOKEN, "");
         boolean loggedIn = token != null && !token.trim().isEmpty();
-        boolean notifyOn = prefs.getBoolean(PresenceManager.KEY_FRIEND_PLAY_NOTIFY, true);
+        // 好友开玩通知 或 聊天消息通知，任一开启就需要这个服务
+        boolean notifyOn = prefs.getBoolean(PresenceManager.KEY_FRIEND_PLAY_NOTIFY, true)
+                || prefs.getBoolean(ChatNotifier.KEY_CHAT_NOTIFY, true);
 
         if (loggedIn && notifyOn) {
             start(app);
@@ -94,7 +97,8 @@ public class PresenceService extends Service {
                         .getSharedPreferences(PresenceManager.PREFS_NAME, Context.MODE_PRIVATE);
                 String token = prefs.getString(PresenceManager.KEY_AUTH_ACCESS_TOKEN, "");
                 boolean loggedIn = token != null && !token.trim().isEmpty();
-                boolean notifyOn = prefs.getBoolean(PresenceManager.KEY_FRIEND_PLAY_NOTIFY, true);
+                boolean notifyOn = prefs.getBoolean(PresenceManager.KEY_FRIEND_PLAY_NOTIFY, true)
+                        || prefs.getBoolean(ChatNotifier.KEY_CHAT_NOTIFY, true);
                 if (loggedIn && notifyOn) {
                     context.getApplicationContext().startForegroundService(i);
                 }
@@ -111,8 +115,10 @@ public class PresenceService extends Service {
         super.onCreate();
         presenceManager = PresenceManager.get(this);
         friendNotifier = new FriendNotifier(this);
+        chatNotifier = new ChatNotifier(this);
         apiClient = new SocialApiClient(this);
         FriendNotifier.ensureChannels(this);
+        ChatNotifier.ensureChannels(this);
     }
 
     @Override
@@ -126,7 +132,8 @@ public class PresenceService extends Service {
         SharedPreferences prefs = getSharedPreferences(PresenceManager.PREFS_NAME, MODE_PRIVATE);
         String token = prefs.getString(PresenceManager.KEY_AUTH_ACCESS_TOKEN, "");
         boolean loggedIn = token != null && !token.trim().isEmpty();
-        boolean notifyOn = prefs.getBoolean(PresenceManager.KEY_FRIEND_PLAY_NOTIFY, true);
+        boolean notifyOn = prefs.getBoolean(PresenceManager.KEY_FRIEND_PLAY_NOTIFY, true)
+                || prefs.getBoolean(ChatNotifier.KEY_CHAT_NOTIFY, true);
 
         if (!loggedIn || !notifyOn) {
             shutdownAndStop();
@@ -200,13 +207,19 @@ public class PresenceService extends Service {
 
     private void pollFriendsOnce() {
         try {
-            if (!PresenceManager.isFriendPlayNotifyEnabled(this)) return;
             SharedPreferences prefs = getSharedPreferences(PresenceManager.PREFS_NAME, MODE_PRIVATE);
             String token = prefs.getString(PresenceManager.KEY_AUTH_ACCESS_TOKEN, "");
             if (token == null || token.trim().isEmpty()) {
                 shutdownAndStop();
                 return;
             }
+
+            // 聊天消息通知独立于「好友开始玩」开关，两者各有自己的设置项
+            if (chatNotifier != null) {
+                chatNotifier.pollOnce();
+            }
+
+            if (!PresenceManager.isFriendPlayNotifyEnabled(this)) return;
             List<FriendInfo> friends = apiClient.getFriendsList();
             if (friendNotifier != null) {
                 friendNotifier.processFriendsSnapshot(friends);
@@ -242,6 +255,7 @@ public class PresenceService extends Service {
     private void shutdownAndStop() {
         stopFriendPolling();
         if (friendNotifier != null) friendNotifier.reset();
+        if (chatNotifier != null) chatNotifier.reset();
         if (heartbeatHeld.compareAndSet(true, false) && presenceManager != null) {
             presenceManager.releaseHeartbeat();
         }

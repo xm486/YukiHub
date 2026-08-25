@@ -122,7 +122,8 @@ public class FriendNotifier {
             String game = PresenceManager.extractGameTitle(activity);
             if (game.isEmpty()) game = activity;
 
-            Intent intent = new Intent(appContext, HomeActivity.class);
+            // 落点是游戏库主界面（MainActivity），与聊天通知保持一致
+            Intent intent = new Intent(appContext, com.yuki.yukihub.MainActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
                     | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             intent.putExtra("home_target", "friends");
@@ -169,9 +170,20 @@ public class FriendNotifier {
     /** 构建前台保活通知。 */
     public static Notification buildForegroundNotification(Context context, String playingActivity) {
         ensureChannels(context);
-        Intent intent = new Intent(context, HomeActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // 这是常驻通知，点它只应该“回到应用”，不该指定落到哪个界面。
+        // getLaunchIntentForPackage 等同于点桌面图标：app 在后台时把整个任务栈
+        // 原样带到前台，用户停在游戏库/聊天/设置就回到那里。
+        // 它也会自动解析当前启用的 activity-alias（本项目有图标切换功能）。
+        // 注意别加 FLAG_ACTIVITY_CLEAR_TOP，那会清掉栈顶界面把人踢回首页。
+        Intent intent = context.getPackageManager()
+                .getLaunchIntentForPackage(context.getPackageName());
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        } else {
+            // 兜底：两个 activity-alias 都被禁用等极端情况，退回首页
+            intent = new Intent(context, HomeActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        }
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags |= PendingIntent.FLAG_IMMUTABLE;

@@ -297,16 +297,95 @@ public class SocialApiClient {
 
     /** 发送消息（支持指定 msgType） */
     public ChatMessage sendMessage(String receiverId, String content, String msgType) throws Exception {
+        return sendMessage(receiverId, content, msgType, 0);
+    }
+
+    /**
+     * 发送消息（完整版）
+     * @param replyToId 被回复的消息 id（0 = 普通消息），服务端据此给对方发「回复了你」通知
+     */
+    public ChatMessage sendMessage(String receiverId, String content, String msgType, int replyToId) throws Exception {
         JSONObject body = new JSONObject();
         body.put("receiverId", receiverId);
         body.put("content", content);
         body.put("msgType", msgType);
+        if (replyToId > 0) body.put("replyToId", replyToId);
         String resp = doPost("/chat/send", body);
         JSONObject root = new JSONObject(resp);
         JSONObject msg = root.optJSONObject("message");
         if (msg == null) throw new RuntimeException("发送消息失败");
-        return parseMessage(msg);
+        ChatMessage parsed = parseMessage(msg);
+        // 双保险：服务端已返回 isMine=true，这里再兜一层，
+        // 避免老版本服务端漏字段导致本地缓存把自己的消息标成对方发的
+        parsed.isMine = true;
+        return parsed;
     }
+
+    /**
+     * 上传聊天图片（≤500KB，jpg/png/webp）
+     * @param data 已压缩的图片字节
+     * @param mimeType image/jpeg 等
+     * @return 服务器返回的相对 URL（如 /uploads/chat/xxx/1_ab.jpg）
+     */
+    public String uploadChatImage(byte[] data, String mimeType) throws Exception {
+        if (data == null || data.length == 0) throw new IllegalArgumentException("图片数据为空");
+        if (data.length > 500 * 1024) throw new IllegalArgumentException("图片超过 500KB");
+        String token = getToken();
+        if (token == null) throw new IllegalStateException("未登录");
+
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(AUTH_BASE_URL + "/chat/upload_image").openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(CONNECT_TIMEOUT);
+            conn.setReadTimeout(30_000);
+            conn.setDoOutput(true);
+            conn.setFixedLengthStreamingMode(data.length);
+            conn.setRequestProperty("Content-Type", mimeType == null ? "image/jpeg" : mimeType);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(data);
+                os.flush();
+            }
+            int code = conn.getResponseCode();
+            String respBody = readAll(conn, code);
+            if (code == 403 && respBody.contains("ACCOUNT_DISABLED")) {
+                clearAuthSession();
+                throw new AccountDisabledException("该账号已被禁用");
+            }
+            if (code != 200 && code != 201) {
+                throw new RuntimeException(extractError(respBody));
+            }
+            JSONObject root = new JSONObject(respBody);
+            String url = root.optString("url", "");
+            if (url.isEmpty()) throw new RuntimeException("上传失败：服务器未返回图片地址");
+            return url;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 举报聊天消息
+     * @param scene "chat"（私聊）或 "group"（群聊）
+     * @param messageId 被举报的消息 id
+     * @param groupId scene=group 时必填
+     * @param reason 举报理由
+     */
+    public String reportMessage(String scene, int messageId, int groupId, String reason) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("scene", scene);
+        body.put("messageId", messageId);
+        if (groupId > 0) body.put("groupId", groupId);
+        body.put("reason", reason == null ? "" : reason);
+        String resp = doPost("/community/report", body);
+        JSONObject root = new JSONObject(resp);
+        if (!root.optBoolean("success", false)) {
+            throw new RuntimeException(root.optString("error", "举报失败"));
+        }
+        return root.optString("message", "举报已提交");
+    }
+
 
     /** 获取聊天历史 */
     public List<ChatMessage> getChatHistory(String friendId, int offset, int limit) throws Exception {
@@ -325,10 +404,19 @@ public class SocialApiClient {
 
     /** 轮询新消息 */
     public List<ChatMessage> pollNewMessages(int afterId, String friendId) throws Exception {
+        return pollNewMessages(afterId, friendId, false);
+    }
+
+    /**
+     * 轮询新消息
+     * @param peek true = 只读不标记已读（后台通知轮询用，否则未读红点会被通知轮询清掉）
+     */
+    public List<ChatMessage> pollNewMessages(int afterId, String friendId, boolean peek) throws Exception {
         String params = "afterId=" + afterId;
         if (friendId != null && !friendId.isEmpty()) {
             params += "&friendId=" + URLEncoder.encode(friendId, "UTF-8");
         }
+        if (peek) params += "&peek=1";
         String resp = doGet("/chat/poll", params);
         JSONObject root = new JSONObject(resp);
         JSONArray arr = root.optJSONArray("messages");
@@ -369,6 +457,39 @@ public class SocialApiClient {
         return user != null ? user.optString("nickname", nickname) : nickname;
     }
 
+    // ==================== 签到 / 等级 / 经验 ====================
+
+    /** 每日签到 */
+    public JSONObject checkin() throws Exception {
+        String resp = doPost("/community/checkin", new JSONObject());
+        return new JSONObject(resp);
+    }
+
+    /** 查询我的等级 / 经验 / 签到状态 */
+    public JSONObject getMyLevel() throws Exception {
+        String resp = doGet("/user/level", null);
+        return new JSONObject(resp);
+    }
+
+    /**
+     * 上报游戏游玩时长（游戏会话结束时调用，用于获取游戏经验）
+     * @param sessionUuid 会话唯一ID（防重复上报）
+     * @param gameKey 游戏权威 key（可空）
+     * @param title 游戏标题
+     * @param startTime 会话开始时间戳(ms)
+     * @param endTime 会话结束时间戳(ms)
+     */
+    public JSONObject reportPlayTime(String sessionUuid, String gameKey, String title, long startTime, long endTime) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("sessionUuid", sessionUuid == null ? "" : sessionUuid);
+        body.put("gameKey", gameKey == null ? "" : gameKey);
+        body.put("title", title == null ? "" : title);
+        body.put("startTime", startTime);
+        body.put("endTime", endTime);
+        String resp = doPost("/game/play_report", body);
+        return new JSONObject(resp);
+    }
+
     private ChatMessage parseMessage(JSONObject obj) {
         ChatMessage msg = new ChatMessage();
         msg.id = obj.optInt("id", 0);
@@ -378,6 +499,7 @@ public class SocialApiClient {
         msg.msgType = obj.optString("msgType", "text");
         msg.createdAt = obj.optString("createdAt", "");
         msg.isMine = obj.optBoolean("isMine", false);
+        msg.replyToId = obj.optInt("replyToId", 0);
         return msg;
     }
 
@@ -440,15 +562,75 @@ public class SocialApiClient {
 
     /** 发送群组消息（支持指定 msgType） */
     public GroupMessage sendGroupMessage(int groupId, String content, String msgType) throws Exception {
+        return sendGroupMessage(groupId, content, msgType, 0);
+    }
+
+    /**
+     * 发送群组消息（完整版）
+     * @param replyToId 被回复的消息 id（0 = 普通发言）。群聊只有被回复才会给对方推通知
+     */
+    public GroupMessage sendGroupMessage(int groupId, String content, String msgType, int replyToId) throws Exception {
         JSONObject body = new JSONObject();
         body.put("groupId", groupId);
         body.put("content", content);
         body.put("msgType", msgType);
+        if (replyToId > 0) body.put("replyToId", replyToId);
         String resp = doPost("/groups/send", body);
         JSONObject root = new JSONObject(resp);
         JSONObject msg = root.optJSONObject("message");
         if (msg == null) throw new RuntimeException("发送消息失败");
-        return parseGroupMessage(msg);
+        GroupMessage parsed = parseGroupMessage(msg);
+        parsed.isMine = true;
+        return parsed;
+    }
+
+    /** 群聊「被回复」提醒条目 */
+    public static class ReplyAlert {
+        public int id;
+        public int groupId;
+        public String groupName;
+        public String groupIcon;
+        public int messageId;
+        public String actorNickname;
+        public String summary;
+        /** "reply" = 回复了你，"mention" = @了你 */
+        public String kind = "reply";
+    }
+
+    /** 拉取群聊被回复提醒（未读） */
+    public List<ReplyAlert> getGroupReplyAlerts() throws Exception {
+        String resp = doGet("/groups/reply_alerts", null);
+        JSONObject root = new JSONObject(resp);
+        JSONArray arr = root.optJSONArray("alerts");
+        List<ReplyAlert> list = new ArrayList<>();
+        if (arr == null) return list;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.getJSONObject(i);
+            ReplyAlert a = new ReplyAlert();
+            a.id = o.optInt("id", 0);
+            a.groupId = o.optInt("groupId", 0);
+            a.groupName = o.optString("groupName", "群聊");
+            a.groupIcon = o.optString("groupIcon", "");
+            a.messageId = o.optInt("messageId", 0);
+            a.actorNickname = o.optString("actorNickname", "");
+            a.summary = o.optString("summary", "");
+            a.kind = o.optString("kind", "reply");
+            list.add(a);
+        }
+        return list;
+    }
+
+    /** 标记群聊被回复提醒为已读（避免重复弹通知） */
+    public void markGroupReplyAlertsRead(List<Integer> ids) throws Exception {
+        JSONObject body = new JSONObject();
+        if (ids == null || ids.isEmpty()) {
+            body.put("all", true);
+        } else {
+            JSONArray arr = new JSONArray();
+            for (Integer id : ids) if (id != null && id > 0) arr.put((int) id);
+            body.put("ids", arr);
+        }
+        doPost("/groups/reply_alerts", body);
     }
 
     /** 轮询群组新消息 */
@@ -493,12 +675,14 @@ public class SocialApiClient {
         msg.senderAvatar = obj.optString("senderAvatar", "");
         msg.senderUid = obj.optInt("senderUid", 0);
         msg.senderIsAdmin = obj.optBoolean("senderIsAdmin", false);
+        msg.senderLevel = obj.optInt("senderLevel", 0);
         msg.content = obj.optString("content", "");
         msg.msgType = obj.optString("msgType", "text");
         msg.createdAt = obj.optString("createdAt", "");
         msg.recalled = obj.optBoolean("recalled", false);
         msg.deleted = obj.optBoolean("deleted", false);
         msg.isMine = obj.optBoolean("isMine", false);
+        msg.replyToId = obj.optInt("replyToId", 0);
         return msg;
     }
 }
