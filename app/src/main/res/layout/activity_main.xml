@@ -176,27 +176,79 @@
 
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" />
 
-        <!-- 底栏统计 -->
+        <!-- 底栏统计：两个横向胶囊（游戏数 / 游玩时长）
+
+             设计要点：
+             - 不写「游玩统计」标题，图标已经表意，省下的高度给胶囊
+             - 图标和数字同一行横排，比原来的竖排 "\n" 省高度也不易折行
+             - 字号保持 sp（跟随设置里的全局字体缩放），但初始值压到 9sp。
+               侧栏净宽只有约 60dp，放大到 130% 时约 11.7sp，仍放得下
+             - 图标+数字作为一个整体居中：数字不用 weight 撑满，否则短数字
+               （如 "30"）会靠左，右边空一大片很难看
+             - maxLines=1 + autoSize 兜底：时长破 1000h（1234.5h，7 字符）
+               时自动缩字而不是截断
+        -->
         <LinearLayout
             android:id="@+id/statsContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:background="@drawable/bg_sidebar"
-            android:padding="8dp"
+            android:padding="5dp"
             android:layout_marginTop="4dp">
 
-            <TextView
+            <!-- 游戏数（青蓝） -->
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="21dp"
+                android:orientation="horizontal"
                 android:gravity="center"
-                android:text="游玩统计"
-                android:textColor="@color/yh_text_muted"
-                android:textSize="9sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="6dp" />
+                android:background="@drawable/bg_stat_pill_games">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎮"
+                    android:textSize="8sp"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:id="@+id/tvStatsGames"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="3dp"
+                    android:text="0"
+                    android:textColor="#EAF6FF"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
 
-            <TextView android:id="@+id/tvStats" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:text="🎮 0 Games\n◷ 0h Played" android:textColor="@color/yh_text" android:textSize="10sp" android:textStyle="bold" android:lineSpacingExtra="2dp" />
+            <!-- 游玩时长（品红紫，跟上面的青蓝拉开色相差） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="21dp"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/bg_stat_pill_time">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🕐"
+                    android:textSize="8sp"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:id="@+id/tvStatsTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="3dp"
+                    android:text="0h"
+                    android:textColor="#FFEAF7"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 

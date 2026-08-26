@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  经验进度条 · 轨道（底槽）
+
+  【为什么要单独建这个】
+  原来复用的是 bg_input.xml，那个 shape 自带
+      <padding left="14dp" right="14dp" top="8dp" bottom="8dp" />
+  而进度条容器只有 8dp 高 —— 上下 16dp 的 padding 直接把内容区挤成 0，
+  填充条根本没地方画，所以进度条看起来永远是空的。
+  （同一个 bg_input 的 padding 之前也把等级徽章撑成了大方块，是老坑了。）
+
+  这里不写任何 padding，圆角按 4dp（容器 8dp 高，半径取一半即胶囊感）。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#66101A32" />
+    <stroke android:width="1dp" android:color="#3A7FADE0" />
+    <corners android:radius="4dp" />
+</shape>

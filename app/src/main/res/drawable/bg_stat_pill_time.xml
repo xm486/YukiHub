@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  侧栏统计胶囊 · 游玩时长（品红紫）
+
+  结构跟 bg_stat_pill_games 完全一致，只换色相。
+
+  用品红紫（#E879C7 系）而不是第一版的蓝紫——蓝紫跟上面的蓝胶囊太接近，
+  实机上两个胶囊看起来几乎一样。这里往洋红方向偏，色相差拉到足够辨认，
+  同时仍在项目整体的紫粉色调里（跟 bg_home_primary_pill 的 #AA7AF3 同族偏暖）。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:startColor="#48C05CB0"
+                android:endColor="#308A3C80"
+                android:angle="315" />
+            <corners android:radius="999dp" />
+            <stroke android:width="1dp" android:color="#6EE879C7" />
+        </shape>
+    </item>
+    <item android:left="1dp" android:right="1dp" android:top="1dp" android:bottom="1dp">
+        <shape>
+            <corners android:radius="999dp" />
+            <stroke android:width="1dp" android:color="#18FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

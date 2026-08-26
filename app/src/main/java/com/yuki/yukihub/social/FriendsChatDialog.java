@@ -4417,16 +4417,21 @@ public class FriendsChatDialog {
         return badge;
     }
 
-    /** 等级曲线：与服务端 expForLevel 完全一致（1→2:100, 2→3:200, 3→4:400, 4→5:800, 之后 400*(lv-2)） */
+    /** 等级封顶，与服务端 LEVEL_CAP 一致 */
+    private static final int LEVEL_CAP = 30;
+
+    /**
+     * 等级曲线 V3 定表：与服务端 config.php 的 EXP_LEVEL_NEEDS 完全一致。
+     * ⚠️ 改表必须三端同步：server/config.php、server/community/community.js、本文件。
+     * 语义：expForLevel(lv) = 从 Lv.lv 升到 Lv.lv+1 所需经验；Lv.30 已封顶返回 0。
+     */
     private int expForLevel(int level) {
+        final int[] NEEDS = {60, 150, 220, 320, 390, 460, 530, 600, 670,
+                             780, 820, 860, 900, 940, 980, 1020, 1060, 1100, 1140,
+                             1180, 1220, 1260, 1300, 1340, 1380, 1420, 1460, 1500, 1540};
         int lv = Math.max(1, level);
-        switch (lv) {
-            case 1: return 100;
-            case 2: return 200;
-            case 3: return 400;
-            case 4: return 800;
-            default: return 400 * (lv - 2);
-        }
+        if (lv >= LEVEL_CAP) return 0;
+        return NEEDS[lv - 1];
     }
 
     /** 累计到某等级所需总经验 */
@@ -4442,10 +4447,11 @@ public class FriendsChatDialog {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(6), dp(4), dp(6), dp(4));
 
-        int base = totalExpForLevel(level);
-        int need = expForLevel(level);
-        int cur = Math.max(0, exp - base);
-        int remain = Math.max(0, need - cur);
+        boolean maxed = level >= LEVEL_CAP;
+        // B站式继承制：进度条 = 总经验 相对 升到下一级的累计阈值，
+        // 升级时数值连续上涨不清零（与网页端 expBarHtml 口径一致）
+        int next = totalExpForLevel(Math.min(LEVEL_CAP, level + 1));
+        int remain = maxed ? 0 : Math.max(0, next - exp);
 
         TextView lv = new TextView(activity);
         lv.setText("Lv." + level);
@@ -4455,33 +4461,58 @@ public class FriendsChatDialog {
         root.addView(lv);
 
         TextView progress = new TextView(activity);
-        progress.setText(cur + " / " + need + " EXP");
+        progress.setText(maxed ? (exp + " EXP · 已满级") : (exp + " / " + next + " EXP"));
         progress.setTextColor(0xFFF5F7FF);
         progress.setTextSize(13);
         progress.setPadding(0, dp(6), 0, dp(2));
         root.addView(progress);
 
         // 进度条
+        // 轨道用专用 drawable：不能用 bg_input，那个 shape 自带 top/bottom=8dp 的
+        // padding，会把 8dp 高的容器内容区挤成 0，填充条画不出来（进度条全空的根因）
         FrameLayout barBg = new FrameLayout(activity);
-        barBg.setBackgroundResource(R.drawable.bg_input);
+        barBg.setBackgroundResource(R.drawable.bg_exp_bar_track);
         LinearLayout.LayoutParams bgLp = new LinearLayout.LayoutParams(-1, dp(8));
         bgLp.setMargins(0, dp(4), 0, dp(8));
         barBg.setLayoutParams(bgLp);
 
+        // 填充条：代码里造圆角 shape，圆角要比轨道略小一点才不会溢出边缘
         View barFill = new View(activity);
-        barFill.setBackgroundColor(levelColor(level));
-        float ratio = need > 0 ? Math.min(1f, cur / (float) need) : 0f;
-        barBg.addView(barFill, new FrameLayout.LayoutParams(0, -1));
+        android.graphics.drawable.GradientDrawable fillBg = new android.graphics.drawable.GradientDrawable();
+        fillBg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        fillBg.setCornerRadius(dp(3));
+        fillBg.setColor(levelColor(level));
+        barFill.setBackground(fillBg);
+
+        float ratio = maxed ? 1f
+                     : (next > 0 ? Math.min(1f, exp / (float) next) : 0f);
+        // 高度留 1dp 边距避免压住轨道描边
+        FrameLayout.LayoutParams fillLp = new FrameLayout.LayoutParams(0, -1);
+        fillLp.setMargins(dp(1), dp(1), dp(1), dp(1));
+        barBg.addView(barFill, fillLp);
         root.addView(barBg);
-        // 宽度要等父容器测量完才能算
-        barBg.post(() -> {
+        // 宽度要等父容器测量完才能算。
+        // 注意：不能只 post 一次就完事——弹窗首次布局时 getWidth() 可能还是 0，
+        // 这里用 OnLayoutChangeListener 在宽度真正确定后再算一次。
+        final float ratioFinal = ratio;
+        // 用一个共用的计算逻辑，避免两处重复
+        final Runnable applyFill = () -> {
+            int avail = barBg.getWidth() - dp(2);   // 减掉左右各 1dp margin
+            if (avail <= 0) return;
             FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) barFill.getLayoutParams();
-            fl.width = Math.max(dp(2), (int) (barBg.getWidth() * ratio));
-            barFill.setLayoutParams(fl);
-        });
+            int want = ratioFinal <= 0f ? 0 : Math.max(dp(2), (int) (avail * ratioFinal));
+            if (fl.width != want) {
+                fl.width = want;
+                barFill.setLayoutParams(fl);
+            }
+        };
+        barBg.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, orr, ob) -> applyFill.run());
+        // 首帧也算一次（宽度已知时立即生效，未知时靠上面的监听兜底）
+        barBg.post(applyFill);
 
         TextView remainView = new TextView(activity);
-        remainView.setText("距 Lv." + (level + 1) + " 还需 " + remain + " EXP  ·  总经验 " + exp);
+        remainView.setText(maxed ? "🏆 已达满级"
+                                 : ("距 Lv." + (level + 1) + " 还需 " + remain + " EXP"));
         remainView.setTextColor(0xFF9AA4BF);
         remainView.setTextSize(11);
         root.addView(remainView);

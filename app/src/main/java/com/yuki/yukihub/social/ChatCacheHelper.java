@@ -137,13 +137,10 @@ public class ChatCacheHelper {
     public void pruneFriendMessages(String friendId) {
         if (friendId == null || friendId.isEmpty()) return;
         SQLiteDatabase db = helper.getWritableDatabase();
-        try {
-            db.execSQL(
-                    "DELETE FROM friend_messages WHERE friend_id=? AND id NOT IN " +
-                    "(SELECT id FROM friend_messages WHERE friend_id=? ORDER BY id DESC LIMIT ?)",
-                    new Object[]{friendId, friendId, MAX_CACHE_PER_PEER});
-        } finally {
-        }
+        db.execSQL(
+                "DELETE FROM friend_messages WHERE friend_id=? AND id NOT IN " +
+                "(SELECT id FROM friend_messages WHERE friend_id=? ORDER BY id DESC LIMIT ?)",
+                new Object[]{friendId, friendId, MAX_CACHE_PER_PEER});
     }
 
     private ChatMessage readFriendMessage(Cursor c) {
@@ -266,35 +263,26 @@ public class ChatCacheHelper {
     /** 裁剪：只保留每个群最新的 MAX_CACHE_PER_PEER 条 */
     public void pruneGroupMessages(int groupId) {
         SQLiteDatabase db = helper.getWritableDatabase();
-        try {
-            db.execSQL(
-                    "DELETE FROM group_messages_cache WHERE group_id=? AND id NOT IN " +
-                    "(SELECT id FROM group_messages_cache WHERE group_id=? ORDER BY id DESC LIMIT ?)",
-                    new Object[]{groupId, groupId, MAX_CACHE_PER_PEER});
-        } finally {
-        }
+        db.execSQL(
+                "DELETE FROM group_messages_cache WHERE group_id=? AND id NOT IN " +
+                "(SELECT id FROM group_messages_cache WHERE group_id=? ORDER BY id DESC LIMIT ?)",
+                new Object[]{groupId, groupId, MAX_CACHE_PER_PEER});
     }
 
     /** 群消息撤回：将本地缓存更新为撤回状态（用于管理员撤回后即时同步） */
     public void markGroupMessageRecalled(int groupId, int messageId) {
         if (messageId <= 0) return;
         SQLiteDatabase db = helper.getWritableDatabase();
-        try {
-            db.execSQL("UPDATE group_messages_cache SET recalled=1, content='' WHERE group_id=? AND id=?",
-                    new Object[]{groupId, messageId});
-        } finally {
-        }
+        db.execSQL("UPDATE group_messages_cache SET recalled=1, content='' WHERE group_id=? AND id=?",
+                new Object[]{groupId, messageId});
     }
 
     /** 群消息删除：从本地缓存移除（用于管理员删除后即时同步） */
     public void deleteGroupMessage(int groupId, int messageId) {
         if (messageId <= 0) return;
         SQLiteDatabase db = helper.getWritableDatabase();
-        try {
-            db.execSQL("DELETE FROM group_messages_cache WHERE group_id=? AND id=?",
-                    new Object[]{groupId, messageId});
-        } finally {
-        }
+        db.execSQL("DELETE FROM group_messages_cache WHERE group_id=? AND id=?",
+                new Object[]{groupId, messageId});
     }
 
     private GroupMessage readGroupMessage(Cursor c) {

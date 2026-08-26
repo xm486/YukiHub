@@ -191,7 +191,7 @@ private String developerFilter = "";
     // 多选删除栏
     private LinearLayout multiSelectBar;
     private TextView multiSelectCount;
-    private TextView tvEmpty, tvStats, tvProfileName, tvProfileInitial;
+    private TextView tvEmpty, tvStatsGames, tvStatsTime, tvProfileName, tvProfileInitial;
 private ImageView ivProfileAvatar;
 private View profileStatusDot;
 private LinearLayout detailPanel, detailMetaPanel;
@@ -1747,7 +1747,8 @@ if (dir == null || !dir.isDirectory()) return null;
     private void setupUi() {
         RecyclerView recycler = findViewById(R.id.recyclerGames);
         tvEmpty = findViewById(R.id.tvEmpty);
-tvStats = findViewById(R.id.tvStats);
+tvStatsGames = findViewById(R.id.tvStatsGames);
+tvStatsTime = findViewById(R.id.tvStatsTime);
 tvProfileName = findViewById(R.id.tvProfileName);
 tvProfileInitial = findViewById(R.id.tvProfileInitial);
 profileStatusDot = findViewById(R.id.profileStatusDot);
@@ -4176,7 +4177,8 @@ private String launchTypeLabel(String launchType) {
         if (tvProfileName != null) tvProfileName.setText(name);
         if (tvProfileInitial != null) tvProfileInitial.setText(initials(name));
         updateProfileStatusDot();
-        if (tvStats != null) tvStats.setText(allGames.size() + " Games\n" + TimeFormatUtil.playTime(total) + " Played");
+        if (tvStatsGames != null) tvStatsGames.setText(String.valueOf(allGames.size()));
+        if (tvStatsTime != null) tvStatsTime.setText(TimeFormatUtil.playTime(total));
         if (tvGreeting != null) {
             int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
             String period = hour < 5 ? "夜深了" : hour < 11 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
@@ -4487,7 +4489,8 @@ scanMissingCoversIfNeeded();
         sortGames(shown);
         adapter.submit(shown);
         tvEmpty.setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
-        tvStats.setText(allGames.size() + " Games\n" + TimeFormatUtil.playTime(total));
+        tvStatsGames.setText(String.valueOf(allGames.size()));
+        tvStatsTime.setText(TimeFormatUtil.playTime(total));
         updateProfilePanel();
         if (shown.isEmpty()) {
             updateSideDetail(null);
