@@ -1962,6 +1962,8 @@ public class FriendsChatDialog {
         local.senderAvatar = getMyAvatar();
         local.senderUid = getMyUid();
         local.senderIsAdmin = chatGroup != null && chatGroup.isAdmin();
+        // 补 senderId：等级徽章按它记 tag，服务端返回等级后才能原地找回来（否则自己气泡永远没徽章）
+        local.senderId = getMyUserId();
         local.createdAt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
         final View bubbleView = buildGroupMessageBubble(local);
         groupMessageList.addView(bubbleView);
@@ -3365,6 +3367,12 @@ public class FriendsChatDialog {
         return p.getString(KEY_AUTH_AVATAR, "");
     }
 
+    /** 获取当前登录用户的内部 ID（group_messages.sender_id 同源，来自 users.id） */
+    private String getMyUserId() {
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return p.getString("auth_user_id", "");
+    }
+
     /** 获取当前登录用户的 UID */
     private int getMyUid() {
         SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -3829,6 +3837,8 @@ public class FriendsChatDialog {
         local.senderAvatar = getMyAvatar();
         local.senderUid = getMyUid();
         local.senderIsAdmin = chatGroup != null && chatGroup.isAdmin();
+        // 补 senderId：等级徽章按它记 tag，服务端返回等级后才能原地找回来（否则自己气泡永远没徽章）
+        local.senderId = getMyUserId();
         local.createdAt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
         final View bubbleView = buildGroupMessageBubble(local);
         groupMessageList.addView(bubbleView);

@@ -2022,10 +2022,11 @@ private void showProfileDialog() {
     LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22));
     badgeLp.setMargins(0, dp(5), 0, 0);
     info.addView(accountBadge, badgeLp);
-    // 等级 + 经验（仅登录用户，异步拉取服务器数据）
+    // 等级 + 经验（仅登录用户，异步拉取服务器数据）。
+    // 展示口径为「B站式继承条」：总经验 / 升到下一级的累计阈值（与网页端一致）
     if (isLoggedIn()) {
         final TextView levelView = new TextView(this);
-        levelView.setText("Lv.1 · 0/100 EXP");
+        levelView.setText("Lv.1 · 0 EXP");
         levelView.setTextSize(11);
         levelView.setTextColor(getColorCompat(R.color.yh_text_muted));
         levelView.setPadding(0, dp(4), 0, 0);
@@ -2035,11 +2036,14 @@ private void showProfileDialog() {
                 com.yuki.yukihub.social.SocialApiClient client = new com.yuki.yukihub.social.SocialApiClient(MainActivity.this);
                 org.json.JSONObject lv = client.getMyLevel();
                 final int level = lv.optInt("level", 1);
-                final int levelExp = lv.optInt("levelExp", 0);
-                final int expToNext = lv.optInt("expToNext", 100);
+                final int totalExp = lv.optInt("exp", 0);
+                final int nextTotal = lv.optInt("nextLevelTotalExp", totalExp + 100);
+                final boolean maxed = lv.optBoolean("isMaxLevel", false) || level >= 30;
                 final boolean checked = lv.optBoolean("todayCheckedIn", false);
                 runOnUiThread(() -> {
-                    levelView.setText("Lv." + level + " · " + levelExp + "/" + expToNext + " EXP" + (checked ? " · 已签到" : ""));
+                    levelView.setText(maxed
+                            ? ("Lv." + level + " · " + totalExp + " EXP · 已满级")
+                            : ("Lv." + level + " · " + totalExp + "/" + nextTotal + " EXP") + (checked ? " · 已签到" : ""));
                     levelView.setTextColor(levelColorForLevel(level));
                 });
             } catch (Throwable ignored) {}

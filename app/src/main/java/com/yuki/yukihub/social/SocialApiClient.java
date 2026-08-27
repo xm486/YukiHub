@@ -476,7 +476,7 @@ public class SocialApiClient {
      * @param sessionUuid 会话唯一ID（防重复上报）
      * @param gameKey 游戏权威 key（可空）
      * @param title 游戏标题
-     * @param startTime 会话开始时间戳(ms)
+     * @param startTime 会话开始时间戳(ms)——服务端 2026-08 起自动识别毫秒并换算为秒
      * @param endTime 会话结束时间戳(ms)
      */
     public JSONObject reportPlayTime(String sessionUuid, String gameKey, String title, long startTime, long endTime) throws Exception {
