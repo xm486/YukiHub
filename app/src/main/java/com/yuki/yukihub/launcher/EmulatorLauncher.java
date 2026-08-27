@@ -855,10 +855,15 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         boolean autoSdCardMirror = !originMode && !globalScopedSaveDir && isExternalSdCardKrPath(rootPath);
         boolean scopedSaveDir = globalScopedSaveDir || autoSdCardMirror;
         String saveName = safeSaveName(rootPath);
+        // 镜像会覆盖 rootPath，先留存源目录，供 NativeBridge 做镜像->源路径换算。
+        String mirrorSourceRoot = null;
+        String mirrorRootPath = null;
         if (!originMode && scopedSaveDir) {
             KrkrMirror mirror = prepareKrkrScopedMirror(context, rootPath, path, saveName);
             if (mirror != null) {
                 Log.i("EmulatorLauncher", "internal KRKR scoped mirror root=" + rootPath + " -> " + mirror.rootPath + " path=" + path + " -> " + mirror.launchPath + " globalScoped=" + globalScopedSaveDir + " autoSdMirror=" + autoSdCardMirror);
+                mirrorSourceRoot = rootPath;
+                mirrorRootPath = mirror.rootPath;
                 rootPath = mirror.rootPath;
                 path = mirror.launchPath;
             } else if (autoSdCardMirror) {
@@ -900,6 +905,9 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         i.putExtra("terminateKrProcessOnDestroy", scopedSaveDir || safFileFallback || autoSdCardMirror);
         i.putExtra("scopedSaveName", saveName);
         i.putExtra("safFileFallback", safFileFallback);
+        // 镜像模式下把源目录一并下发，KRKR 侧据此建立 镜像->源 路径映射。
+        if (mirrorRootPath != null) i.putExtra("krMirrorRoot", mirrorRootPath);
+        if (mirrorSourceRoot != null) i.putExtra("krMirrorSourceRoot", mirrorSourceRoot);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
         return i;
     }
@@ -913,6 +921,19 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         }
     }
 
+    /**
+     * 准备 KRKR 镜像目录。
+     *
+     * <p>资源用 symlink，链接名转小写。Kirikiroid2 内核会把整条路径转小写再做
+     * stat/opendir，而 Linux 文件系统大小写敏感，链接名保持原始大小写会导致
+     * 带大写字母的条目探测不到。
+     *
+     * <p>注意：不能改用 0 字节占位文件 + open 重定向。对照实验证实内核读 xp3
+     * 是 native 直读文件系统，不经过 NativeBridge.open hook，占位文件会被读成空内容。
+     *
+     * <p>独立存档行为不变：savedata 始终是 symlink 指向
+     * getExternalFilesDir()/save/&lt;name&gt;/，既不进影子树也不进索引。
+     */
     private static KrkrMirror prepareKrkrScopedMirror(Context context, String rootPath, String launchPath, String saveName) {
         if (context == null || rootPath == null || rootPath.trim().isEmpty()) return null;
         try {
@@ -922,12 +943,28 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
             File external = context.getExternalFilesDir(null);
             if (internal == null || external == null) return null;
             String name = (saveName == null || saveName.trim().isEmpty()) ? safeSaveName(rootPath) : saveName;
-            File mirrorRoot = new File(new File(internal, "krkr_mirror"), name);
+            // 存档目录沿用原始大小写的名字，保证老用户存档路径不变。
             File saveRoot = new File(new File(external, "save"), name);
+            // 镜像根目录名必须小写：引擎会把整条路径转小写，根目录带大写会直接 ENOENT。
+            File mirrorRoot = new File(new File(internal, "krkr_mirror"), name.toLowerCase(Locale.ROOT));
             if (!mirrorRoot.exists() && !mirrorRoot.mkdirs()) return null;
             if (!saveRoot.exists() && !saveRoot.mkdirs()) return null;
+
+            // 独立存档：始终用 symlink 指向外部可见的存档目录，位置与行为保持不变。
             File mirrorSave = new File(mirrorRoot, "savedata");
             if (!ensureSymlink(mirrorSave, saveRoot)) return null;
+
+            // 资源文件用 symlink：KRKR 内核读 xp3 是 native 直接读文件系统，
+            // 不经过 NativeBridge.open hook（已由对照实验证实：同一目录名下
+            // symlink 能读到 27352 个文件，0 字节占位文件则完全读不到，
+            // 两种情况 open hook 都是 0 次调用）。因此镜像里必须是能被内核
+            // 直接解析到真实内容的 symlink，不能是占位文件。
+            //
+            // 链接名转小写：内核会把整条路径转小写再做 stat/opendir，
+            // 链接名保持原始大小写会导致带大写字母的文件探测不到。
+            int linkCount = 0;
+            int collisionCount = 0;
+            java.util.Set<String> claimedNames = new java.util.HashSet<>();
             File[] children = sourceRoot.listFiles();
             if (children != null) {
                 for (File child : children) {
@@ -935,17 +972,48 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
                     String childName = child.getName();
                     if (childName == null || childName.isEmpty()) continue;
                     if ("savedata".equalsIgnoreCase(childName)) continue;
-                    File link = new File(mirrorRoot, childName);
-                    ensureSymlink(link, child);
+                    String lowerName = childName.toLowerCase(Locale.ROOT);
+                    if (!claimedNames.add(lowerName)) {
+                        // 小写化后撞名（如 Data.xp3 与 data.xp3 并存），保留先出现的。
+                        collisionCount++;
+                        Log.w("EmulatorLauncher", "mirror name collision, skip " + child.getAbsolutePath());
+                        continue;
+                    }
+                    File link = new File(mirrorRoot, lowerName);
+                    if (ensureSymlink(link, child)) linkCount++;
                 }
             }
-            String mappedLaunch = mapPathIntoMirror(rootPath, launchPath, mirrorRoot.getAbsolutePath());
-            Log.i("EmulatorLauncher", "KRKR scoped mirror ready source=" + rootPath + " mirror=" + mirrorRoot.getAbsolutePath() + " save=" + saveRoot.getAbsolutePath());
+            if (children != null && children.length > 0 && linkCount == 0) {
+                Log.w("EmulatorLauncher", "no mirror link created, abort root=" + rootPath);
+                return null;
+            }
+            String mappedLaunch = mapPathIntoMirrorLowercase(rootPath, launchPath, mirrorRoot.getAbsolutePath());
+            Log.i("EmulatorLauncher", "KRKR scoped mirror ready source=" + rootPath
+                    + " mirror=" + mirrorRoot.getAbsolutePath() + " save=" + saveRoot.getAbsolutePath()
+                    + " links=" + linkCount + " collisions=" + collisionCount);
             return new KrkrMirror(mirrorRoot.getAbsolutePath(), mappedLaunch);
         } catch (Throwable t) {
             Log.w("EmulatorLauncher", "prepare KRKR scoped mirror failed root=" + rootPath + " path=" + launchPath, t);
             return null;
         }
+    }
+
+    /**
+     * 把源目录下的启动路径映射进影子镜像，相对部分转小写。
+     * 影子树里的文件名全是小写，启动路径必须同步小写才能命中。
+     */
+    private static String mapPathIntoMirrorLowercase(String sourceRoot, String launchPath, String mirrorRoot) {
+        if (launchPath == null || launchPath.trim().isEmpty()) return mirrorRoot;
+        String src = stripFileScheme(sourceRoot);
+        String path = stripFileScheme(launchPath);
+        if (src == null || path == null) return mirrorRoot;
+        while (src.endsWith("/") && src.length() > 1) src = src.substring(0, src.length() - 1);
+        if (path.equals(src)) return mirrorRoot;
+        if (path.startsWith(src + "/")) {
+            String relative = path.substring(src.length());
+            return mirrorRoot + relative.toLowerCase(Locale.ROOT);
+        }
+        return path;
     }
 
     private static boolean ensureSymlink(File link, File target) {

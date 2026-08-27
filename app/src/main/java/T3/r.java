@@ -85,6 +85,15 @@ public abstract class r extends KR2Activity {
         }
         if (prefix != null) {
             try {
+                // 镜像模式：先装配 镜像->源 路径映射，再开 hook。
+                // 顺序很重要，hook 一旦生效就可能立刻有 open 调用进来。
+                String mirrorRoot = intent.getStringExtra("krMirrorRoot");
+                String mirrorSourceRoot = intent.getStringExtra("krMirrorSourceRoot");
+                if (mirrorRoot != null && mirrorSourceRoot != null) {
+                    NativeBridge.configureMirror(mirrorRoot, mirrorSourceRoot);
+                } else {
+                    NativeBridge.configureMirror(null, null);
+                }
                 NativeBridge.interceptor(prefix);
                 NativeBridge.relocate();
                 Log.i(TAG, "native interceptor enabled prefix=" + prefix);
@@ -176,6 +185,14 @@ public abstract class r extends KR2Activity {
     private static String storagePrefix(String path) {
         String p = normalizeKrPath(path);
         String lower = p.toLowerCase();
+        // 镜像模式：path 指向私有目录下的 krkr_mirror/<game>/...，此时必须返回镜像根，
+        // 否则前缀会退化成完整文件路径，导致 hook 覆盖范围错乱、散装资源读取被判定为 -1。
+        int mirrorIdx = lower.indexOf("/krkr_mirror/");
+        if (mirrorIdx >= 0) {
+            int nameStart = mirrorIdx + "/krkr_mirror/".length();
+            int nameEnd = p.indexOf('/', nameStart);
+            return nameEnd < 0 ? p : p.substring(0, nameEnd);
+        }
         if (lower.startsWith("/storage/emulated/0/")) return "/storage/emulated/0";
         if (lower.startsWith("/sdcard/")) return "/sdcard";
         if (lower.startsWith("/storage/")) {

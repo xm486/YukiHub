@@ -22,7 +22,47 @@ public final class NativeBridge {
     private static final List<RandomAccessFile> OPEN_FILES = new ArrayList<>();
     private static final List<ParcelFileDescriptor> OPEN_PFDS = new ArrayList<>();
 
+    /** 镜像根 → 源目录根。镜像模式下用于把镜像路径换算回真实源路径。 */
+    private static volatile String MIRROR_ROOT;
+    private static volatile String MIRROR_SOURCE_ROOT;
+
     private NativeBridge() { }
+
+    /**
+     * 配置镜像路径映射。镜像模式启动前调用一次。
+     * 传 null 清除映射（非镜像模式）。
+     */
+    public static void configureMirror(String mirrorRoot, String sourceRoot) {
+        MIRROR_ROOT = trimTrailingSlash(normalizeFilePath(mirrorRoot));
+        MIRROR_SOURCE_ROOT = trimTrailingSlash(normalizeFilePath(sourceRoot));
+        Log.i("NativeBridge", "mirror map configured mirror=" + MIRROR_ROOT + " source=" + MIRROR_SOURCE_ROOT);
+    }
+
+    private static String trimTrailingSlash(String p) {
+        if (p == null) return null;
+        while (p.endsWith("/") && p.length() > 1) p = p.substring(0, p.length() - 1);
+        return p.isEmpty() ? null : p;
+    }
+
+    /**
+     * 把镜像路径换算成源目录下的真实路径。
+     * savedata 由 redirectKrScopedSavePath 单独处理，不走这里。
+     * 返回 null 表示不适用（非镜像路径或未配置映射）。
+     */
+    private static String mapMirrorToSource(String path) {
+        String mirror = MIRROR_ROOT;
+        String source = MIRROR_SOURCE_ROOT;
+        if (path == null || mirror == null || source == null) return null;
+        if (path.length() == mirror.length() && path.regionMatches(true, 0, mirror, 0, mirror.length())) {
+            return source;
+        }
+        if (path.length() > mirror.length()
+                && path.regionMatches(true, 0, mirror, 0, mirror.length())
+                && path.charAt(mirror.length()) == '/') {
+            return source + path.substring(mirror.length());
+        }
+        return null;
+    }
 
     public static native boolean initialize(String so);
     public static native boolean launch(String so, String path, boolean useMaps);
@@ -49,6 +89,24 @@ public final class NativeBridge {
             Log.i("NativeBridge", "open " + fd + " " + javaMode + " " + path);
             return fd;
         } catch (Throwable directError) {
+            // 镜像模式：直开失败时换算回源路径重试。symlink 只覆盖顶层子项，
+            // 深层路径或 symlink 失效时靠这条兜底，避免直接 return -1 导致游戏读不到资源。
+            if (redirected == null) {
+                String sourcePath = mapMirrorToSource(normalized);
+                if (sourcePath != null) {
+                    try {
+                        RandomAccessFile raf = new RandomAccessFile(new File(sourcePath), javaMode);
+                        OPEN_FILES.add(raf);
+                        int fd = getFd(raf);
+                        Log.i("NativeBridge", "open via mirror-source " + fd + " " + javaMode + " " + normalized + " -> " + sourcePath);
+                        return fd;
+                    } catch (Throwable mirrorError) {
+                        Log.w("NativeBridge", "mirror-source open failed " + sourcePath, mirrorError);
+                        int safFd = openViaSaf(sourcePath, mode, mirrorError);
+                        if (safFd >= 0) return safFd;
+                    }
+                }
+            }
             if (isSafFallbackEnabled()) {
                 int safFd = openViaSaf(normalized, mode, directError);
                 if (safFd >= 0) return safFd;
