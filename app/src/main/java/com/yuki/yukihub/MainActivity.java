@@ -1995,7 +1995,11 @@ private void showProfileDialog() {
     nameView.setTypeface(null, android.graphics.Typeface.BOLD);
     nameView.setSingleLine(true);
     nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    nameRow.addView(nameView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+    // 昵称按内容宽度排布，铅笔才能紧跟其后（用 weight=1 会把铅笔推到行尾）。
+    // 超长昵称用 maxWidth 兜底，省略号截断而不是把铅笔挤出屏幕。
+    nameView.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.45f));
+    nameRow.addView(nameView, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
     if (isLoggedIn()) {
         ImageView editNameBtn = new ImageView(this);
         editNameBtn.setImageResource(R.drawable.ic_edit_pencil);
@@ -6628,7 +6632,12 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
 
 // ==================== .nomedia 相册防污染 ====================
 
-    /** 已询问过 .nomedia 的扫描根 uri 集合（按 uri 存，删除中间项不会错位）。 */
+    /**
+     * 已询问过 .nomedia 的扫描根 uri 集合（按 uri 存，删除中间项不会错位）。
+     *
+     * <p>读取时顺带清理已经不在扫描根列表里的陈旧条目，
+     * 避免用户反复更换目录后这个集合无限增长。
+     */
     private Set<String> getNoMediaAskedUris() {
         Set<String> asked = new HashSet<>();
         if (prefs == null) return asked;
@@ -6642,28 +6651,40 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
         return asked;
     }
 
-    private void markNoMediaAsked(String rootUri) {
-        if (prefs == null || rootUri == null || rootUri.trim().isEmpty()) return;
-        Set<String> asked = getNoMediaAskedUris();
-        asked.add(rootUri.trim());
+    /** 丢弃已不在扫描根列表中的「已问过」记录，保持 prefs 不无限增长。 */
+    private void pruneNoMediaAsked() {
+        if (prefs == null) return;
+        try {
+            Set<String> asked = getNoMediaAskedUris();
+            if (asked.isEmpty()) return;
+            Set<String> valid = new HashSet<>();
+            for (String r : getScanRootUris()) {
+                if (r != null && !r.trim().isEmpty()) valid.add(r.trim());
+            }
+            if (asked.retainAll(valid)) {
+                saveNoMediaAsked(asked);
+            }
+        } catch (Throwable t) {
+            Log.w("YukiHub", "prune nomedia asked failed", t);
+        }
+    }
+
+    private void saveNoMediaAsked(Set<String> asked) {
+        if (prefs == null) return;
         StringBuilder sb = new StringBuilder();
         for (String s : asked) {
+            if (s == null || s.trim().isEmpty()) continue;
             if (sb.length() > 0) sb.append('\n');
-            sb.append(s);
+            sb.append(s.trim());
         }
         prefs.edit().putString(KEY_NOMEDIA_ASKED, sb.toString()).apply();
     }
 
-    private void clearNoMediaAsked(String rootUri) {
+    private void markNoMediaAsked(String rootUri) {
         if (prefs == null || rootUri == null || rootUri.trim().isEmpty()) return;
         Set<String> asked = getNoMediaAskedUris();
-        if (!asked.remove(rootUri.trim())) return;
-        StringBuilder sb = new StringBuilder();
-        for (String s : asked) {
-            if (sb.length() > 0) sb.append('\n');
-            sb.append(s);
-        }
-        prefs.edit().putString(KEY_NOMEDIA_ASKED, sb.toString()).apply();
+        if (!asked.add(rootUri.trim())) return; // 已经记过，不必重写 prefs
+        saveNoMediaAsked(asked);
     }
 
     /**
@@ -6746,6 +6767,7 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
         AppExecutors.runOnIo(() -> {
             final NoMediaHelper.Result r = NoMediaHelper.create(MainActivity.this, rootUri);
             runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 if (r.success) {
                     markNoMediaAsked(rootUri);
                     Toast.makeText(this,
@@ -6801,14 +6823,17 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
             }
 
             int created = 0, already = 0, skipped = 0;
+            List<String> rescanPaths = new ArrayList<>();
             for (ScanResult sr : results) {
                 if (sr == null || sr.uri == null || sr.uri.trim().isEmpty()) continue;
                 try {
                     NoMediaHelper.Safety s = NoMediaHelper.check(sr.uri);
                     if (!s.allowed) { skipped++; continue; }
-                    NoMediaHelper.Result r = NoMediaHelper.create(MainActivity.this, sr.uri);
+                    // rescan=false：批量期间不逐个触发媒体扫描，结束后统一扫一次
+                    NoMediaHelper.Result r = NoMediaHelper.create(MainActivity.this, sr.uri, false);
                     if (r.success) {
                         if (r.alreadyExists) already++; else created++;
+                        if (r.realPath != null && !r.realPath.isEmpty()) rescanPaths.add(r.realPath);
                     } else {
                         skipped++;
                     }
@@ -6817,11 +6842,18 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
                     skipped++;
                 }
             }
+            if (!rescanPaths.isEmpty()) {
+                NoMediaHelper.requestMediaRescan(MainActivity.this,
+                        rescanPaths.toArray(new String[0]));
+            }
 
             final int fCreated = created, fAlready = already, fSkipped = skipped;
             final int total = results.size();
             runOnUiThread(() -> {
-                markNoMediaAsked(rootUri);
+                if (isFinishing() || isDestroyed()) return;
+                // 只有真的扫到了目录才记「已问过」；扫描失败(total=0)不记，
+                // 否则用户以后再也不会被提示（多为权限或目录变动导致的临时失败）。
+                if (total > 0) markNoMediaAsked(rootUri);
                 String msg = total == 0
                         ? "没有扫描到游戏目录，未做任何改动"
                         : "新建 " + fCreated + " 个，已存在 " + fAlready + " 个"
@@ -6873,11 +6905,13 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
         AppExecutors.runOnIo(() -> {
             final NoMediaHelper.Result r = NoMediaHelper.remove(MainActivity.this, rootUri);
             runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 Toast.makeText(this,
                         r.success ? "已移除 .nomedia，相册将重新收录该目录图片" : r.error,
                         Toast.LENGTH_LONG).show();
-                // 移除后允许再次询问
-                clearNoMediaAsked(rootUri);
+                // 不清「已问过」记录：用户是主动移除的，
+                // 清掉会导致下次扫描又弹窗询问，属于骚扰。
+                // 需要重新创建时可从设置里的「相册」入口手动操作。
                 refreshActiveScanRootListUi();
             });
         });
@@ -6903,6 +6937,8 @@ List<String> roots = getScanRootUris();
 if (index < 0 || index >= roots.size()) return;
 roots.remove(index);
 saveScanRootUris(roots);
+// 目录已移除，顺带丢掉它的 .nomedia 询问记录，避免 prefs 无限增长
+pruneNoMediaAsked();
 }
 
 private String scanRootsSummary() {
@@ -7003,6 +7039,8 @@ private LinearLayout scanRootCard(String uri, int index, Runnable refresh) {
             }
             final boolean fHas = has;
             runOnUiThread(() -> {
+                // 卡片可能已被刷新替换掉，旧 View 脱离视图树后不必再更新
+                if (isFinishing() || isDestroyed() || noMedia.getParent() == null) return;
                 noMedia.setText(fHas ? "相册✓" : "相册✕");
                 noMedia.setTextColor(fHas ? primaryTextColor() : getColorCompat(R.color.yh_text_muted));
             });

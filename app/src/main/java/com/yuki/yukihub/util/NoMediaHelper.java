@@ -126,24 +126,36 @@ public final class NoMediaHelper {
         }
 
         String p = normalizePath(realPath);
+        if (p == null) {
+            // 归一化失败（含越界的 .. 等）→ fail-closed
+            return new Safety(false, Reject.UNRESOLVED, null, realPath.trim());
+        }
 
         String volumeRoot;
         String rel;
-        if (p.equals(INTERNAL_ROOT)) {
-            volumeRoot = p;
-            rel = "";
-        } else if (p.startsWith(INTERNAL_ROOT + "/")) {
-            volumeRoot = INTERNAL_ROOT;
-            rel = p.substring(INTERNAL_ROOT.length() + 1);
+        // /storage/emulated/<用户ID>[/...]：主存储，用户 ID 不只有 0
+        // （工作资料 / 多用户是 10、11…，写死 0 会把这些当成普通子目录放行）
+        int emu = matchEmulatedUserRoot(p);
+        if (emu > 0) {
+            volumeRoot = p.substring(0, emu);
+            rel = emu >= p.length() ? "" : p.substring(emu + 1);
         } else if (p.startsWith("/storage/")) {
             // /storage/XXXX-XXXX[/...] → 外置 SD 卡
             String tail = p.substring("/storage/".length());
             int slash = tail.indexOf('/');
+            String vol = slash < 0 ? tail : tail.substring(0, slash);
+            // emulated / self 是主存储的中间层，不是真实卷名。
+            // 走到这里说明前面的 matchEmulatedUserRoot 和别名归一化都没匹配上，
+            // 即形如 /storage/emulated/abc、/storage/self/xxx 这类无法确定归属的路径 → fail-closed。
+            // （不拦的话 vol="abc"、rel="emulated" 会判定错位而误放行）
+            if ("emulated".equalsIgnoreCase(vol) || "self".equalsIgnoreCase(vol) || vol.isEmpty()) {
+                return new Safety(false, Reject.UNRESOLVED, null, p);
+            }
             if (slash < 0) {
                 volumeRoot = p;
                 rel = "";
             } else {
-                volumeRoot = "/storage/" + tail.substring(0, slash);
+                volumeRoot = "/storage/" + vol;
                 rel = tail.substring(slash + 1);
             }
         } else {
@@ -172,15 +184,74 @@ public final class NoMediaHelper {
         return new Safety(true, Reject.NONE, p, p);
     }
 
-    /** 路径归一化：反斜杠转正斜杠、压缩重复斜杠、去尾斜杠、/sdcard 归一化到 /storage/emulated/0。 */
+    /**
+     * 若 p 是 {@code /storage/emulated/<数字>} 或其子路径，返回卷根部分的结束下标；否则返回 -1。
+     *
+     * <p>必须支持任意用户 ID：工作资料和多用户环境下主存储是
+     * {@code /storage/emulated/10} 这类路径，只认 0 会把它们的<b>根目录</b>
+     * 误判成普通子目录而放行，后果和在存储根建 .nomedia 一样严重。
+     */
+    private static int matchEmulatedUserRoot(String p) {
+        final String prefix = "/storage/emulated/";
+        if (p == null || !p.startsWith(prefix)) return -1;
+        int i = prefix.length();
+        int digitStart = i;
+        while (i < p.length() && p.charAt(i) >= '0' && p.charAt(i) <= '9') i++;
+        if (i == digitStart) return -1;                  // 没有数字段
+        if (i < p.length() && p.charAt(i) != '/') return -1; // 数字后面必须是 / 或结尾
+        return i;
+    }
+
+    /**
+     * 路径归一化：反斜杠转正斜杠、压缩重复斜杠、去尾斜杠、解析 {@code .} 与 {@code ..}、
+     * 并把主存储的各种别名统一到 {@link #INTERNAL_ROOT}。
+     *
+     * <p>返回 null 表示路径非法（{@code ..} 越过了根），调用方必须按拒绝处理。
+     *
+     * <p>{@code ..} 必须真正解析：内置文件选择器允许用户手输路径，
+     * {@code /storage/emulated/0/Games/../..} 实际指向存储根，
+     * 不解析就会绕过所有安全判定。
+     */
     private static String normalizePath(String raw) {
+        if (raw == null) return null;
         String p = raw.trim().replace('\\', '/');
-        p = p.replaceAll("/+", "/");
-        while (p.length() > 1 && p.endsWith("/")) p = p.substring(0, p.length() - 1);
-        if (p.equals("/sdcard")) {
-            p = INTERNAL_ROOT;
-        } else if (p.startsWith("/sdcard/")) {
-            p = INTERNAL_ROOT + "/" + p.substring("/sdcard/".length());
+        if (p.isEmpty()) return null;
+        boolean absolute = p.startsWith("/");
+
+        // 逐段解析 . 与 ..
+        java.util.ArrayList<String> out = new java.util.ArrayList<>();
+        for (String seg : p.split("/")) {
+            if (seg.isEmpty() || ".".equals(seg)) continue;
+            if ("..".equals(seg)) {
+                if (out.isEmpty()) {
+                    // 绝对路径越过根 → 非法；相对路径本就不该出现在这里
+                    return null;
+                }
+                out.remove(out.size() - 1);
+                continue;
+            }
+            out.add(seg);
+        }
+        StringBuilder sb = new StringBuilder();
+        if (absolute) sb.append('/');
+        for (int i = 0; i < out.size(); i++) {
+            if (i > 0) sb.append('/');
+            sb.append(out.get(i));
+        }
+        p = sb.length() == 0 ? "/" : sb.toString();
+        if (!absolute) return null; // 只接受绝对路径
+
+        // 主存储别名统一：/sdcard、/storage/self/primary、/storage/emulated/legacy
+        // 都指向内置存储根，不归一化会被当成「卷根下的普通子目录」放行。
+        if (p.equals("/sdcard")) return INTERNAL_ROOT;
+        if (p.startsWith("/sdcard/")) return INTERNAL_ROOT + "/" + p.substring("/sdcard/".length());
+        if (p.equals("/storage/self/primary")) return INTERNAL_ROOT;
+        if (p.startsWith("/storage/self/primary/")) {
+            return INTERNAL_ROOT + "/" + p.substring("/storage/self/primary/".length());
+        }
+        if (p.equals("/storage/emulated/legacy")) return INTERNAL_ROOT;
+        if (p.startsWith("/storage/emulated/legacy/")) {
+            return INTERNAL_ROOT + "/" + p.substring("/storage/emulated/legacy/".length());
         }
         return p;
     }
@@ -264,13 +335,15 @@ public final class NoMediaHelper {
      */
     public static boolean exists(Context ctx, String rootUri) {
         String realPath = resolveRealPath(rootUri);
-        if (realPath != null && !realPath.isEmpty()) {
+        String normalized = realPath == null ? null : normalizePath(realPath);
+        if (normalized != null && !normalized.isEmpty()) {
             try {
-                File f = new File(normalizePath(realPath), FILE_NAME);
+                File dir = new File(normalized);
+                File f = new File(dir, FILE_NAME);
                 if (f.exists()) return true;
-                // 父目录可读但文件不存在 → 结论可信，直接返回
-                File parent = f.getParentFile();
-                if (parent != null && parent.canRead()) return false;
+                // 目录可读却没有该文件 → 结论可信，不必再走 SAF 查询。
+                // 目录不可读/不存在时不能下结论，落到下面的 SAF 分支再试。
+                if (dir.isDirectory() && dir.canRead()) return false;
             } catch (Throwable t) {
                 Log.w(TAG, "File exists probe failed", t);
             }
@@ -346,12 +419,26 @@ public final class NoMediaHelper {
      * <p>成功后自动触发媒体库重扫，让已入库的图片条目被清理。
      */
     public static Result create(Context ctx, String rootUri) {
+        return create(ctx, rootUri, true);
+    }
+
+    /**
+     * 创建 .nomedia，可控制是否立即触发媒体重扫。
+     *
+     * @param rescan 批量创建时传 false，由调用方在结束后用
+     *               {@link #requestMediaRescan(Context, String[])} 一次性重扫，
+     *               避免逐个触发被系统限流。
+     */
+    public static Result create(Context ctx, String rootUri, boolean rescan) {
         Safety safety = check(rootUri);
         if (!safety.allowed) {
             Log.w(TAG, "create blocked: " + safety.reject + " uri=" + rootUri);
             return Result.fail(safety.message());
         }
+        boolean isSaf = rootUri != null && rootUri.trim().startsWith("content://");
         if (exists(ctx, rootUri)) {
+            // 已存在也补一次重扫：用户可能是手动建的文件，相册里的旧条目还没清掉。
+            if (rescan) requestMediaRescan(ctx, safety.realPath);
             return Result.already(safety.realPath);
         }
 
@@ -359,26 +446,32 @@ public final class NoMediaHelper {
         if (canWriteDirectly(safety.realPath)) {
             try {
                 File target = new File(safety.realPath, FILE_NAME);
-                if (target.exists()) return Result.already(safety.realPath);
+                if (target.exists()) {
+                    if (rescan) requestMediaRescan(ctx, safety.realPath);
+                    return Result.already(safety.realPath);
+                }
                 if (target.createNewFile()) {
                     Log.i(TAG, "created via File: " + target.getAbsolutePath());
-                    requestMediaRescan(ctx, safety.realPath);
+                    if (rescan) requestMediaRescan(ctx, safety.realPath);
                     return Result.ok(safety.realPath);
                 }
                 Log.w(TAG, "File.createNewFile returned false: " + target.getAbsolutePath());
+                // 非 SAF 目录没有后备方案，给准确原因而不是笼统的「没有权限」
+                if (!isSaf) return Result.fail("创建失败，目录可能只读或空间不足");
             } catch (Throwable t) {
-                Log.w(TAG, "File create failed, fallback to SAF", t);
+                Log.w(TAG, "File create failed" + (isSaf ? ", fallback to SAF" : ""), t);
+                if (!isSaf) return Result.fail("创建失败：" + shortError(t));
             }
         }
 
         // 路径 2：SAF createDocument + 回读校验。
-        if (ctx == null || rootUri == null || !rootUri.trim().startsWith("content://")) {
+        if (ctx == null || !isSaf) {
             return Result.fail("没有该目录的写入权限，请重新绑定扫描目录并授予写入权限");
         }
-        return createViaSaf(ctx, rootUri, safety.realPath);
+        return createViaSaf(ctx, rootUri, safety.realPath, rescan);
     }
 
-    private static Result createViaSaf(Context ctx, String rootUri, String realPath) {
+    private static Result createViaSaf(Context ctx, String rootUri, String realPath, boolean rescan) {
         Uri created = null;
         try {
             Uri tree = Uri.parse(rootUri);
@@ -417,7 +510,7 @@ public final class NoMediaHelper {
                 }
             }
 
-            requestMediaRescan(ctx, realPath);
+            if (rescan) requestMediaRescan(ctx, realPath);
             return Result.ok(realPath);
         } catch (SecurityException se) {
             Log.w(TAG, "SAF create denied", se);
@@ -432,6 +525,7 @@ public final class NoMediaHelper {
     public static Result remove(Context ctx, String rootUri) {
         String realPath = resolveRealPath(rootUri);
         String normalized = realPath == null ? null : normalizePath(realPath);
+        boolean isSaf = rootUri != null && rootUri.trim().startsWith("content://");
 
         if (normalized != null && canWriteDirectly(normalized)) {
             try {
@@ -445,12 +539,16 @@ public final class NoMediaHelper {
                     requestMediaRescan(ctx, normalized);
                     return Result.ok(normalized);
                 }
+                Log.w(TAG, "File.delete returned false: " + target.getAbsolutePath());
+                // 非 SAF 目录没有后备方案，直接给准确原因（不要落到下面报「没有权限」）
+                if (!isSaf) return Result.fail("移除失败，文件可能被占用或只读");
             } catch (Throwable t) {
-                Log.w(TAG, "File delete failed, fallback to SAF", t);
+                Log.w(TAG, "File delete failed" + (isSaf ? ", fallback to SAF" : ""), t);
+                if (!isSaf) return Result.fail("移除失败：" + shortError(t));
             }
         }
 
-        if (ctx == null || rootUri == null || !rootUri.trim().startsWith("content://")) {
+        if (ctx == null || !isSaf) {
             return Result.fail("没有该目录的写入权限，无法移除");
         }
         try {
@@ -482,10 +580,16 @@ public final class NoMediaHelper {
      * UI 文案必须提示用户"可能需要等待或重启设备"，不要承诺立即生效。
      */
     public static void requestMediaRescan(Context ctx, String realPath) {
-        if (ctx == null || realPath == null || realPath.trim().isEmpty()) return;
+        if (realPath == null || realPath.trim().isEmpty()) return;
+        requestMediaRescan(ctx, new String[]{realPath});
+    }
+
+    /** 批量重扫：一次调用提交多个路径，避免逐个触发被系统限流。 */
+    public static void requestMediaRescan(Context ctx, String[] paths) {
+        if (ctx == null || paths == null || paths.length == 0) return;
         try {
             MediaScannerConnection.scanFile(ctx.getApplicationContext(),
-                    new String[]{realPath}, null,
+                    paths, null,
                     (path, uri) -> Log.i(TAG, "media rescan done path=" + path + " uri=" + uri));
         } catch (Throwable t) {
             Log.w(TAG, "media rescan request failed", t);
