@@ -152,6 +152,7 @@ import com.yuki.yukihub.ui.ThemeColorExtractor;
 import com.yuki.yukihub.ui.ScanResultAdapter;
 import com.yuki.yukihub.ui.colorpicker.ColorPickerDialog;
 import com.yuki.yukihub.util.AppExecutors;
+import com.yuki.yukihub.util.NoMediaHelper;
 import com.yuki.yukihub.util.DevLogger;
 import com.yuki.yukihub.util.TimeFormatUtil;
 import com.yuki.yukihub.util.UiScaleUtil;
@@ -163,6 +164,7 @@ import java.text.Collator;
 import java.util.Map;
 import java.util.Calendar;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.Future;
@@ -232,6 +234,8 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private static final String KEY_USE_BUILTIN_FILE_CHOOSER = "use_builtin_file_chooser"; // true=内置, false=原生SAF
     private static final String KEY_SCAN_ROOT_ENABLED = "scan_root_enabled"; // 保存每个目录的开关状态
     private static final int MAX_SCAN_ROOTS = 3;
+    // .nomedia 询问记录：按扫描根 uri 存（不按下标，避免删除中间项时错位）
+    private static final String KEY_NOMEDIA_ASKED = "nomedia_asked_uris";
     private static final String KEY_STARTUP_SCAN_DEPTH = "startup_scan_depth";
     private static final String KEY_AUTO_SCAN_ON_STARTUP = "auto_scan_on_startup";
     private static final String KEY_SCAN_MODE = "scan_mode"; // fast / legacy
@@ -661,6 +665,7 @@ pendingScanRootReplaceIndex = -2;
 if (changed) {
 refreshActiveScanRootListUi();
 Toast.makeText(MainActivity.this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
+maybePromptNoMedia(uri.toString());
 }
 } else {
 pendingScanRootReplaceIndex = -2;
@@ -6621,6 +6626,263 @@ SharedPreferences.Editor e = prefs.edit().putString(KEY_SCAN_ROOT_URIS, joined.t
         return active;
     }
 
+// ==================== .nomedia 相册防污染 ====================
+
+    /** 已询问过 .nomedia 的扫描根 uri 集合（按 uri 存，删除中间项不会错位）。 */
+    private Set<String> getNoMediaAskedUris() {
+        Set<String> asked = new HashSet<>();
+        if (prefs == null) return asked;
+        String joined = prefs.getString(KEY_NOMEDIA_ASKED, "");
+        if (joined != null && !joined.trim().isEmpty()) {
+            for (String part : joined.split("\\n")) {
+                String s = part == null ? "" : part.trim();
+                if (!s.isEmpty()) asked.add(s);
+            }
+        }
+        return asked;
+    }
+
+    private void markNoMediaAsked(String rootUri) {
+        if (prefs == null || rootUri == null || rootUri.trim().isEmpty()) return;
+        Set<String> asked = getNoMediaAskedUris();
+        asked.add(rootUri.trim());
+        StringBuilder sb = new StringBuilder();
+        for (String s : asked) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(s);
+        }
+        prefs.edit().putString(KEY_NOMEDIA_ASKED, sb.toString()).apply();
+    }
+
+    private void clearNoMediaAsked(String rootUri) {
+        if (prefs == null || rootUri == null || rootUri.trim().isEmpty()) return;
+        Set<String> asked = getNoMediaAskedUris();
+        if (!asked.remove(rootUri.trim())) return;
+        StringBuilder sb = new StringBuilder();
+        for (String s : asked) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(s);
+        }
+        prefs.edit().putString(KEY_NOMEDIA_ASKED, sb.toString()).apply();
+    }
+
+    /**
+     * 绑定扫描目录 / 扫描完成后调用：探测是否需要询问创建 .nomedia。
+     *
+     * <p>此阶段<b>只做只读探测，不做安全判定，不弹任何警告</b>。
+     * 安全判定要等用户明确点了「创建」之后才执行（见 {@link #performNoMediaCreate}），
+     * 这样不想用这功能的人从头到尾只会看到一个普通询问框。
+     */
+    private void maybePromptNoMedia(String rootUri) {
+        if (rootUri == null || rootUri.trim().isEmpty()) return;
+        final String root = rootUri.trim();
+        if (getNoMediaAskedUris().contains(root)) return;
+        AppExecutors.runOnIo(() -> {
+            boolean exists;
+            try {
+                exists = NoMediaHelper.exists(MainActivity.this, root);
+            } catch (Throwable t) {
+                Log.w("YukiHub", "nomedia probe failed root=" + root, t);
+                return;
+            }
+            if (exists) return; // 已经有了，静默
+            runOnUiThread(() -> showNoMediaAskDialog(root));
+        });
+    }
+
+    /** 扫描完成后对所有启用的扫描根做一次检查（覆盖已绑定目录的老用户）。 */
+    private void maybePromptNoMediaForActiveRoots() {
+        try {
+            List<String> roots = getActiveScanRootUris();
+            Set<String> asked = getNoMediaAskedUris();
+            for (String root : roots) {
+                if (root == null || root.trim().isEmpty()) continue;
+                if (asked.contains(root.trim())) continue;
+                maybePromptNoMedia(root);
+                return; // 一次只问一个，避免弹窗叠加
+            }
+        } catch (Throwable t) {
+            Log.w("YukiHub", "nomedia batch prompt failed", t);
+        }
+    }
+
+    /** 询问弹窗：用户表态前不显示任何警告。 */
+    private void showNoMediaAskDialog(final String rootUri) {
+        if (isFinishing() || isDestroyed()) return;
+        String shown = displayPath(rootUri);
+        String msg = "扫描目录：\n" + shown + "\n\n"
+                + "游戏解压后会产生大量 CG、立绘图片，系统相册会把它们全部收录，导致相册被刷满。\n\n"
+                + "可以在该目录创建一个 .nomedia 空文件，让系统相册忽略这个目录下的所有图片。"
+                + "这不会影响游戏运行，也不会影响 YukiHub 读取封面。\n\n"
+                + "⚠️ 已经进入相册的图片不会立刻消失，需要等系统重新扫描（可能需要重启设备）。";
+        try {
+            new AlertDialog.Builder(this)
+                    .setTitle("防止游戏图片塞满相册")
+                    .setMessage(msg)
+                    .setPositiveButton("创建", (d, w) -> performNoMediaCreate(rootUri, true))
+                    .setNegativeButton("不用了", (d, w) -> markNoMediaAsked(rootUri))
+                    .setNeutralButton("以后再说", null) // 不记状态，下次还会问
+                    .show();
+        } catch (Throwable t) {
+            Log.w("YukiHub", "show nomedia dialog failed", t);
+        }
+    }
+
+    /**
+     * 用户点了「创建」之后才执行：先安全判定，通过再写入。
+     *
+     * @param allowFallback 被安全判定拦截时是否提供「只在游戏目录创建」的降级选项
+     */
+    private void performNoMediaCreate(final String rootUri, final boolean allowFallback) {
+        NoMediaHelper.Safety safety = NoMediaHelper.check(rootUri);
+        if (!safety.allowed) {
+            if (allowFallback) {
+                showNoMediaBlockedDialog(rootUri, safety);
+            } else {
+                Toast.makeText(this, safety.message(), Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        AppExecutors.runOnIo(() -> {
+            final NoMediaHelper.Result r = NoMediaHelper.create(MainActivity.this, rootUri);
+            runOnUiThread(() -> {
+                if (r.success) {
+                    markNoMediaAsked(rootUri);
+                    Toast.makeText(this,
+                            r.alreadyExists ? "该目录已有 .nomedia，无需重复创建"
+                                    : "已创建 .nomedia，相册将忽略该目录下的图片",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this, r.error, Toast.LENGTH_LONG).show();
+                }
+                refreshActiveScanRootListUi();
+            });
+        });
+    }
+
+    /** 安全判定拦截时的降级弹窗：改为只在扫描到的游戏目录里逐个创建。 */
+    private void showNoMediaBlockedDialog(final String rootUri, NoMediaHelper.Safety safety) {
+        if (isFinishing() || isDestroyed()) return;
+        String msg = safety.message() + "\n\n"
+                + "可以改为只在扫描到的游戏目录里单独创建，效果相同且安全。";
+        try {
+            new AlertDialog.Builder(this)
+                    .setTitle("⚠️ 已阻止：该位置不能创建")
+                    .setMessage(msg)
+                    .setPositiveButton("只在游戏目录创建", (d, w) -> createNoMediaForScannedGames(rootUri))
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable t) {
+            Log.w("YukiHub", "show nomedia blocked dialog failed", t);
+        }
+    }
+
+    /**
+     * 降级路径：扫描该根下的游戏目录，对每个目录逐个做安全判定后创建。
+     * 安全判定不放水，同一套规则。
+     */
+    private void createNoMediaForScannedGames(final String rootUri) {
+        Toast.makeText(this, "正在扫描游戏目录，请稍候...", Toast.LENGTH_SHORT).show();
+        AppExecutors.runOnSingle(() -> {
+            List<ScanResult> results = new ArrayList<>();
+            try {
+                int depth = prefs == null ? DEFAULT_STARTUP_SCAN_DEPTH
+                        : prefs.getInt(KEY_STARTUP_SCAN_DEPTH, DEFAULT_STARTUP_SCAN_DEPTH);
+                depth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, depth));
+                boolean useFast = prefs == null
+                        || SCAN_MODE_FAST.equals(prefs.getString(KEY_SCAN_MODE, SCAN_MODE_FAST));
+                if (useFast) {
+                    results.addAll(FastGameScanner.scan(this, Uri.parse(rootUri), depth));
+                } else {
+                    results.addAll(GameScanner.scan(this, Uri.parse(rootUri), depth));
+                }
+            } catch (Throwable t) {
+                Log.w("YukiHub", "nomedia fallback scan failed root=" + rootUri, t);
+            }
+
+            int created = 0, already = 0, skipped = 0;
+            for (ScanResult sr : results) {
+                if (sr == null || sr.uri == null || sr.uri.trim().isEmpty()) continue;
+                try {
+                    NoMediaHelper.Safety s = NoMediaHelper.check(sr.uri);
+                    if (!s.allowed) { skipped++; continue; }
+                    NoMediaHelper.Result r = NoMediaHelper.create(MainActivity.this, sr.uri);
+                    if (r.success) {
+                        if (r.alreadyExists) already++; else created++;
+                    } else {
+                        skipped++;
+                    }
+                } catch (Throwable t) {
+                    Log.w("YukiHub", "nomedia create failed uri=" + sr.uri, t);
+                    skipped++;
+                }
+            }
+
+            final int fCreated = created, fAlready = already, fSkipped = skipped;
+            final int total = results.size();
+            runOnUiThread(() -> {
+                markNoMediaAsked(rootUri);
+                String msg = total == 0
+                        ? "没有扫描到游戏目录，未做任何改动"
+                        : "新建 " + fCreated + " 个，已存在 " + fAlready + " 个"
+                                + (fSkipped > 0 ? "，跳过 " + fSkipped + " 个" : "");
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                refreshActiveScanRootListUi();
+            });
+        });
+    }
+
+    /** 设置界面点击 .nomedia 状态时的管理弹窗（创建 / 移除）。 */
+    private void showNoMediaManageDialog(final String rootUri) {
+        if (isFinishing() || isDestroyed()) return;
+        AppExecutors.runOnIo(() -> {
+            final boolean exists = NoMediaHelper.exists(MainActivity.this, rootUri);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                String shown = displayPath(rootUri);
+                try {
+                    if (exists) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("相册防污染：已开启")
+                                .setMessage("目录：\n" + shown + "\n\n"
+                                        + "该目录已有 .nomedia，系统相册会忽略这里的图片。\n\n"
+                                        + "移除后相册会重新收录该目录下的图片。")
+                                .setPositiveButton("移除", (d, w) -> performNoMediaRemove(rootUri))
+                                .setNegativeButton("关闭", null)
+                                .show();
+                    } else {
+                        new AlertDialog.Builder(this)
+                                .setTitle("相册防污染：未开启")
+                                .setMessage("目录：\n" + shown + "\n\n"
+                                        + "创建 .nomedia 后，系统相册会忽略该目录下的所有图片，"
+                                        + "避免游戏 CG 塞满相册。不影响游戏运行和封面读取。\n\n"
+                                        + "⚠️ 请勿在存储卡根目录创建，否则相册会读不到任何图片。"
+                                        + "YukiHub 会自动阻止这类危险位置。")
+                                .setPositiveButton("创建", (d, w) -> performNoMediaCreate(rootUri, true))
+                                .setNegativeButton("取消", null)
+                                .show();
+                    }
+                } catch (Throwable t) {
+                    Log.w("YukiHub", "show nomedia manage dialog failed", t);
+                }
+            });
+        });
+    }
+
+    private void performNoMediaRemove(final String rootUri) {
+        AppExecutors.runOnIo(() -> {
+            final NoMediaHelper.Result r = NoMediaHelper.remove(MainActivity.this, rootUri);
+            runOnUiThread(() -> {
+                Toast.makeText(this,
+                        r.success ? "已移除 .nomedia，相册将重新收录该目录图片" : r.error,
+                        Toast.LENGTH_LONG).show();
+                // 移除后允许再次询问
+                clearNoMediaAsked(rootUri);
+                refreshActiveScanRootListUi();
+            });
+        });
+    }
+
 private boolean addOrReplaceScanRoot(String uri, int replaceIndex) {
 if (uri == null || uri.trim().isEmpty()) return false;
 List<String> roots = getScanRootUris();
@@ -6687,6 +6949,7 @@ pendingScanRootReplaceIndex = -2;
                         if (changed) {
                             refreshActiveScanRootListUi();
                             Toast.makeText(MainActivity.this, "扫描目录已更新", Toast.LENGTH_SHORT).show();
+                            maybePromptNoMedia(selectedDir);
                         }
                     }
                 })
@@ -6722,6 +6985,28 @@ private LinearLayout scanRootCard(String uri, int index, Runnable refresh) {
         text.setTextSize(11);
         text.setSingleLine(false);
         card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        // 相册防污染（.nomedia）状态入口：异步探测后回填，避免主线程 IO
+        TextView noMedia = new TextView(this);
+        noMedia.setText("相册…");
+        noMedia.setTextColor(getColorCompat(R.color.yh_text_muted));
+        noMedia.setTextSize(12);
+        noMedia.setTypeface(null, android.graphics.Typeface.BOLD);
+        noMedia.setPadding(dp(8), 0, dp(4), 0);
+        noMedia.setOnClickListener(v -> showNoMediaManageDialog(uri));
+        card.addView(noMedia);
+        AppExecutors.runOnIo(() -> {
+            boolean has;
+            try {
+                has = NoMediaHelper.exists(MainActivity.this, uri);
+            } catch (Throwable t) {
+                return;
+            }
+            final boolean fHas = has;
+            runOnUiThread(() -> {
+                noMedia.setText(fHas ? "相册✓" : "相册✕");
+                noMedia.setTextColor(fHas ? primaryTextColor() : getColorCompat(R.color.yh_text_muted));
+            });
+        });
         TextView change = new TextView(this);
         change.setText("更换");
         change.setTextColor(primaryTextColor());
@@ -8969,6 +9254,9 @@ if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size
                 setScanLoading(false);
                 loadGames();
                 if (showToast) Toast.makeText(this, "扫描[" + scanModeLabel + "] " + scanRoots.size() + " 个目录：新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
+                // 覆盖已绑定目录的老用户：扫描完成后检查一次是否需要询问 .nomedia。
+                // 只在用户主动扫描时触发，开机自动扫描不打扰。
+                if (showToast) maybePromptNoMediaForActiveRoots();
             });
         });
     }
