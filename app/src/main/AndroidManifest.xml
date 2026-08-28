@@ -256,6 +256,13 @@
   android:configChanges="keyboardHidden|screenSize" />
 
         <activity
+            android:name="com.yuki.yukihub.ons.OnsButtonLayoutActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode" />
+
+        <activity
             android:name="com.yuri.onscripter.ONScripter"
             android:exported="false"
             android:process=":ons"
@@ -263,13 +270,5 @@
             android:taskAffinity="com.yuki.yukihub.ONScripter"
             android:screenOrientation="sensorLandscape"
             android:configChanges="keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode" />
-
-        <activity
-            android:name="com.yuki.yukihub.ons.OnsVideoActivity"
-            android:exported="false"
-            android:process=":ons"
-            android:screenOrientation="sensorLandscape"
-            android:configChanges="keyboardHidden|screenSize" />
-
     </application>
 </manifest>

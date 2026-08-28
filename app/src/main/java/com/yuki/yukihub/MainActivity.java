@@ -140,6 +140,7 @@ import com.yuki.yukihub.metadata.VnMetadata;
 import com.yuki.yukihub.metadata.YmgalClient;
 import com.yuki.yukihub.model.EngineType;
 import com.yuki.yukihub.model.Game;
+import com.yuki.yukihub.ons.OnsLibLoader;
 import com.yuki.yukihub.ons.OnsSettings;
 import com.yuki.yukihub.scanner.FastGameScanner;
 import com.yuki.yukihub.scanner.GameScanner;
@@ -8869,8 +8870,41 @@ private void showEditPlayTimeDialog(Game game) {
         EditText sharpnessValue = krEdit("锐化值，例如 2", settings.sharpnessValue);
         sharpnessValue.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         Spinner encoding = krSpinner(new String[]{"gbk", "sjis", "utf8"}, settings.encoding);
+        // 引擎版本可切换：0.7.7 为默认，遇到兼容问题可退回 0.7.6。
+        Spinner engineVersion = krSpinner(OnsLibLoader.AVAILABLE_VERSIONS, OnsLibLoader.getSelectedVersion(this));
 
+        CheckBox noVsync = krCheckBox("关闭垂直同步（--no-vsync）", settings.noVsync);
+        CheckBox fontCache = krCheckBox("缓存字体（--fontcache）", settings.fontCache);
+        CheckBox renderFontOutline = krCheckBox("文字描边替代投影（--render-font-outline）", settings.renderFontOutline);
+        CheckBox disableRescale = krCheckBox("不缩放档案内图片（--disable-rescale）", settings.disableRescale);
+        CheckBox forceButtonShortcut = krCheckBox("强制启用按键快捷（--force-button-shortcut）", settings.forceButtonShortcut);
+        CheckBox wheelDownAdvance = krCheckBox("滚轮下滚推进文本", settings.wheelDownAdvance);
+        CheckBox debugLog = krCheckBox("输出引擎调试日志（--debug:1）", settings.debugLog);
+        EditText forceWidth = krEdit("宽度，0 为自动", settings.forceWidth > 0 ? String.valueOf(settings.forceWidth) : "");
+        forceWidth.setInputType(InputType.TYPE_CLASS_NUMBER);
+        EditText forceHeight = krEdit("高度，0 为自动", settings.forceHeight > 0 ? String.valueOf(settings.forceHeight) : "");
+        forceHeight.setInputType(InputType.TYPE_CLASS_NUMBER);
+
+        root.addView(krLabel("引擎版本")); root.addView(engineVersion);
         root.addView(krLabel("文本编码")); root.addView(encoding);
+
+        // 虚拟按键布局编辑器入口：进全屏界面直接拖，所见即所得
+        Button btnLayout = krButton("编辑虚拟按键布局…");
+        final TextView layoutSummary = krLabel(onsLayoutSummary());
+        layoutSummary.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        btnLayout.setOnClickListener(v -> {
+            try {
+                startActivity(new android.content.Intent(MainActivity.this,
+                        com.yuki.yukihub.ons.OnsButtonLayoutActivity.class));
+            } catch (Throwable t) {
+                android.widget.Toast.makeText(MainActivity.this,
+                        "打开布局编辑器失败：" + t, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+        root.addView(krLabel("虚拟按键"));
+        root.addView(btnLayout);
+        root.addView(layoutSummary);
+
         root.addView(stretchFull);
         root.addView(ignoreCutout);
         root.addView(disableVideo);
@@ -8878,8 +8912,19 @@ private void showEditPlayTimeDialog(Game game) {
         root.addView(allowEditArgs);
         root.addView(sharpness);
         root.addView(krLabel("锐化值")); root.addView(sharpnessValue);
+        root.addView(krLabel("进阶选项"));
+        root.addView(noVsync);
+        root.addView(fontCache);
+        root.addView(renderFontOutline);
+        root.addView(disableRescale);
+        root.addView(forceButtonShortcut);
+        root.addView(wheelDownAdvance);
+        root.addView(debugLog);
+        root.addView(krLabel("强制分辨率（宽高需同时填写，留空为自动）"));
+        root.addView(forceWidth);
+        root.addView(forceHeight);
 
-        TextView tip = krLabel("说明：设置会生成 OnsYuri 原版参数：--root、--font、--fullscreen/--fullscreen2、--enc、--save-dir 等。修改后下次启动 ONS 游戏生效。");
+        TextView tip = krLabel("说明：设置会生成 OnsYuri 原版参数：--root、--font、--fullscreen/--fullscreen2、--enc、--save-dir 等。修改后下次启动 ONS 游戏生效。引擎版本切换需要完全退出游戏进程后才会重新加载。");
         tip.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
         root.addView(tip);
 
@@ -8908,7 +8953,17 @@ private void showEditPlayTimeDialog(Game game) {
             settings.sharpness = sharpness.isChecked();
             settings.sharpnessValue = sharpnessValue.getText().toString().trim().isEmpty() ? "2" : sharpnessValue.getText().toString().trim();
             settings.encoding = OnsSettings.normalizeEncoding(String.valueOf(encoding.getSelectedItem()));
+            settings.noVsync = noVsync.isChecked();
+            settings.fontCache = fontCache.isChecked();
+            settings.renderFontOutline = renderFontOutline.isChecked();
+            settings.disableRescale = disableRescale.isChecked();
+            settings.forceButtonShortcut = forceButtonShortcut.isChecked();
+            settings.wheelDownAdvance = wheelDownAdvance.isChecked();
+            settings.debugLog = debugLog.isChecked();
+            settings.forceWidth = parsePositiveInt(forceWidth.getText().toString());
+            settings.forceHeight = parsePositiveInt(forceHeight.getText().toString());
             settings.save(this);
+            OnsLibLoader.setSelectedVersion(this, String.valueOf(engineVersion.getSelectedItem()));
             if (game != null && (game.emulatorPackage == null || game.emulatorPackage.trim().isEmpty())) {
                 game.emulatorPackage = "internal.ons";
                 repository.update(game);
@@ -8922,6 +8977,46 @@ private void showEditPlayTimeDialog(Game game) {
         if (shownWindow != null) {
             shownWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             shownWindow.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.72f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
+        }
+    }
+
+    /**
+     * 虚拟按键当前配置的一句话摘要，显示在设置项下方。
+     */
+    private String onsLayoutSummary() {
+        try {
+            com.yuki.yukihub.ons.OnsButtonConfig c =
+                    com.yuki.yukihub.ons.OnsButtonConfig.load(this);
+            int left = 0, right = 0, custom = 0;
+            for (com.yuki.yukihub.ons.OnsButtonConfig.Item it : c.items) {
+                if (it.x < 50f) left++; else right++;
+                if (it.isCustom()) custom++;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("共 ").append(c.items.size()).append(" 个（左 ").append(left)
+              .append(" / 右 ").append(right).append("）");
+            if (custom > 0) sb.append("，含 ").append(custom).append(" 个自定义");
+            sb.append("　直径 ").append(c.size).append("dp　不透明度 ")
+              .append(c.opacity).append("%");
+            return sb.toString();
+        } catch (Throwable t) {
+            return "点击上方按钮进行配置";
+        }
+    }
+
+    /**
+     * 解析用户输入的正整数，非法或空值返回 0（表示「自动 / 不指定」）。
+     * 用于强制分辨率这类可留空的数值输入。
+     */
+    private int parsePositiveInt(String text) {
+        if (text == null) return 0;
+        String t = text.trim();
+        if (t.isEmpty()) return 0;
+        try {
+            int v = Integer.parseInt(t);
+            return v > 0 ? v : 0;
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 

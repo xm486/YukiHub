@@ -29,6 +29,24 @@ public final class OnsSettings {
     public String encoding = "gbk";
     public boolean scopedSaveDir = true;
     public boolean allowEditArgs = true;
+    // ===== 以下为对齐 onsyuri 0.7.7 补全的参数 =====
+    /** --no-vsync：关闭垂直同步。部分机型上开着会掉帧，关掉更流畅但可能撕裂。 */
+    public boolean noVsync = false;
+    /** --fontcache：缓存默认字体，长文本渲染更快，代价是多占一点内存。 */
+    public boolean fontCache = false;
+    /** --render-font-outline：描边渲染文字，替代默认的投影效果。 */
+    public boolean renderFontOutline = false;
+    /** --disable-rescale：不缩放档案内图片，保持像素原样。 */
+    public boolean disableRescale = false;
+    /** --force-button-shortcut：忽略脚本的 useescspc / getenter，强制启用按键快捷操作。 */
+    public boolean forceButtonShortcut = false;
+    /** --enable-wheeldown-advance：滚轮下滚推进文本。 */
+    public boolean wheelDownAdvance = false;
+    /** --debug:1：输出引擎调试日志，排查脚本问题时才需要开。 */
+    public boolean debugLog = false;
+    /** 自定义分辨率，0 表示不指定（--width / --height）。 */
+    public int forceWidth = 0;
+    public int forceHeight = 0;
 
     public static OnsSettings load(Context context) {
         OnsSettings settings = defaults();
@@ -70,6 +88,15 @@ public final class OnsSettings {
         encoding = normalizeEncoding(o.optString("encoding", encoding));
         scopedSaveDir = o.optBoolean("scopedsavedir", scopedSaveDir);
         allowEditArgs = o.optBoolean("alloweditargs", allowEditArgs);
+        noVsync = o.optBoolean("novsync", noVsync);
+        fontCache = o.optBoolean("fontcache", fontCache);
+        renderFontOutline = o.optBoolean("renderfontoutline", renderFontOutline);
+        disableRescale = o.optBoolean("disablerescale", disableRescale);
+        forceButtonShortcut = o.optBoolean("forcebuttonshortcut", forceButtonShortcut);
+        wheelDownAdvance = o.optBoolean("wheeldownadvance", wheelDownAdvance);
+        debugLog = o.optBoolean("debuglog", debugLog);
+        forceWidth = o.optInt("width", forceWidth);
+        forceHeight = o.optInt("height", forceHeight);
     }
 
     public JSONObject toJson() throws JSONException {
@@ -83,6 +110,15 @@ public final class OnsSettings {
         o.put("encoding", normalizeEncoding(encoding));
         o.put("scopedsavedir", scopedSaveDir);
         o.put("alloweditargs", allowEditArgs);
+        o.put("novsync", noVsync);
+        o.put("fontcache", fontCache);
+        o.put("renderfontoutline", renderFontOutline);
+        o.put("disablerescale", disableRescale);
+        o.put("forcebuttonshortcut", forceButtonShortcut);
+        o.put("wheeldownadvance", wheelDownAdvance);
+        o.put("debuglog", debugLog);
+        o.put("width", forceWidth);
+        o.put("height", forceHeight);
         return o;
     }
 
@@ -110,6 +146,21 @@ public final class OnsSettings {
         if (sharpness) {
             args.add("--sharpness");
             args.add(safeSharpness());
+        }
+        // ===== onsyuri 0.7.7 支持的其余开关 =====
+        if (noVsync) args.add("--no-vsync");
+        if (fontCache) args.add("--fontcache");
+        if (renderFontOutline) args.add("--render-font-outline");
+        if (disableRescale) args.add("--disable-rescale");
+        if (forceButtonShortcut) args.add("--force-button-shortcut");
+        if (wheelDownAdvance) args.add("--enable-wheeldown-advance");
+        if (debugLog) args.add("--debug:1");
+        // 宽高必须成对给出，只给一个会让引擎按默认值算另一边，反而更容易出错。
+        if (forceWidth > 0 && forceHeight > 0) {
+            args.add("--width");
+            args.add(String.valueOf(forceWidth));
+            args.add("--height");
+            args.add(String.valueOf(forceHeight));
         }
         return args;
     }
