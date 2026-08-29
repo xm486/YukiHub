@@ -312,6 +312,8 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 也感谢所有参与测试、反馈和建议的用户。
 
+---
+
 ## ❤️ Special Thanks
 
 特别感谢所有 Contributors 对 YukiHub 的贡献 ❤️

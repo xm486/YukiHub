@@ -148,6 +148,67 @@ public class YukiScreenshotAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         ScreenshotServiceManager.setService(this);
         Log.d(TAG, "Accessibility screenshot service connected");
+        // 自检手势能力：canPerformGestures 没配置的话 dispatchGesture 会被系统
+        // 直接拒绝（返回 false），且不留任何系统日志，极难排查。这里显式报告。
+        try {
+            android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+            boolean canGesture = info != null
+                    && (info.getCapabilities()
+                    & android.accessibilityservice.AccessibilityServiceInfo
+                    .CAPABILITY_CAN_PERFORM_GESTURES) != 0;
+            Log.i(TAG, "gesture capability=" + canGesture);
+        } catch (Throwable t) {
+            Log.w(TAG, "capability check failed", t);
+        }
+    }
+
+    /**
+     * 无障碍手势点击（游戏内虚拟鼠标的 Artemis 注入通道）。
+     *
+     * 手势构造有两个坑，都踩过：
+     * 1. 零位移路径（moveTo(x,y) 后 lineTo(x,y)）会被部分引擎的命中判定忽略，
+     *    NativeActivity 的 native 输入队列尤其挑。这里改成 1px 位移，
+     *    既产生真实的 MOVE 事件，视觉与逻辑上仍是原地点击。
+     * 2. dispatchGesture 的返回值必须检查：false = 手势被系统直接拒绝
+     *    （常见原因是上一个手势还没结束、或服务缺 CAPABILITY_CAN_PERFORM_GESTURES）。
+     *    之前传 null 回调又忽略返回值，等于把失败原因全丢了。
+     */
+    public static void tap(int x, int y, long durationMs) {
+        YukiScreenshotAccessibilityService service = ScreenshotServiceManager.getService();
+        if (service == null) {
+            Log.w(TAG, "tap ignored: accessibility service not connected");
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        try {
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo(x, y);
+            // 1px 位移：零位移手势部分引擎不认（收不到 MOVE 就不判命中）
+            path.lineTo(x + 1, y + 1);
+            long dur = Math.max(50, durationMs);
+            android.accessibilityservice.GestureDescription.StrokeDescription stroke =
+                    new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, dur);
+            boolean ok = service.dispatchGesture(
+                    new android.accessibilityservice.GestureDescription.Builder()
+                            .addStroke(stroke)
+                            .build(),
+                    new android.accessibilityservice.AccessibilityService.GestureResultCallback() {
+                        @Override
+                        public void onCompleted(android.accessibilityservice.GestureDescription d) {
+                            Log.d(TAG, "gesture completed (" + x + "," + y + ")");
+                        }
+
+                        @Override
+                        public void onCancelled(android.accessibilityservice.GestureDescription d) {
+                            Log.w(TAG, "gesture CANCELLED (" + x + "," + y + ")");
+                        }
+                    }, null);
+            if (!ok) {
+                Log.w(TAG, "dispatchGesture REJECTED (" + x + "," + y + ")");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "dispatchGesture failed", t);
+        }
     }
 
     @Override

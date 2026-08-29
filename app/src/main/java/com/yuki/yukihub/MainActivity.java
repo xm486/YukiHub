@@ -132,6 +132,8 @@ import com.yuki.yukihub.ai.WeeklyPlayStats;
 import com.yuki.yukihub.data.GameRepository;
 import com.yuki.yukihub.data.GameRepository.PlayActivity;
 import com.yuki.yukihub.data.MetadataRepository;
+import com.yuki.yukihub.gamecursor.GameCursorConfig;
+import com.yuki.yukihub.gamecursor.GameCursorIconRenderer;
 import com.yuki.yukihub.launcher.EmulatorLauncher;
 import com.yuki.yukihub.metadata.BangumiClient;
 import com.yuki.yukihub.metadata.MetadataController;
@@ -340,6 +342,21 @@ private ActivityResultLauncher<String> coverLauncher;
 private ActivityResultLauncher<String> profileAvatarLauncher;
 private ActivityResultLauncher<String> backgroundPickerLauncher;
 private ActivityResultLauncher<String> videoBackgroundPickerLauncher;
+private ActivityResultLauncher<String> cursorIconPickerLauncher;
+    /** Windows 光标包（文件夹）导入。 */
+    private ActivityResultLauncher<Uri> cursorSchemePickerLauncher;
+    /** 当前打开的虚拟鼠标设置对话框里的预览控件；关闭时置 null。 */
+    private CursorPreviewView gameCursorPreview;
+    /**
+     * 当前正在编辑的虚拟鼠标配置对象；对话框关闭时置 null。
+     *
+     * 必须存在：导入光标包/选图是异步回调，回来时得改**对话框正在持有的那个**
+     * cfg 对象。否则另 load 一份副本改完保存，用户点"保存"时对话框里的旧快照
+     * 又会把结果覆盖回去。
+     */
+    private GameCursorConfig gameCursorEditing;
+    /** 设置对话框里显示"当前外观来源"的那行文字；随导入结果更新。 */
+    private TextView gameCursorSourceStatus;
 private MediaPlayer backgroundMediaPlayer;
 private SoundPool uiSoundPool;
     private int uiClickSoundId;
@@ -718,7 +735,7 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
         });
         backgroundPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
             if (uri != null) {
-                String bg = copyImageToInternalStorage(uri, "backgrounds", "bg_", 1920, 88);
+String bg = copyImageToInternalStorage(uri, "backgrounds", "bg_", 1920, 88);
                 if (bg == null || bg.isEmpty()) {
                     Toast.makeText(MainActivity.this, "背景保存失败", Toast.LENGTH_SHORT).show();
                     return;
@@ -740,6 +757,36 @@ profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.Ge
                 Toast.makeText(MainActivity.this, "已设置视频背景", Toast.LENGTH_SHORT).show();
             }
         });
+        // 游戏内虚拟鼠标：光标图标选择（复制到内部存储，避免 content Uri 授权失效）
+        cursorIconPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+            if (uri == null) return;
+            String saved = copyImageToInternalStorage(uri, "cursors", "cursor_", 512, 100);
+            if (saved == null || saved.isEmpty()) {
+                Toast.makeText(MainActivity.this, "光标图标保存失败", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            // 必须改设置对话框正在持有的那个 cfg，不能另 load 一份 ——
+            // 否则对话框点"保存"时会用旧快照把这次选择覆盖掉。
+            GameCursorConfig cfg = gameCursorEditing != null
+                    ? gameCursorEditing : GameCursorConfig.load(this);
+            cfg.iconUri = saved;
+            // PNG 与光标包互斥：光标包优先级更高，选了 PNG 就得把包卸掉，
+            // 否则设置了 PNG 却看不到变化。
+            if (cfg.hasWinCursor()) {
+                cfg.winCursorName = null;
+                com.yuki.yukihub.gamecursor.wincursor.WinCursorSupport.uninstall(this);
+            }
+            cfg.save(this);
+            if (gameCursorPreview != null) gameCursorPreview.refresh(cfg);
+            if (gameCursorSourceStatus != null) gameCursorSourceStatus.setText("当前：自定义图片");
+            Toast.makeText(MainActivity.this, "光标图标已更新，游戏内实时生效", Toast.LENGTH_SHORT).show();
+        });
+        // 游戏内虚拟鼠标：Windows 光标包（.ani/.cur）整包导入
+        cursorSchemePickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.OpenDocumentTree(), uri -> {
+                    if (uri == null) return;
+                    onCursorSchemeFolderPicked(uri);
+                });
 
         backupCreateLauncher = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/octet-stream"), uri -> {
             if (uri != null) exportLocalBackup(uri);
@@ -5252,9 +5299,14 @@ String rematchItem = "重新匹配" + sourceLabel;
         String nsfwBlurLabel = "🔞 NSFW 封面模糊";
         boolean nsfwBlurGameOn = game.nsfw;
         String nsfwBlurItem = nsfwBlurLabel + "：" + (nsfwBlurGameOn ? "开启" : "关闭");
-        String[] items = (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS)
-                ? new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem, "引擎设置", "详细信息", "删除游戏", "多选删除…"}
-                : new String[]{"编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem, "详细信息", "删除游戏", "多选删除…"};
+        java.util.List<String> itemList = new java.util.ArrayList<>(java.util.Arrays.asList(
+                "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
+        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS) itemList.add("引擎设置");
+        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS) itemList.add("虚拟鼠标");
+        itemList.add("详细信息");
+        itemList.add("删除游戏");
+        itemList.add("多选删除…");
+        String[] items = itemList.toArray(new String[0]);
         LinearLayout listRoot = new LinearLayout(this);
         listRoot.setOrientation(LinearLayout.VERTICAL);
         listRoot.setBackgroundResource(R.drawable.bg_dialog);
@@ -5301,6 +5353,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                     loadGames();
                 }
                 else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game); }
+                else if ("虚拟鼠标".equals(chosen)) showGameCursorDialog(game);
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
                 else if ("删除游戏".equals(chosen)) confirmDeleteGame(game);
                 else if ("多选删除…".equals(chosen)) enterMultiSelectMode(game);
@@ -8739,6 +8792,707 @@ private void showEditPlayTimeDialog(Game game) {
     private String gamehubModeValue(int index) {
         if (index == 1) return "program";
         return "game";
+    }
+
+    /**
+     * 游戏内虚拟鼠标设置（KRKR / Artemis 共用）。
+     * 含内置箭头实时预览（与游戏内共用 GameCursorIconRenderer）。
+     */
+    private void showGameCursorDialog(Game game) {
+        if (game == null) return;
+        boolean krkr = game.engine == EngineType.KIRIKIRI;
+        boolean artemis = game.engine == EngineType.ARTEMIS;
+        if (!krkr && !artemis) {
+            Toast.makeText(this, "该引擎暂不支持虚拟鼠标", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        GameCursorConfig cfg = GameCursorConfig.load(this);
+        gameCursorEditing = cfg;   // 供异步导入回调直接改这一份
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(getColorCompat(com.yuki.yukihub.R.color.yh_card));
+        int pad = (int) (18 * getResources().getDisplayMetrics().density);
+        panel.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText(krkr ? "KRKR 虚拟鼠标" : "Artemis 虚拟鼠标");
+        title.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+        title.setTextSize(22);
+        title.setPadding(0, 0, 0, pad / 2);
+        panel.addView(title);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(root);
+        panel.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        CheckBox enable = krCheckBox(krkr
+                        ? "启用 KRKR 虚拟鼠标（悬浮光标，拖动定位，抬手点击）"
+                        : "启用 Artemis 虚拟鼠标（悬浮光标，拖动定位，抬手点击）",
+                krkr ? cfg.krkrEnabled : cfg.artemisEnabled);
+        root.addView(enable);
+
+        // ===== 实时预览（与游戏内同一渲染代码）=====
+        TextView previewLabel = krLabel("光标预览（与游戏内一致，红十字 = 鼠标尖位置）");
+        root.addView(previewLabel);
+        final CursorPreviewView preview = new CursorPreviewView(this, cfg);
+        gameCursorPreview = preview;   // 供导入回调刷新
+        root.addView(preview, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(80)));
+
+        TextView scaleLabel = krLabel("光标大小");
+        root.addView(scaleLabel);
+        android.widget.SeekBar scaleSeek = new android.widget.SeekBar(this);
+        scaleSeek.setMax(100);
+        final float scaleSpan = GameCursorConfig.MAX_SCALE - GameCursorConfig.MIN_SCALE;
+        scaleSeek.setProgress(Math.round(
+                (gcClampScale(cfg.scale) - GameCursorConfig.MIN_SCALE) / scaleSpan * 100f));
+        scaleSeek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int progress, boolean fromUser) {
+                cfg.scale = GameCursorConfig.MIN_SCALE + progress / 100f * scaleSpan;
+                preview.refresh(cfg);
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) { }
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) { }
+        });
+        root.addView(scaleSeek);
+
+        TextView alphaLabel = krLabel("光标不透明度");
+        root.addView(alphaLabel);
+        android.widget.SeekBar alphaSeek = new android.widget.SeekBar(this);
+        alphaSeek.setMax(80);
+        alphaSeek.setProgress(Math.round((gcClampAlpha(cfg.alpha) - 0.2f) / 0.8f * 80f));
+        alphaSeek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int progress, boolean fromUser) {
+                cfg.alpha = 0.2f + progress / 80f * 0.8f;
+                preview.refresh(cfg);
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) { }
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) { }
+        });
+        root.addView(alphaSeek);
+
+        TextView sensLabel = krLabel("鼠标模式移动灵敏度");
+        root.addView(sensLabel);
+        android.widget.SeekBar sensSeek = new android.widget.SeekBar(this);
+        sensSeek.setMax(100);
+        sensSeek.setProgress(Math.round((gcClampSens(cfg.sensitivity) - 0.5f) / 2.5f * 100f));
+        sensSeek.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int progress, boolean fromUser) {
+                cfg.sensitivity = 0.5f + progress / 100f * 2.5f;
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) { }
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) { }
+        });
+        root.addView(sensSeek);
+
+        // ===== 光标外观来源 =====
+        TextView srcLabel = krLabel("光标外观");
+        root.addView(srcLabel);
+
+        TextView srcStatus = new TextView(this);
+        gameCursorSourceStatus = srcStatus;   // 导入回调要更新它
+        srcStatus.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        srcStatus.setTextSize(11);
+        srcStatus.setPadding(0, 0, 0, dp(6));
+        srcStatus.setText(cfg.hasWinCursor()
+                ? "当前：" + cfg.winCursorName
+                : (cfg.iconUri != null && !cfg.iconUri.isEmpty()
+                ? "当前：自定义图片" : "当前：内置箭头"));
+        root.addView(srcStatus);
+
+        // Windows 光标包：整包导入，能读 inf 就自动标出哪个是正常状态
+        Button importScheme = krButton("导入 Windows 光标包（文件夹）…");
+        importScheme.setOnClickListener(v -> {
+            try {
+                cursorSchemePickerLauncher.launch(null);
+            } catch (Throwable t) {
+                Toast.makeText(this, "无法打开文件选择器", Toast.LENGTH_SHORT).show();
+            }
+        });
+        root.addView(importScheme, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+
+        TextView schemeHint = new TextView(this);
+        schemeHint.setText("支持 .ani（动画）与 .cur（静态）。选中包含光标文件的文件夹后，"
+                + "会列出里面的光标让你挑一个，带 AutoSetup.inf 的包能自动标出「正常状态」那一个。"
+                + "动画光标会按原速播放，鼠标尖的位置直接取自文件本身。");
+        schemeHint.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        schemeHint.setTextSize(10);
+        schemeHint.setPadding(0, dp(4), 0, dp(8));
+        root.addView(schemeHint);
+
+        LinearLayout iconRow = new LinearLayout(this);
+        iconRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button pickIcon = krButton("选择图片…");
+        pickIcon.setOnClickListener(v -> cursorIconPickerLauncher.launch("image/*"));
+        Button resetIcon = krButton("恢复默认箭头");
+        resetIcon.setOnClickListener(v -> {
+            cfg.iconUri = null;
+            // 同时卸掉光标包，否则"恢复默认"只清了 PNG 却仍显示光标包
+            if (cfg.hasWinCursor()) {
+                cfg.winCursorName = null;
+                com.yuki.yukihub.gamecursor.wincursor.WinCursorSupport.uninstall(this);
+            }
+            cfg.save(this);
+            preview.refresh(cfg);
+            srcStatus.setText("当前：内置箭头");
+            Toast.makeText(this, "已恢复内置箭头", Toast.LENGTH_SHORT).show();
+        });
+        iconRow.addView(pickIcon, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        iconRow.addView(resetIcon, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        root.addView(iconRow);
+
+        // Artemis 专属：显示 native 注入通道状态 + 无障碍（现在只是备用通道）
+        if (artemis) {
+            TextView accStatus = new TextView(this);
+            int probe = com.yuki.yukihub.gamecursor.ArtemisNativeInput.probe();
+            boolean nativeOk = probe >= 1; // 库已加载且符号取到（2 才是引擎也就绪）
+            boolean ready = isAccessibilityTapReady();
+            accStatus.setText(nativeOk
+                    ? "✓ 引擎直连注入可用，无需额外权限"
+                    : (ready
+                    ? "引擎直连不可用，将回退到无障碍手势"
+                    : "⚠ 引擎直连不可用，且无障碍未开启：点击不会生效"));
+            accStatus.setTextColor(getColorCompat(nativeOk || ready
+                    ? com.yuki.yukihub.R.color.yh_text : com.yuki.yukihub.R.color.yh_warning));
+            accStatus.setTextSize(12);
+            accStatus.setPadding(0, dp(10), 0, dp(4));
+            root.addView(accStatus);
+
+            // 只在直连不可用时才提供无障碍入口，避免让人以为必须开
+            if (!nativeOk) {
+                Button accBtn = krButton(ready ? "无障碍服务设置（已开启）" : "去开启无障碍服务（备用通道）");
+                accBtn.setOnClickListener(v -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                    } catch (Throwable t) {
+                        Toast.makeText(this, "无法打开系统设置，请手动前往：设置 → 无障碍", Toast.LENGTH_LONG).show();
+                    }
+                });
+                root.addView(accBtn, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+            }
+        }
+
+        TextView tip = new TextView(this);
+        tip.setText("用法：进游戏后右下角有一个模式浮标（可拖动换位置）。\n"
+                + "· 点浮标切到鼠标模式（浮标变蓝）：全屏任意位置滑动移动光标，原地轻点 = 在光标尖端注入点击。\n"
+                + "· 再点一次切回直接触摸（浮标变灰）：触摸原样给游戏，光标隐藏。\n"
+                + (krkr
+                ? "KRKR 的点击走引擎自身触摸管线，原引擎「虚拟光标缩放」等设置不受影响。"
+                : "Artemis 的点击与悬停直接写入引擎输入层，不经过系统输入派发，"
+                + "因此不需要无障碍权限。光标显示仍需要「显示在其他应用上层」权限。"));
+        tip.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+        tip.setTextSize(11);
+        tip.setPadding(0, dp(10), 0, 0);
+        root.addView(tip);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button cancel = krButton("取消");
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        Button save = krButton("保存");
+        save.setOnClickListener(v -> {
+            // 只改当前引擎自己的开关，另一个引擎的设置必须原样保留。
+            // 之前写成 cfg.krkrEnabled = krkr && checked，在 artemis 对话框里
+            // krkr=false 会把 krkr 的开关直接清掉，导致"开一个关另一个"。
+            if (krkr) {
+                cfg.krkrEnabled = enable.isChecked();
+            } else {
+                cfg.artemisEnabled = enable.isChecked();
+            }
+            cfg.save(this);
+            // 只在 native 直连不可用时才提示无障碍：
+            // 直连走引擎内部输入层，根本不需要无障碍权限。
+            if (artemis && enable.isChecked()
+                    && com.yuki.yukihub.gamecursor.ArtemisNativeInput.probe() < 1
+                    && !isAccessibilityTapReady()) {
+                promptAccessibilityForCursor(dialog);
+                return;
+            }
+            Toast.makeText(this, "虚拟鼠标设置已保存，下次进游戏生效", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        actions.addView(save, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        panel.addView(actions);
+
+        // 对话框关掉后别再持有这些引用（异步回调会判空）
+        dialog.setOnDismissListener(d -> {
+            if (gameCursorPreview == preview) gameCursorPreview = null;
+            if (gameCursorEditing == cfg) gameCursorEditing = null;
+            if (gameCursorSourceStatus == srcStatus) gameCursorSourceStatus = null;
+        });
+        dialog.setContentView(panel);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.72f),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.8f));
+        }
+        dialog.show();
+    }
+
+    /**
+     * 光标包文件夹选中后的处理：扫描 → 弹角色选择列表。
+     *
+     * 有 inf 时能准确标出哪个是「正常状态」（inf 的 [Strings] 段 pointer= 那一项），
+     * 没有 inf 就按文件名猜，猜不到就不标注让用户自己认 —— 有些包确实分不清。
+     */
+    private void onCursorSchemeFolderPicked(Uri treeUri) {
+        try {
+            // 持久化授权，否则下次读不到（虽然我们会立刻解码落盘，但扫描期间要用）
+            getContentResolver().takePersistableUriPermission(treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Throwable ignored) { }
+
+        Toast.makeText(this, "正在扫描光标包…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.Scheme scheme =
+                    com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.scan(this, treeUri);
+            runOnUiThread(() -> {
+                if (scheme.entries.isEmpty()) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("没有找到光标文件")
+                            .setMessage("这个文件夹里没有 .ani 或 .cur 文件。\n\n"
+                                    + "请选择包含光标文件的文件夹（通常还有一个 AutoSetup.inf）。")
+                            .setPositiveButton("知道了", null)
+                            .show();
+                    return;
+                }
+                showCursorSchemePickDialog(scheme);
+            });
+        }, "cursor-scan").start();
+    }
+
+    /** 光标包角色选择对话框：每项带动图预览，可直接看到长什么样。 */
+    private void showCursorSchemePickDialog(
+            com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.Scheme scheme) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundResource(com.yuki.yukihub.R.drawable.bg_dialog);
+        panel.setPadding(dp(18), dp(18), dp(18), dp(18));
+
+        TextView title = new TextView(this);
+        title.setText(scheme.name);
+        title.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+        title.setTextSize(17);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        panel.addView(title);
+
+        TextView hint = new TextView(this);
+        hint.setText(scheme.hasRoleInfo
+                ? "已从安装信息识别出各光标的用途。选一个作为游戏内的光标：\n"
+                + "推荐选「普通选择」——那是桌面上的常态指针。"
+                : "这个包没有可读的安装信息，无法确定每个文件的用途。\n"
+                + "下面按文件名列出，点开预览自己挑一个。");
+        hint.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        hint.setTextSize(11);
+        hint.setPadding(0, dp(8), 0, dp(10));
+        panel.addView(hint);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+
+        // 每项：动图预览 + 标签 + 帧数。解码放后台，避免一次点开卡住 UI。
+        final List<CursorPreviewItemView> items = new ArrayList<>();
+        for (com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.Entry e : scheme.entries) {
+            CursorPreviewItemView item = new CursorPreviewItemView(this, e);
+            item.setOnClickListener(v -> {
+                dialog.dismiss();
+                installCursorScheme(scheme.name, e);
+            });
+            list.addView(item, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
+            items.add(item);
+        }
+        scroll.addView(list);
+        panel.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        Button cancel = krButton("取消");
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        panel.addView(cancel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
+
+        dialog.setOnDismissListener(d -> {
+            for (CursorPreviewItemView it : items) it.release();
+        });
+        dialog.setContentView(panel);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.8f),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.75f));
+        }
+        dialog.show();
+
+        // 后台逐个解码并刷新预览
+        new Thread(() -> {
+            for (CursorPreviewItemView it : items) {
+                it.decodeInBackground();
+            }
+        }, "cursor-preview").start();
+    }
+
+    /** 安装选中的光标为常态光标。 */
+    private void installCursorScheme(
+            String schemeName,
+            com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.Entry entry) {
+        Toast.makeText(this, "正在导入…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final int frames = com.yuki.yukihub.gamecursor.wincursor.WinCursorSupport
+                    .install(this, entry.uri, entry.fileName);
+            runOnUiThread(() -> {
+                if (frames <= 0) {
+                    Toast.makeText(this, "这个光标文件无法解码，换一个试试", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                final String name = schemeName + " · " + entry.label();
+                // 关键：必须改设置对话框正在持有的那个 cfg 对象，不能另 load 一份。
+                // 之前在新 load 的副本上改并保存，对话框里的 cfg 仍是旧快照，
+                // 点"保存"时又用 winCursorName=null 把导入结果覆盖掉了 ——
+                // 表现就是导入能预览、一动滑块就变回普通箭头、进游戏也没生效。
+                if (gameCursorEditing != null) {
+                    gameCursorEditing.winCursorName = name;
+                    gameCursorEditing.iconUri = null;   // 光标包优先级高于 PNG
+                    gameCursorEditing.save(this);
+                } else {
+                    GameCursorConfig cfg = GameCursorConfig.load(this);
+                    cfg.winCursorName = name;
+                    cfg.iconUri = null;
+                    cfg.save(this);
+                }
+                if (gameCursorPreview != null) gameCursorPreview.refresh(gameCursorEditing);
+                if (gameCursorSourceStatus != null) gameCursorSourceStatus.setText("当前：" + name);
+                Toast.makeText(this,
+                        frames > 1 ? "已导入（" + frames + " 帧动画）" : "已导入（静态光标）",
+                        Toast.LENGTH_SHORT).show();
+            });
+        }, "cursor-install").start();
+    }
+
+    /**
+     * 光标包选择列表里的一项：左边动图预览，右边名称与帧数。
+     *
+     * 预览直接播动画，这样「哪个是我想要的」一眼就能看出来，
+     * 不用靠文件名猜。
+     */
+    private final class CursorPreviewItemView extends LinearLayout {
+        private final com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.Entry entry;
+        private final AnimatedCursorView icon;
+        private final TextView label;
+
+        CursorPreviewItemView(Context c,
+                              com.yuki.yukihub.gamecursor.wincursor.CursorSchemeScanner.Entry e) {
+            super(c);
+            this.entry = e;
+            setOrientation(HORIZONTAL);
+            setGravity(android.view.Gravity.CENTER_VERTICAL);
+            setPadding(dp(6), dp(6), dp(6), dp(6));
+            setClickable(true);
+            setBackgroundResource(com.yuki.yukihub.R.drawable.bg_game_card);
+
+            icon = new AnimatedCursorView(c);
+            addView(icon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+            label = new TextView(c);
+            label.setText(e.label());
+            label.setTextColor(getColorCompat(e.isNormal
+                    ? com.yuki.yukihub.R.color.yh_primary : com.yuki.yukihub.R.color.yh_text));
+            label.setTextSize(13);
+            label.setPadding(dp(12), 0, 0, 0);
+            LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            addView(label, lp);
+        }
+
+        void decodeInBackground() {
+            final com.yuki.yukihub.gamecursor.wincursor.CursorPack pack =
+                    com.yuki.yukihub.gamecursor.wincursor.WinCursorSupport
+                            .decode(MainActivity.this, entry.uri, entry.fileName);
+            runOnUiThread(() -> {
+                if (pack == null) {
+                    label.setText(entry.label() + "（无法解码）");
+                    return;
+                }
+                int n = pack.sequence != null ? pack.sequence.length : 1;
+                label.setText(entry.label() + (n > 1 ? "  " + n + " 帧" : "  静态"));
+                icon.setPack(pack);
+            });
+        }
+
+        void release() {
+            icon.release();
+        }
+    }
+
+    /** 播放 CursorPack 动画的小控件，只用于设置界面的预览列表。 */
+    private static final class AnimatedCursorView extends View {
+        private com.yuki.yukihub.gamecursor.wincursor.CursorPack pack;
+        private int step;
+        private Runnable ticker;
+        private final RectF dst = new RectF();
+
+        AnimatedCursorView(Context c) {
+            super(c);
+        }
+
+        void setPack(com.yuki.yukihub.gamecursor.wincursor.CursorPack p) {
+            release();
+            pack = p;
+            step = 0;
+            invalidate();
+            if (p != null && p.isAnimated()) startTicker();
+        }
+
+        private void startTicker() {
+            stopTicker();
+            ticker = new Runnable() {
+                @Override
+                public void run() {
+                    if (ticker != this || pack == null) return;
+                    step = (step + 1) % pack.sequence.length;
+                    invalidate();
+                    int d = step < pack.stepDurations.length ? pack.stepDurations[step] : 67;
+                    postDelayed(this, Math.max(16, d));
+                }
+            };
+            int d = pack.stepDurations.length > 0 ? pack.stepDurations[0] : 67;
+            postDelayed(ticker, Math.max(16, d));
+        }
+
+        private void stopTicker() {
+            if (ticker != null) {
+                removeCallbacks(ticker);
+                ticker = null;
+            }
+        }
+
+        void release() {
+            stopTicker();
+            if (pack != null) {
+                pack.recycle();
+                pack = null;
+            }
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            release();
+            super.onDetachedFromWindow();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            if (pack == null || pack.frames == null || pack.frames.length == 0) return;
+            int idx = pack.sequence != null && pack.sequence.length > 0
+                    ? pack.sequence[step % pack.sequence.length] : 0;
+            if (idx < 0 || idx >= pack.frames.length) idx = 0;
+            android.graphics.Bitmap bmp = pack.frames[idx].bitmap;
+            if (bmp == null || bmp.isRecycled()) return;
+            // 等比铺满，保持光标原始比例
+            float vw = getWidth(), vh = getHeight();
+            float bw = bmp.getWidth(), bh = bmp.getHeight();
+            float k = Math.min(vw / bw, vh / bh);
+            float w = bw * k, h = bh * k;
+            dst.set((vw - w) / 2f, (vh - h) / 2f, (vw + w) / 2f, (vh + h) / 2f);
+            canvas.drawBitmap(bmp, null, dst, null);
+        }
+    }
+
+    /** 光标缩放/透明度/灵敏度的取值夹取，与 GameCursorConfig 的上下限保持一致。 */
+    private static float gcClampScale(float v) {
+        return v < GameCursorConfig.MIN_SCALE ? GameCursorConfig.MIN_SCALE
+                : (v > GameCursorConfig.MAX_SCALE ? GameCursorConfig.MAX_SCALE : v);
+    }
+    private static float gcClampAlpha(float v) { return v < 0.2f ? 0.2f : (v > 1f ? 1f : v); }
+    private static float gcClampSens(float v) { return v < 0.5f ? 0.5f : (v > 3f ? 3f : v); }
+
+    /**
+     * Artemis 虚拟鼠标的点击注入依赖无障碍手势，这里查系统的已启用服务列表。
+     * 不能只看 ScreenshotServiceManager.getService()：那是进程内实例，
+     * 主进程没跑过翻译时即使系统已开启也拿不到。
+     */
+    private boolean isAccessibilityTapReady() {
+        try {
+            String enabled = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabled == null || enabled.isEmpty()) return false;
+            String target = getPackageName() + "/"
+                    + com.yuki.yukihub.translate.YukiScreenshotAccessibilityService.class.getName();
+            String shortTarget = getPackageName() + "/."
+                    + com.yuki.yukihub.translate.YukiScreenshotAccessibilityService.class.getSimpleName();
+            for (String s : enabled.split(":")) {
+                String t = s.trim();
+                if (t.equalsIgnoreCase(target) || t.equalsIgnoreCase(shortTarget)) return true;
+                // 兜底：厂商 ROM 有时只写包名段，做包含匹配
+                if (t.startsWith(getPackageName() + "/")
+                        && t.contains("YukiScreenshotAccessibilityService")) return true;
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 引导用户开启无障碍服务（Artemis 点击注入的唯一通道）。 */
+    private void promptAccessibilityForCursor(Dialog parent) {
+        new AlertDialog.Builder(this)
+                .setTitle("需要开启无障碍服务")
+                .setMessage("Artemis 引擎是 NativeActivity，触摸事件由引擎自己的 native 层消费，"
+                        + "应用层无法直接注入点击。\n\n"
+                        + "因此 Artemis 的虚拟鼠标点击必须借助系统无障碍手势："
+                        + "光标移动不受影响，但「点击」需要开启 YukiHub 的无障碍服务才生效。\n\n"
+                        + "开启路径：系统设置 → 无障碍 → 已下载的服务 → YukiHub → 开启。\n"
+                        + "（该服务与屏幕翻译共用，只做截图与手势，不读取窗口内容）")
+                .setPositiveButton("去开启", (d, w) -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                    } catch (Throwable t) {
+                        Toast.makeText(this, "无法打开系统设置，请手动前往：设置 → 无障碍", Toast.LENGTH_LONG).show();
+                    }
+                    if (parent != null) parent.dismiss();
+                })
+                .setNegativeButton("稍后再说", (d, w) -> {
+                    Toast.makeText(this, "已保存。未开启无障碍前，Artemis 光标可移动但点击无效", Toast.LENGTH_LONG).show();
+                    if (parent != null) parent.dismiss();
+                })
+                .show();
+    }
+
+    /**
+     * 设置界面里的光标实时预览。
+     *
+     * 用与游戏内 CursorView 完全相同的 CursorAppearance，所以看到的就是实际效果：
+     * 光标包会播动画，PNG 显示图片，都没有则内置箭头。
+     * 之前这里只画内置箭头，换了图在预览里看不出区别、进游戏才发现不一样。
+     *
+     * 顺便画一个十字标出热点（鼠标尖的实际位置），这在光标包场景下很有用 ——
+     * 不同角色的热点差异极大（文本选择在垂直中间，对角箭头在右上）。
+     */
+    private final class CursorPreviewView extends View {
+        private GameCursorConfig cfg;
+        private final com.yuki.yukihub.gamecursor.CursorAppearance appearance =
+                new com.yuki.yukihub.gamecursor.CursorAppearance();
+        private Runnable ticker;
+        private Paint hotspotPaint;
+        /**
+         * 上次实际加载的外观来源。
+         *
+         * 不能拿 cfg 前后对比：refresh 传进来的常常就是同一个对象引用，
+         * 字段已被就地改掉，比较结果永远"没变"。必须自己留一份快照。
+         */
+        private String loadedWinName;
+        private String loadedIconUri;
+
+        CursorPreviewView(Context c, GameCursorConfig initial) {
+            super(c);
+            cfg = initial;
+            reloadAppearance();
+        }
+
+        void refresh(GameCursorConfig c) {
+            if (c == null) return;
+            cfg = c;
+            // 只有外观来源真的变了才重新解码。滑块拖动时 refresh 每帧都来，
+            // 每次重解几十帧 PNG 会卡住 UI。
+            if (!eq(loadedWinName, cfg.winCursorName) || !eq(loadedIconUri, cfg.iconUri)) {
+                reloadAppearance();
+            }
+            invalidate();
+        }
+
+        private void reloadAppearance() {
+            appearance.load(MainActivity.this, cfg);
+            loadedWinName = cfg != null ? cfg.winCursorName : null;
+            loadedIconUri = cfg != null ? cfg.iconUri : null;
+            restartTicker();
+        }
+
+        private boolean eq(String x, String y) {
+            return x == null ? y == null : x.equals(y);
+        }
+
+        private void restartTicker() {
+            stopTicker();
+            if (!appearance.isAnimated()) return;
+            appearance.resetAnimation();
+            ticker = new Runnable() {
+                @Override
+                public void run() {
+                    if (ticker != this) return;
+                    appearance.advance();
+                    invalidate();
+                    postDelayed(this, Math.max(16, appearance.currentDurationMs()));
+                }
+            };
+            postDelayed(ticker, Math.max(16, appearance.currentDurationMs()));
+        }
+
+        private void stopTicker() {
+            if (ticker != null) {
+                removeCallbacks(ticker);
+                ticker = null;
+            }
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            stopTicker();
+            appearance.release();
+            super.onDetachedFromWindow();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            // 与游戏内一致的尺寸算法：基准高度 × 缩放，按内容宽高比定宽
+            float aspect = appearance.aspect();
+            float h = dp(44) * gcClampScale(cfg.scale) / GameCursorConfig.DEFAULT_SCALE;
+            float w = h * aspect;
+            // 预览框放不下时等比缩小，保证小缩放值也能看清
+            float maxW = getWidth() * 0.9f, maxH = getHeight() * 0.9f;
+            if (w > maxW || h > maxH) {
+                float k = Math.min(maxW / w, maxH / h);
+                w *= k;
+                h *= k;
+            }
+            float left = (getWidth() - w) / 2f;
+            float top = (getHeight() - h) / 2f;
+
+            int saveCount = canvas.save();
+            canvas.translate(left, top);
+            // 应用不透明度：游戏内是 View.setAlpha()，预览这里没有独立 View，
+            // 所以用 saveLayerAlpha 包一层。只包光标本身 ——
+            // 下面的热点十字是辅助标记，不该跟着变淡。
+            int alpha = Math.round(gcClampAlpha(cfg.alpha) * 255f);
+            int layer = -1;
+            if (alpha < 255) {
+                layer = canvas.saveLayerAlpha(0, 0, w, h, alpha);
+            }
+            appearance.draw(canvas, w, h, false);
+            if (layer >= 0) canvas.restoreToCount(layer);
+            canvas.restoreToCount(saveCount);
+
+            // 热点十字：标出"鼠标尖"的实际位置
+            if (hotspotPaint == null) {
+                hotspotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                hotspotPaint.setStyle(Paint.Style.STROKE);
+                hotspotPaint.setStrokeWidth(dp(1));
+                hotspotPaint.setColor(0x99FF3B30);
+            }
+            float hx = left + w * appearance.hotspotX();
+            float hy = top + h * appearance.hotspotY();
+            float r = dp(4);
+            canvas.drawLine(hx - r, hy, hx + r, hy, hotspotPaint);
+            canvas.drawLine(hx, hy - r, hx, hy + r, hotspotPaint);
+        }
     }
 
     private void showKrSettingsDialog(Game game) {
