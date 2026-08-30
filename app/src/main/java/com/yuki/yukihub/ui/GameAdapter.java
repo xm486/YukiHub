@@ -203,12 +203,19 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         bindStatusBadge(h.statusBadge, g.playStatus);
         String coverUri = chooseSafeCoverUri(g);
         boolean needBlur = g.nsfw && nsfwBlurEnabled;
+        // 统一先作废该 ImageView 上可能存在的旧异步请求。
+        // ViewHolder 会被复用：若卡片上一次显示的是 NSFW 游戏且模糊尚未算完，
+        // 而本次走的是非模糊路径，不重置 tag 会让旧请求的 tag 校验意外通过，
+        // 把上一个游戏的模糊封面贴到当前卡片上（表现为封面错位，滑动后恢复）。
+        // 因此每条路径都要设置自己的唯一 tag，模糊路径随后会覆盖成自己的请求 tag。
+        h.cover.setTag(R.id.tag_remote_image_request, "bind:" + g.id + ":" + System.nanoTime());
         if (coverUri != null && !coverUri.isEmpty()) {
             try {
                 final Uri uri = Uri.parse(coverUri);
                 if (needBlur) {
                     // 高斯模糊：先查缓存，缓存命中直接显示模糊图，零闪烁
-                    final String requestTag = "nsfw_blur:" + g.id;
+                    // key 带上封面 uri：换封面后游戏 id 不变，只用 id 会命中旧封面的模糊图
+                    final String requestTag = "nsfw_blur:" + g.id + ":" + coverUri;
                     h.cover.setTag(R.id.tag_remote_image_request, requestTag);
                     Bitmap cached = BlurUtils.getCached(requestTag);
                     if (cached != null) {
@@ -226,13 +233,20 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
                             try {
                                 android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
                                 opts.inSampleSize = 2;
-                                Bitmap bitmap = android.graphics.BitmapFactory.decodeStream(
-                                        h.itemView.getContext().getContentResolver().openInputStream(uri), null, opts);
+                                Bitmap bitmap;
+                                // try-with-resources：原实现未关闭流，滚动时每张封面泄漏一个 fd
+                                try (java.io.InputStream in = h.itemView.getContext()
+                                        .getContentResolver().openInputStream(uri)) {
+                                    if (in == null) return;
+                                    bitmap = android.graphics.BitmapFactory.decodeStream(in, null, opts);
+                                }
                                 if (bitmap == null) return;
                                 final Bitmap blurred = BlurUtils.blur(h.itemView.getContext(), bitmap, 22f);
                                 if (blurred == null) return;
                                 BlurUtils.putCache(requestTag, blurred);
                                 h.itemView.post(() -> {
+                                    // tag 校验：ViewHolder 可能已被复用给别的游戏，
+                                    // 此时 tag 已变，丢弃这次结果，避免贴错卡片
                                     String currentTag = (String) h.cover.getTag(R.id.tag_remote_image_request);
                                     if (!requestTag.equals(currentTag)) return;
                                     h.cover.setImageBitmap(blurred);
