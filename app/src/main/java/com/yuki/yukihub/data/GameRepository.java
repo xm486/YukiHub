@@ -245,7 +245,79 @@ public class GameRepository {
         for (Long id : ids) finishPlaySession(id, end, minDuration, maxDuration);
     }
 
-    public PlayActivity findLatestOpenPlaySession() {
+    /**
+     * 清理「秒退」产生的未完成记录，返回清掉的条数。
+     *
+     * 游戏启动失败（进程被系统复用导致引擎直接退出、崩溃、被强杀）时，
+     * 启动器没机会结算，会在库里留下 end_time IS NULL 的记录。
+     * 这类极短记录没有补记价值，若不清理会导致补记弹窗反复出现
+     * （findLatestOpenPlaySession 是 LIMIT 1，一条一弹）。
+     *
+     * 注意：正常手动退出游戏不会走到这里——那条路径由
+     * finishCurrentPlaySessionIfAny 正常结算并写入 end_time，
+     * 记录已完成，不在本方法的处理范围内。因此开发中「进游戏看一眼就退」
+     * 只要是手动退出，都会被正常计时，不受影响。
+     *
+     * @param thresholdMs 时长阈值，start_time 距今短于此值的未完成记录将被删除
+     */
+    public int discardShortOpenPlaySessions(long thresholdMs) {
+        if (thresholdMs <= 0) return 0;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        try {
+            long cutoff = System.currentTimeMillis() - thresholdMs;
+            return db.delete("play_sessions",
+                    "end_time IS NULL AND start_time > ?",
+                    new String[]{String.valueOf(cutoff)});
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+/** 未完成记录的总条数，用于补记弹窗一次性告知用户数量。 */
+    public int countOpenPlaySessions() {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor c = null;
+        try {
+            c = db.rawQuery(
+                    "SELECT COUNT(*) FROM play_sessions ps JOIN games g ON g.id=ps.game_id " +
+                            "WHERE ps.end_time IS NULL AND IFNULL(ps.deleted,0)=0", null);
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        } catch (Throwable t) {
+            return 0;
+        } finally {
+            if (c != null) c.close();
+        }
+    }
+
+    /**
+     * 未完成记录弹窗的进程级互斥标记。
+     *
+     * MainActivity.onCreate 与 HomeActivity.onResume 都会调用
+     * finishStalePlaySessionsIfAny，若各自持有标记，用户在两个界面之间
+     * 切换就会重复看到同一个模态弹窗。放在这里让两处共用同一个状态。
+     * 进程重启后自然复位，符合「每次运行询问一次」的预期。
+     */
+    private static boolean staleSessionHandled = false;
+
+    /** 本次运行是否已处理过未完成记录。 */
+    public static boolean isStaleSessionHandled() {
+        return staleSessionHandled;
+    }
+
+    /** 标记本次运行已处理过未完成记录。 */
+    public static void markStaleSessionHandled() {
+        staleSessionHandled = true;
+    }
+
+    /**
+     * 复位标记。在启动游戏时调用：本次游玩若异常结束，
+     * 回到启动器后应当能再次得到提示，而不是被上一轮的标记压掉。
+     */
+    public static void resetStaleSessionHandled() {
+        staleSessionHandled = false;
+    }
+
+
+public PlayActivity findLatestOpenPlaySession() {
         SQLiteDatabase db = helper.getReadableDatabase();
         Cursor c = db.rawQuery(
                 "SELECT ps.id,ps.session_uuid,ps.game_id,g.title,ps.start_time,ps.end_time,ps.duration,ps.launch_type " +

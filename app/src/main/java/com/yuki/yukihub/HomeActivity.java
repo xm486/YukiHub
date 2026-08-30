@@ -957,13 +957,33 @@ public class HomeActivity extends AppCompatActivity {
 
     private static final long MIN_PLAY_SESSION_MS = 0L;
     private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
+    /**
+     * 秒退阈值：与 MainActivity 保持一致。
+     * 未完成且起始时间距今短于此值的记录直接丢弃，不询问用户。
+     * 正常手动退出的游戏由 MainActivity.finishCurrentPlaySessionIfAny 结算，不受影响。
+     */
+    private static final long DISCARD_OPEN_SESSION_MS = 10L * 1000L;
     private boolean staleSessionDialogShowing = false;
 
     private void finishStalePlaySessionsIfAny() {
         if (repository == null || staleSessionDialogShowing) return;
+        // 与 MainActivity 共用进程级标记，避免在两个界面间切换时重复弹同一个模态窗
+        if (GameRepository.isStaleSessionHandled()) return;
+
+        // 先静默丢弃启动失败产生的秒退垃圾记录（游戏启动失败会连续产生多条）
+        int discarded = repository.discardShortOpenPlaySessions(DISCARD_OPEN_SESSION_MS);
+        if (discarded > 0) {
+            android.util.Log.i("YukiHub", "discarded " + discarded + " short open play sessions");
+        }
+
         GameRepository.PlayActivity open = repository.findLatestOpenPlaySession();
-        if (open == null) return;
+        if (open == null) {
+            GameRepository.markStaleSessionHandled();
+            return;
+        }
+        GameRepository.markStaleSessionHandled();
         staleSessionDialogShowing = true;
+        int total = repository.countOpenPlaySessions();
         long now = System.currentTimeMillis();
         long rawDuration = Math.max(0L, now - open.startTime);
         long duration = Math.min(rawDuration, MAX_PLAY_SESSION_MS);
@@ -971,21 +991,26 @@ public class HomeActivity extends AppCompatActivity {
                 + "游戏：" + empty(open.gameTitle, "未命名游戏") + "\n"
                 + "开始时间：" + new SimpleDateFormat("MM月dd日 HH:mm", Locale.getDefault()).format(new Date(open.startTime)) + "\n"
                 + "可补记时长：" + formatPlayDuration(duration) + "\n\n"
-                + "如果这段时间确实在游玩，可选择补记；如果只是测试启动、闪退或误操作，请选择忽略。\n\n"
-                + "本操作仅处理这一条未完成记录。";
+                + (total > 1
+                    ? "另有 " + (total - 1) + " 条更早的未完成记录，将一并处理。\n\n"
+                    : "")
+                + "如果这段时间确实在游玩，可选择补记；如果只是测试启动、闪退或误操作，请选择忽略。";
         androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("发现未完成的游玩记录")
                 .setMessage(message)
                 .setPositiveButton("补记", (d, w) -> {
-                    repository.finishPlaySession(open.sessionId, System.currentTimeMillis(), MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
+                    // 一次性结算全部未完成记录，避免下次进来又弹
+                    repository.finishUnfinishedPlaySessions(
+                            System.currentTimeMillis(), MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
                     refreshHome();
                     Toast.makeText(this, "已补记上次游玩时长", Toast.LENGTH_SHORT).show();
                     staleSessionDialogShowing = false;
                 })
                 .setNegativeButton("忽略", (d, w) -> {
-                    repository.deleteOpenPlaySession(open.sessionId);
+                    // 同样一次性清掉全部，而非只删这一条
+                    repository.deleteOpenPlaySessions();
                     refreshHome();
-                    Toast.makeText(this, "已忽略上次未完成记录", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "已忽略未完成记录", Toast.LENGTH_SHORT).show();
                     staleSessionDialogShowing = false;
                 })
                 .setCancelable(false)

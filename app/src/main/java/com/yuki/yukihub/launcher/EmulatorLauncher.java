@@ -28,6 +28,89 @@ import com.yuki.yukihub.ons.OnsSettings;
 public class EmulatorLauncher {
     private static final List<FileObserver> ARTEMIS_SAVE_OBSERVERS = new ArrayList<>();
 
+    /** Artemis 引擎所在的独立进程后缀，与 AndroidManifest 中的 android:process 一致。 */
+    private static final String ARTEMIS_PROCESS_SUFFIX = ":artemis";
+
+    /**
+     * 启动 Artemis 游戏前，先确保上一次的 :artemis 进程已经结束。
+     *
+     * 【为什么必须这样做】
+     * 三个 Artemis 版本（标准 / 兼容 / 兼容 v2）来自不同的引擎构建，
+     * 却共用同一个 :artemis 进程与同一个 taskAffinity，且都是 singleInstance。
+     * 引擎是 NativeActivity，android_main 持有进程级的全局状态
+     * （静态变量、已注册的 JNI、音频与 GL 上下文）。
+     * 进程被复用时，后启动的引擎会看到上一个引擎残留的环境，
+     * 随即走正常关闭流程退出——表现为「黑屏一闪就回启动器」，
+     * 日志只有 android_main Destroy requested，没有任何崩溃标记。
+     *
+     * 部分机型（如 ColorOS）会在游戏退出后及时回收 :artemis，
+     * 因此每次都是干净的冷启动，不会触发该问题；
+     * 而另一些机型（如 MagicOS）会把进程留在后台复用，必然复现。
+     * 依赖系统的回收行为是不成立的假设，所以这里主动清理。
+     *
+     * 存档安全性：Artemis 存档由 FileObserver 监听 CLOSE_WRITE 实时导出，
+     * 且该 observer 注册在启动器进程（见 ARTEMIS_SAVE_OBSERVERS），
+     * 不在 :artemis 进程内，因此杀掉 :artemis 不会影响存档落盘。
+     *
+     * @return true 表示已确认进程不存在（或已成功清理）
+     */
+    private static boolean ensureArtemisProcessGone(Context context) {
+        if (context == null) return true;
+        try {
+            String target = context.getPackageName() + ARTEMIS_PROCESS_SUFFIX;
+            if (!isProcessAlive(context, target)) return true;
+
+            android.app.ActivityManager am =
+                    (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return false;
+            // killBackgroundProcesses 只能按包名杀，会连带结束本应用的其它后台进程。
+            // 对我们是可接受的：KRKR/ONS/Tyrano 各自独立进程，正在前台的不受影响，
+            // 而此刻正要启动新游戏，本就不该有其它游戏进程在跑。
+            am.killBackgroundProcesses(context.getPackageName());
+            Log.i("EmulatorLauncher", "killBackgroundProcesses issued for " + target);
+
+            // 杀进程是异步的，轮询等待其真正消失，避免紧接着的 startActivity
+            // 又被路由到旧进程里。
+            // 本方法在主线程调用（launchGameInternal），上限压到 600ms：
+            // 实测进程通常在 100~200ms 内消失，600ms 足够且不至于触发 ANR。
+            for (int i = 0; i < 12; i++) {
+                if (!isProcessAlive(context, target)) {
+                    Log.i("EmulatorLauncher", "artemis process gone after " + (i * 50) + "ms");
+                    return true;
+                }
+                try {
+                    Thread.sleep(50L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            Log.w("EmulatorLauncher", "artemis process still alive after 600ms, launching anyway");
+            return false;
+        } catch (Throwable t) {
+            Log.w("EmulatorLauncher", "ensureArtemisProcessGone failed", t);
+            return false;
+        }
+    }
+
+    /** 按进程名查询本应用的某个子进程是否存活。 */
+    private static boolean isProcessAlive(Context context, String processName) {
+        try {
+            android.app.ActivityManager am =
+                    (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return false;
+            List<android.app.ActivityManager.RunningAppProcessInfo> running = am.getRunningAppProcesses();
+            if (running == null) return false;
+            for (android.app.ActivityManager.RunningAppProcessInfo info : running) {
+                if (info != null && processName.equals(info.processName)) return true;
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+
     public static boolean launchGame(Context context, String packageName, String rootUri, String launchTarget) {
         return launchGame(context, packageName, rootUri, launchTarget, "game", null);
     }
@@ -639,6 +722,9 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
     }
 
     public static Intent buildInternalArtemisIntent(Context context, String packageName, String gamePath, String launchTarget) {
+// 启动前先清掉可能残留的 :artemis 进程，避免不同引擎构建共用进程导致
+// 后启动的引擎读到上一个引擎的全局状态后直接退出（黑屏一闪）。详见 ensureArtemisProcessGone。
+ensureArtemisProcessGone(context);
 String resolvedPath = resolveInternalArtemisPath(gamePath, launchTarget);
 String rootPath = stripFileScheme(resolvedPath);
 String path = rootPath;

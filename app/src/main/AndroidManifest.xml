@@ -10,6 +10,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
+        清理残留的 :artemis 进程用。三个 Artemis 引擎版本共用同一进程，
+        进程被系统留在后台复用时，后启动的引擎会读到上一个引擎的全局状态
+        并直接退出（表现为黑屏一闪）。详见 EmulatorLauncher.ensureArtemisProcessGone。
+        该权限为普通权限，只能杀本应用自己的后台进程，无需运行时申请。
+    -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- Winlator 直启使用导出 Activity，不再依赖 Shizuku 权限。 -->
 
     <queries>

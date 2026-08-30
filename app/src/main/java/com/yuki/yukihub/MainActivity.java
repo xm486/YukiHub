@@ -10464,6 +10464,9 @@ try {
         sessionStart = System.currentTimeMillis();
         String launchType = resolveLaunchType(emulatorPackage);
         runningSessionId = repository.startPlaySession(game.id, sessionStart, launchType);
+        // 复位「本次运行已处理过未完成记录」标记：本次游玩若异常结束，
+        // 回到启动器时应当能再次得到提示，而不是被之前的标记压掉。
+        GameRepository.resetStaleSessionHandled();
         launchedExternal = true;
         // 标记正在玩（Steam 风格），并确保后台心跳继续
         try {
@@ -10973,11 +10976,34 @@ return startActivitySafely(intent);
     /** 未完成记录弹窗期间到达的快捷方式启动请求，弹窗关闭后再执行。 */
     private long pendingShortcutGameId = -1L;
 
+    /**
+     * 秒退阈值：未完成且起始时间距今短于此值的记录直接丢弃，不询问用户。
+     * 游戏启动失败会连续产生多条这类垃圾记录，逐条询问会让弹窗看起来没完没了。
+     * 正常手动退出的游戏由 finishCurrentPlaySessionIfAny 结算，不受此阈值影响。
+     */
+    private static final long DISCARD_OPEN_SESSION_MS = 10L * 1000L;
+
+    /** 进程内互斥：MainActivity 与 HomeActivity 都会调用，标记放在 GameRepository 供两处共用。 */
     private void finishStalePlaySessionsIfAny() {
         if (repository == null) return;
+        // 同一次运行内只处理一次，避免在两个界面间切换时反复弹窗
+        if (GameRepository.isStaleSessionHandled()) return;
+
+        // 先静默丢弃启动失败产生的秒退垃圾记录
+        int discarded = repository.discardShortOpenPlaySessions(DISCARD_OPEN_SESSION_MS);
+        if (discarded > 0) {
+            Log.i("YukiHub", "discarded " + discarded + " short open play sessions");
+        }
+
         PlayActivity open = repository.findLatestOpenPlaySession();
-        if (open == null) return;
+        if (open == null) {
+            GameRepository.markStaleSessionHandled();
+            return;
+        }
+        GameRepository.markStaleSessionHandled();
         staleSessionDialogShowing = true;
+        // 剩余未完成记录的总数：一次性告知并统一处理，不再逐条弹窗
+        int total = repository.countOpenPlaySessions();
         long now = System.currentTimeMillis();
         long rawDuration = Math.max(0L, now - open.startTime);
         long duration = Math.min(rawDuration, MAX_PLAY_SESSION_MS);
@@ -10985,22 +11011,27 @@ return startActivitySafely(intent);
                 + "游戏：" + emptyText(open.gameTitle, "未命名游戏") + "\n"
                 + "开始时间：" + TimeFormatUtil.date(open.startTime) + "\n"
                 + "可补记时长：" + TimeFormatUtil.playTime(duration) + "\n\n"
-                + "如果这段时间确实在游玩，可选择补记；如果只是测试启动、闪退或误操作，请选择忽略。\n\n"
-                + "本操作仅处理这一条未完成记录。";
+                + (total > 1
+                    ? "另有 " + (total - 1) + " 条更早的未完成记录，将一并处理。\n\n"
+                    : "")
+                + "如果这段时间确实在游玩，可选择补记；如果只是测试启动、闪退或误操作，请选择忽略。";
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("发现未完成的游玩记录")
                 .setMessage(message)
                 .setPositiveButton("补记", (d, w) -> {
-                    repository.finishPlaySession(open.sessionId, System.currentTimeMillis(), MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
+                    // 一次性结算全部未完成记录，避免下次进来又弹
+                    repository.finishUnfinishedPlaySessions(
+                            System.currentTimeMillis(), MIN_PLAY_SESSION_MS, MAX_PLAY_SESSION_MS);
                     loadGames();
                     updateProfilePanel();
                     Toast.makeText(MainActivity.this, "已补记上次游玩时长", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("忽略", (d, w) -> {
-                    repository.deleteOpenPlaySession(open.sessionId);
+                    // 同样一次性清掉全部，而非只删这一条
+                    repository.deleteOpenPlaySessions();
                     loadGames();
                     updateProfilePanel();
-                    Toast.makeText(MainActivity.this, "已忽略上次未完成记录", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "已忽略未完成记录", Toast.LENGTH_SHORT).show();
                 })
                 .setCancelable(false)
                 // 这个弹窗是模态的。桌面快捷方式冷启动时它会先弹出来，
