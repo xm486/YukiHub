@@ -270,6 +270,15 @@ public final class GameCursorOverlay {
         cursor.setVisibility(mouseMode ? View.VISIBLE : View.GONE);
         toggle.invalidate();
         updateWindowTouchability();
+        // 进入鼠标模式时同步一次位置：否则引擎的鼠标位置还是上次退出时的旧值，
+        // 光标显示在一处、引擎认为在另一处，悬停高亮就会错位。
+        if (mouseMode) {
+            container.post(() -> {
+                if (attached && mouseMode) {
+                    injector.hover(cursor.tipX(), cursor.tipY());
+                }
+            });
+        }
     }
 
     /**
@@ -474,6 +483,14 @@ public final class GameCursorOverlay {
                     lastX = event.getRawX();
                     lastY = event.getRawY();
                     cursor.setTapFeedback(true);
+                    // 按下时立刻上报一次位置。
+                    //
+                    // 必需：如果手指按下后几乎不动就抬手（正常点击的样子），
+                    // MOVE 分支可能一次都没跑到、或位移为 0 被去重跳过，
+                    // 引擎的鼠标位置就还停在上一次的地方 ——
+                    // 表现为悬停高亮位置与光标不一致、"一会能一会不能"。
+                    lastHoverAt = android.os.SystemClock.uptimeMillis();
+                    injector.hover(cursor.tipX(), cursor.tipY());
                     return true;
                 }
                 case MotionEvent.ACTION_MOVE: {

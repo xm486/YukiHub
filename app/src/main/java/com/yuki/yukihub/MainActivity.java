@@ -117,6 +117,7 @@ import java.lang.reflect.Method;
  import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -1099,20 +1100,20 @@ private void scheduleVideoThemeExtraction() {
     for (int id : sidebarIds) {
         TextView tv = findViewById(id);
         if (tv != null) {
-            tv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
+            tv.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
         }
     }
 
     // Profile panel (background only)
     View profilePanel = findViewById(R.id.profilePanel);
     if (profilePanel != null) {
-        profilePanel.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+        profilePanel.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_sidebar) : tintSidebar(colors));
     }
 
     // Search input (background only)
     EditText etSearch = findViewById(R.id.etSearch);
     if (etSearch != null) {
-        etSearch.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+        etSearch.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_input) : tintInput(colors));
     }
 
     // Detail panel (right sidebar) — outer FrameLayout has bg_game_card
@@ -1121,7 +1122,7 @@ private void scheduleVideoThemeExtraction() {
         // The outer FrameLayout is the detailPanel's parent (ScrollView's parent)
         View detailOuterFrame = (View) detailPanel.getParent().getParent();
         if (detailOuterFrame != null) {
-            detailOuterFrame.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_game_card) : tintCardSelected(colors));
+            detailOuterFrame.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_game_card) : tintCardSelected(colors));
         }
         // The ScrollView parent
         View detailScrollParent = (View) detailPanel.getParent();
@@ -1133,11 +1134,11 @@ private void scheduleVideoThemeExtraction() {
     // Detail panel interactive element backgrounds
     TextView sideMetadataSourceBadge = findViewById(R.id.sideMetadataSourceBadge);
     if (sideMetadataSourceBadge != null) {
-        sideMetadataSourceBadge.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_chip) : tintChip(colors));
+        sideMetadataSourceBadge.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_chip) : tintChip(colors));
     }
     TextView sideTranslateToggle = findViewById(R.id.sideTranslateToggle);
     if (sideTranslateToggle != null) {
-        sideTranslateToggle.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+        sideTranslateToggle.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_input) : tintInput(colors));
     }
 
     // Detail panel cover placeholder
@@ -1145,38 +1146,38 @@ private void scheduleVideoThemeExtraction() {
     if (sideDetailPlaceholder != null) {
         View coverFrame = (View) sideDetailPlaceholder.getParent();
         if (coverFrame != null) {
-            coverFrame.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+            coverFrame.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
         }
     }
 
     // Detail panel screenshot placeholders
     ImageView sideScreenshot1 = findViewById(R.id.sideScreenshot1);
     if (sideScreenshot1 != null) {
-        sideScreenshot1.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+        sideScreenshot1.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
     }
     ImageView sideScreenshot2 = findViewById(R.id.sideScreenshot2);
     if (sideScreenshot2 != null) {
-        sideScreenshot2.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+        sideScreenshot2.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
     }
 
     // Launch button (background only)
     TextView sideBtnLaunch = findViewById(R.id.sideBtnLaunch);
     if (sideBtnLaunch != null) {
-        sideBtnLaunch.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+        sideBtnLaunch.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
     }
     // Options button (background only)
     TextView sideBtnOptions = findViewById(R.id.sideBtnOptions);
     if (sideBtnOptions != null) {
-        sideBtnOptions.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+        sideBtnOptions.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_input) : tintInput(colors));
     }
 
     // Top bar buttons (background only)
     View btnScan = findViewById(R.id.btnScan);
-    if (btnScan != null) btnScan.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+    if (btnScan != null) btnScan.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
     TextView btnAdd = findViewById(R.id.btnAdd);
-    if (btnAdd != null) btnAdd.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+    if (btnAdd != null) btnAdd.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
     View btnSettings = findViewById(R.id.btnSettings);
-    if (btnSettings != null) btnSettings.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_yuki_button) : tintButton(colors));
+    if (btnSettings != null) btnSettings.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
 
     // Nav buttons (background only)
     int[] navIds = {R.id.navHome, R.id.navLibrary, R.id.navBigScreen, R.id.navChat};
@@ -1185,9 +1186,9 @@ private void scheduleVideoThemeExtraction() {
         if (nv != null) {
             if (id == R.id.navLibrary) {
                 // navLibrary is the active/selected nav — use bg_home_nav_active on reset, tintSidebar when themed
-                nv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_home_nav_active) : tintSidebar(colors));
+                nv.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_home_nav_active) : tintSidebar(colors));
             } else {
-                nv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
+                nv.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_sidebar_item) : tintSidebarItem(colors));
             }
         }
     }
@@ -1197,7 +1198,7 @@ private void scheduleVideoThemeExtraction() {
     for (int id : sidebarContainerIds) {
         View sc = findViewById(id);
         if (sc != null) {
-            sc.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_sidebar) : tintSidebar(colors));
+            sc.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_sidebar) : tintSidebar(colors));
         }
     }
 
@@ -1206,7 +1207,7 @@ private void scheduleVideoThemeExtraction() {
     for (int id : filterIds) {
         View fv = findViewById(id);
         if (fv != null) {
-            fv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+            fv.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_input) : tintInput(colors));
         }
     }
 
@@ -1215,14 +1216,14 @@ private void scheduleVideoThemeExtraction() {
     for (int id : statusIds) {
         View sv = findViewById(id);
         if (sv != null) {
-            sv.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_input) : tintInput(colors));
+            sv.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_input) : tintInput(colors));
         }
     }
 
     // Notice button (uses bg_status_item on reset, tintInput when themed — no padding to avoid icon squeeze)
     View btnNotice = findViewById(R.id.btnNotice);
     if (btnNotice != null) {
-        btnNotice.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_status_item) : tintInput(colors));
+        btnNotice.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_status_item) : tintInput(colors));
     }
 
     // Background dim overlay color
@@ -1237,7 +1238,7 @@ private void scheduleVideoThemeExtraction() {
     for (int id : placeholderIds) {
         View v = findViewById(id);
         if (v != null && v.getVisibility() == View.VISIBLE) {
-            v.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+            v.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
         }
     }
 
@@ -1248,7 +1249,7 @@ private void scheduleVideoThemeExtraction() {
         detailCoverPlaceholder = findViewByIdRecursive((ViewGroup) detailPanel2, R.id.tvCoverPlaceholder);
     }
     if (detailCoverPlaceholder != null) {
-        detailCoverPlaceholder.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+        detailCoverPlaceholder.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
     }
 
     // Profile avatar placeholder
@@ -1256,7 +1257,7 @@ private void scheduleVideoThemeExtraction() {
     if (profileAvatar != null && profileAvatar instanceof ViewGroup) {
         View avatarFrame = findViewByIndex((ViewGroup) profileAvatar, 0);
         if (avatarFrame != null) {
-            avatarFrame.setBackground(resetting ? getResources().getDrawable(R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
+            avatarFrame.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
         }
     }
 

@@ -28,6 +28,8 @@ public final class ArtemisNativeInput {
 
     private static native boolean nativeRelease();
 
+    private static native boolean nativeClearKeys();
+
     private static native void nativeDumpKeys();
 
     /**
@@ -96,11 +98,29 @@ public final class ArtemisNativeInput {
         }
     }
 
-    /** 抬起。 */
+    /** 抬起：写抬起边沿（state=4），引擎下一帧读 IsUpEdge 时触发按钮确认。 */
     public static boolean release() {
         if (!isLoaded()) return false;
         try {
             return nativeRelease();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 清空按键状态（state=0）。必须在 release() 之后延时调用。
+     *
+     * 引擎的 Execute() 在输入 deque 为空时完全不碰状态数组
+     * （反汇编可见 cbz 直接跳过），而我们是直写状态数组、从不排队，
+     * 所以引擎永远不会帮我们把抬起边沿推进回空闲。
+     * 不清的话 state 卡在 4，IsUpEdge 每帧为真 —— 实测表现为
+     * "拖动鼠标到哪都算一次点击"，并持续干扰悬停判定。
+     */
+    public static boolean clearKeys() {
+        if (!isLoaded()) return false;
+        try {
+            return nativeClearKeys();
         } catch (Throwable t) {
             return false;
         }

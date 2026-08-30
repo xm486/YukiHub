@@ -35,6 +35,13 @@ public final class GameCursorInjector {
      */
     private static final long ARTEMIS_PRESS_HOLD_MS = 120;
     /**
+     * 抬起边沿的保持时长（毫秒）。
+     *
+     * 引擎要在自己的帧循环里读到 IsUpEdge 才会触发按钮确认，
+     * 所以写 4 之后不能立刻清 0。80ms 在 30fps 下也能跨 2 帧以上。
+     */
+    private static final long ARTEMIS_UP_EDGE_HOLD_MS = 80;
+    /**
      * Artemis hover 失败后的重试间隔。
      *
      * 200ms 是权衡：足够稀疏（不会每帧白跑 JNI），也足够密
@@ -151,6 +158,9 @@ public final class GameCursorInjector {
             if (target == TARGET_ARTEMIS) ArtemisNativeInput.release();
             android.util.Log.i(TAG, "injector reset: released stuck press");
         }
+        // 无论有没有卡住的按下，都把状态清干净：
+        // 抬起边沿（4）若残留会让引擎每帧都判定为"刚抬起"。
+        if (target == TARGET_ARTEMIS) ArtemisNativeInput.clearKeys();
     }
 
     /** 悬停通道是否已被判定不可用。 */
@@ -197,12 +207,17 @@ public final class GameCursorInjector {
             artemisHoverBackoffUntil = 0;
             artemisPressed = true;
             // 保持足够长再抬起：引擎按帧轮询状态数组，太短会被掉帧漏掉。
-            // 抬起后立刻清标志，下一次点击无需等固定间隔。
-            new android.os.Handler(android.os.Looper.getMainLooper())
-                    .postDelayed(() -> {
-                        ArtemisNativeInput.release();
-                        artemisPressed = false;
-                    }, ARTEMIS_PRESS_HOLD_MS);
+            // 抬起分两步：先写抬起边沿让 IsUpEdge 成立，再延时清回空闲 ——
+            // 引擎的 Execute() 在 deque 为空时不碰状态数组，不会帮我们清，
+            // 卡在抬起边沿会让"拖到哪都算点击"。
+            android.os.Handler h =
+                    new android.os.Handler(android.os.Looper.getMainLooper());
+            h.postDelayed(() -> {
+                ArtemisNativeInput.release();
+                artemisPressed = false;
+                // 再等一帧让引擎读到抬起边沿，然后清干净
+                h.postDelayed(ArtemisNativeInput::clearKeys, ARTEMIS_UP_EDGE_HOLD_MS);
+            }, ARTEMIS_PRESS_HOLD_MS);
             android.util.Log.d(TAG, "artemis native tap (" + x + "," + y + ")");
             return;
         }
