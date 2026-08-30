@@ -184,7 +184,13 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
   </a>
 </p>
 
-<p align="center">欢迎加入 QQ 交流群，反馈问题、提建议或一起讨论功能。</p>
+<p align="center">
+  <a href="https://pd.qq.com/s/dk65nmyu7?b=9">
+    <img src="https://img.shields.io/badge/QQ频道-pd21655966-12B7F5?logo=tencentqq&logoColor=white" alt="QQ Channel" />
+  </a>
+</p>
+
+<p align="center">欢迎加入 QQ 交流群和QQ频道，反馈问题、提建议或一起讨论功能。</p>
 
 ---
 

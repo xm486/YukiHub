@@ -12,11 +12,57 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      * 一旦有用户装过更高版本，库里记录的就是那个高版本号；
      * 版本号改小会触发 onDowngrade，默认实现直接抛异常导致打开数据库就闪退。
      * 历史：15 = 聊天回复引用 + 未读锚点；16 = 曾短暂加过群聊等级列（已废弃，等级改为不入缓存）
+     *      18 = 清理 metadata_cache 孤儿行（历史存量）+ 压缩数据库
      */
-    public static final int DB_VERSION = 17;
+    public static final int DB_VERSION = 18;
+
+    /**
+     * 升级时清理过孤儿行的标记。
+     *
+     * VACUUM 不能在事务内执行，而 onUpgrade 由 SQLiteOpenHelper 包在事务里，
+     * 所以升级只置标记，压缩延后到 onOpen（事务外）执行。
+     * static：SQLiteOpenHelper 实例在项目里是各处新建的（每个 Repository 一个），
+     * 用实例字段会导致置标记的实例与执行压缩的实例不是同一个。
+     */
+    private static final java.util.concurrent.atomic.AtomicBoolean vacuumPending =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public YukiDatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
+    }
+
+    /**
+     * 事务外的收尾工作：执行升级时挂起的 VACUUM。
+     *
+     * onOpen 在 onCreate/onUpgrade 之后、且已脱离升级事务时调用，
+     * 是执行 VACUUM 的合适时机。compareAndSet 保证多个 helper 实例
+     * 并发打开时只压缩一次。
+     */
+    @Override
+    public void onOpen(SQLiteDatabase db) {
+        super.onOpen(db);
+        if (!vacuumPending.compareAndSet(true, false)) return;
+        try {
+            long before = db.getPageSize() * getPageCount(db);
+            db.execSQL("VACUUM");
+            long after = db.getPageSize() * getPageCount(db);
+            android.util.Log.i("YukiDB", "vacuum done: " + (before / 1024) + "KB -> " + (after / 1024) + "KB");
+        } catch (Throwable t) {
+            // 压缩失败不影响功能，只是文件没变小
+            android.util.Log.w("YukiDB", "vacuum failed", t);
+        }
+    }
+
+    private long getPageCount(SQLiteDatabase db) {
+        android.database.Cursor c = null;
+        try {
+            c = db.rawQuery("PRAGMA page_count", null);
+            return c.moveToFirst() ? c.getLong(0) : 0L;
+        } catch (Throwable t) {
+            return 0L;
+        } finally {
+            if (c != null) c.close();
+        }
     }
 
     @Override
@@ -126,6 +172,25 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
             // 多余的列留着无害，SQLite 也不支持简单地删列，因此不做处理。
             // 这里保留分支只为把版本号推进到 17，修复此前误将版本改小导致的闪退。
             ensureChatCacheTables(db);
+        }
+        if (oldVersion < 18) {
+            // 历史存量清理：删游戏时曾漏掉 metadata_cache，
+            // 导致已删游戏的资料缓存永久残留，并被备份原样导出（备份体积持续膨胀）。
+            // 删除逻辑本身已修（见 GameRepository.delete/deleteBatch/deleteAll），
+            // 这里只负责把之前攒下的垃圾一次性擦掉。
+            try {
+                int removed = db.delete("metadata_cache",
+                        "game_id NOT IN (SELECT id FROM games)", null);
+                if (removed > 0) {
+                    android.util.Log.i("YukiDB", "upgrade 18: pruned " + removed + " orphan metadata rows");
+                    // 删完只是把页标记为空闲，文件不会自动变小，需要 VACUUM 回收。
+                    // 但 onUpgrade 运行在事务内，VACUUM 在事务里会失败，
+                    // 因此这里只置标记，实际压缩延后到事务外执行。
+                    vacuumPending.set(true);
+                }
+            } catch (Throwable t) {
+                android.util.Log.w("YukiDB", "upgrade 18 prune failed", t);
+            }
         }
     }
 

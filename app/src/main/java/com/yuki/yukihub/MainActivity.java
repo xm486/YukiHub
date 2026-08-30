@@ -525,7 +525,13 @@ private void handleHomeTargetIntent(Intent intent) {
             } else if (HOME_TARGET_SETTINGS.equals(target)) {
                 showSettingsDialog();
             } else if (HOME_TARGET_LAUNCH_GAME.equals(target)) {
-                launchGameFromHome(targetGameId);
+                // 未完成记录弹窗是模态的，此时启动会让游戏跑在弹窗背后。
+                // 挂起请求，等弹窗关闭后由 consumePendingShortcutLaunch 接手。
+                if (staleSessionDialogShowing) {
+                    pendingShortcutGameId = targetGameId;
+                } else {
+                    launchGameFromHome(targetGameId);
+                }
             } else if (HOME_TARGET_FRIENDS.equals(target)) {
                 if (chatFriendId != null && !chatFriendId.isEmpty()) {
                     new com.yuki.yukihub.social.FriendsChatDialog(this)
@@ -3330,7 +3336,8 @@ private void exportLocalBackup(Uri uri) {
         root.put("created_at", System.currentTimeMillis());
         root.put("backup_type", "local_full");
         root.put("note", "Local backup keeps the latest 30 play sessions. Uses gzip compression.");
-        byte[] jsonBytes = root.toString(2).getBytes(StandardCharsets.UTF_8);
+        // toString() 而非 toString(2)：备份是机读文件，缩进只会白白撑大待压缩的字节数
+        byte[] jsonBytes = root.toString().getBytes(StandardCharsets.UTF_8);
         // gzip 压缩后写入文件
         ByteArrayOutputStream gzipBos = new ByteArrayOutputStream(jsonBytes.length / 4);
         try (GZIPOutputStream gzip = new GZIPOutputStream(gzipBos)) {
@@ -5304,6 +5311,10 @@ String rematchItem = "重新匹配" + sourceLabel;
                 "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS) itemList.add("引擎设置");
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS) itemList.add("虚拟鼠标");
+        // 桌面快捷方式：部分启动器（含部分定制 ROM）不支持固定快捷方式，不支持时不显示该项
+        boolean shortcutSupported = com.yuki.yukihub.shortcut.GameShortcutManager.isSupported(this);
+        String shortcutItem = "📌 添加到桌面";
+        if (shortcutSupported) itemList.add(shortcutItem);
         itemList.add("详细信息");
         itemList.add("删除游戏");
         itemList.add("多选删除…");
@@ -5355,6 +5366,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 }
                 else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game); }
                 else if ("虚拟鼠标".equals(chosen)) showGameCursorDialog(game);
+                else if (shortcutItem.equals(chosen)) requestGameShortcut(game);
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
                 else if ("删除游戏".equals(chosen)) confirmDeleteGame(game);
                 else if ("多选删除…".equals(chosen)) enterMultiSelectMode(game);
@@ -5515,12 +5527,50 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         if (selectedGame != null) updateSideDetail(selectedGame);
     }
 
+    /**
+     * 请求把游戏添加到桌面。
+     *
+     * 图标生成要解码封面 + 取主色，放在 IO 线程做；
+     * requestPinShortcut 本身会弹系统确认框，必须回到主线程调用。
+     */
+    private void requestGameShortcut(Game game) {
+        if (game == null) return;
+        if (!com.yuki.yukihub.shortcut.GameShortcutManager.isSupported(this)) {
+            Toast.makeText(this, "当前桌面不支持添加快捷方式", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (com.yuki.yukihub.shortcut.GameShortcutManager.isPinned(this, game.id)) {
+            Toast.makeText(this, "桌面已有该游戏的快捷方式", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final long gameId = game.id;
+        final String title = game.title;
+        final String cover = safeCoverUri(game);
+        AppExecutors.runOnIo(() -> {
+            // 封面解码 + 取主色在 IO 线程完成，避免主线程卡顿
+            final android.graphics.drawable.Icon icon =
+                    com.yuki.yukihub.shortcut.GameShortcutManager.prepareIcon(
+                            MainActivity.this, title, cover);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                // requestPinShortcut 会弹系统确认框，必须在主线程
+                boolean ok = com.yuki.yukihub.shortcut.GameShortcutManager.requestPinWithIcon(
+                        MainActivity.this, gameId, title, icon, MainActivity.class);
+                if (!ok) {
+                    Toast.makeText(MainActivity.this, "添加失败，当前桌面可能不支持", Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+    }
+
     private void confirmDeleteGame(Game game) {
         if (game == null) return;
         new AlertDialog.Builder(this)
                 .setTitle("删除游戏")
                 .setMessage("确定删除 “" + game.title + "”？不会删除本体文件。")
-                .setPositiveButton("删除", (x,w)->{ repository.delete(game.id); selectedGame = null; loadGames(); })
+                .setPositiveButton("删除", (x,w)->{
+                    com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id);
+                    repository.delete(game.id); selectedGame = null; loadGames(); })
                 .setNegativeButton("取消", null)
                 .show();
     }
@@ -5638,6 +5688,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 .setTitle("批量删除")
                 .setMessage("确定删除选中的 " + count + " 个游戏？\n不会删除本体文件，仅从游戏库移除。")
                 .setPositiveButton("删除 " + count + " 个", (d, w) -> {
+                    com.yuki.yukihub.shortcut.GameShortcutManager.disableForGames(this, ids);
                     int deleted = repository.deleteBatch(ids);
                     selectedGame = null;
                     exitMultiSelectMode();
@@ -5668,6 +5719,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                             .setTitle("最后确认")
                             .setMessage("真的要清空全部 " + total + " 个游戏吗？")
                             .setPositiveButton("确定清空", (d2, w2) -> {
+                                com.yuki.yukihub.shortcut.GameShortcutManager.disableAll(this);
                                 int deleted = repository.deleteAll();
                                 selectedGame = null;
                                 exitMultiSelectMode();
@@ -7514,7 +7566,7 @@ private void showDetailDialog(Game game) {
         d.findViewById(R.id.btnKrSettings).setOnClickListener(v -> {
             if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game);
         });
-        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
+        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id); repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
         d.findViewById(R.id.btnLaunch).setOnClickListener(v -> launchGame(game));
         d.show();
         applyImmersiveToWindow(d.getWindow());
@@ -8485,6 +8537,15 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
             g.launchTarget = selectedLaunchTarget;
             g.description = desc.getText().toString();
             if (game == null) repository.insert(g); else repository.update(g);
+            // 标题/封面可能变了，刷新已固定到桌面的快捷方式（没有则静默跳过）
+            if (game != null) {
+                final long shortcutGameId = g.id;
+                final String shortcutTitle = g.title;
+                final String shortcutCover = safeCoverUri(g);
+                AppExecutors.runOnIo(() -> com.yuki.yukihub.shortcut.GameShortcutManager
+                        .updateIfExists(MainActivity.this, shortcutGameId, shortcutTitle,
+                                shortcutCover, MainActivity.class));
+            }
             d.dismiss(); loadGames();
         });
         d.setOnDismissListener(x -> pendingEditDialog = null);
@@ -10908,10 +10969,15 @@ return startActivitySafely(intent);
         });
     }
 
+    private boolean staleSessionDialogShowing = false;
+    /** 未完成记录弹窗期间到达的快捷方式启动请求，弹窗关闭后再执行。 */
+    private long pendingShortcutGameId = -1L;
+
     private void finishStalePlaySessionsIfAny() {
         if (repository == null) return;
         PlayActivity open = repository.findLatestOpenPlaySession();
         if (open == null) return;
+        staleSessionDialogShowing = true;
         long now = System.currentTimeMillis();
         long rawDuration = Math.max(0L, now - open.startTime);
         long duration = Math.min(rawDuration, MAX_PLAY_SESSION_MS);
@@ -10937,8 +11003,26 @@ return startActivitySafely(intent);
                     Toast.makeText(MainActivity.this, "已忽略上次未完成记录", Toast.LENGTH_SHORT).show();
                 })
                 .setCancelable(false)
+                // 这个弹窗是模态的。桌面快捷方式冷启动时它会先弹出来，
+                // 若不拦住，游戏会在弹窗背后被启动，用户看不到也无法确认。
+                // 因此启动请求先挂起，弹窗关掉后再执行。
+                .setOnDismissListener(d -> {
+                    staleSessionDialogShowing = false;
+                    consumePendingShortcutLaunch();
+                })
                 .show();
         styleAlertDialogDark(dialog);
+    }
+
+    /** 执行被未完成记录弹窗挡住的快捷方式启动请求。 */
+    private void consumePendingShortcutLaunch() {
+        long gameId = pendingShortcutGameId;
+        pendingShortcutGameId = -1L;
+        if (gameId <= 0) return;
+        getWindow().getDecorView().post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            launchGameFromHome(gameId);
+        });
     }
 
 @Override protected void onResume() {

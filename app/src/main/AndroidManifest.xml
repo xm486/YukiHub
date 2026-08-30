@@ -122,10 +122,18 @@
             </intent-filter>
         </activity-alias>
 
+        <!--
+            launchMode=singleTask：桌面游戏快捷方式必需。
+            默认 standard 时，若应用已在后台，从桌面点快捷方式会新建第二个
+            MainActivity 实例，两个实例各持有一份 runningSessionId /
+            launchedExternal，游玩计时会错乱。singleTask 保证全局只有一个实例，
+            重复启动走 onNewIntent。
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="sensorLandscape"
+            android:launchMode="singleTask"
+android:screenOrientation="sensorLandscape"
             android:configChanges="keyboardHidden|screenSize" />
 
         <activity

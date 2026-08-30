@@ -382,6 +382,10 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
         gameRepo.importGamesJson(root.optJSONArray("games"));
         gameRepo.importPlaySessionsJson(root.optJSONArray("play_sessions"));
         if (root.has("metadata_cache")) metaRepo.importMetadataJson(root.optJSONArray("metadata_cache"));
+        // 常态自查：老备份可能含已删游戏的资料缓存（历史上删游戏时漏清），
+        // 导入侧虽会因匹配不到 gameId 而跳过，但本地原有孤儿行仍需清理。
+        // 与数据库版本号无关，每次导入都跑一遍，幂等且无孤儿时等于空跑。
+        gameRepo.pruneOrphanMetadata();
     }
 
     private JSONObject mergeSnapshots(JSONObject local, JSONObject remote) throws Exception {

@@ -107,10 +107,15 @@ public class GameRepository {
         SQLiteDatabase db = helper.getWritableDatabase();
         // 同步清理该游戏的游玩会话，避免残留脏数据
         db.delete("play_sessions", "game_id=?", new String[]{String.valueOf(id)});
+        // 同步清理该游戏的资料缓存。
+        // metadata_cache 没有 FK CASCADE（只有 play_sessions 有），
+        // 不显式删就会留下永久孤儿行，并被备份原样导出，导致备份体积持续膨胀。
+        // 主键是 (game_id, source)，按 game_id 删只命中这一个游戏的全部来源。
+        db.delete("metadata_cache", "game_id=?", new String[]{String.valueOf(id)});
         return db.delete("games", "id=?", new String[]{String.valueOf(id)});
     }
 
-    /** 批量删除游戏（含对应 play_sessions），返回实际删除的游戏数。 */
+    /** 批量删除游戏（含对应 play_sessions 与 metadata_cache），返回实际删除的游戏数。 */
     public int deleteBatch(java.util.Collection<Long> ids) {
         if (ids == null || ids.isEmpty()) return 0;
         SQLiteDatabase db = helper.getWritableDatabase();
@@ -120,6 +125,7 @@ public class GameRepository {
             for (Long id : ids) {
                 if (id == null || id <= 0) continue;
                 db.delete("play_sessions", "game_id=?", new String[]{String.valueOf(id)});
+                db.delete("metadata_cache", "game_id=?", new String[]{String.valueOf(id)});
                 deleted += db.delete("games", "id=?", new String[]{String.valueOf(id)});
             }
             db.setTransactionSuccessful();
@@ -129,7 +135,7 @@ public class GameRepository {
         return deleted;
     }
 
-    /** 一键清空全部游戏库（含 play_sessions），返回删除的游戏数。不删本体文件。 */
+    /** 一键清空全部游戏库（含 play_sessions 与 metadata_cache），返回删除的游戏数。不删本体文件。 */
     public int deleteAll() {
         SQLiteDatabase db = helper.getWritableDatabase();
         int count = 0;
@@ -142,12 +148,32 @@ public class GameRepository {
         db.beginTransaction();
         try {
             db.delete("play_sessions", null, null);
+            db.delete("metadata_cache", null, null);
             db.delete("games", null, null);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
         return count;
+    }
+
+    /**
+     * 清理没有对应游戏的资料缓存孤儿行，返回清掉的行数。
+     *
+     * 幂等：没有孤儿行时等于空跑。
+     * 这是常态自查，与数据库版本号无关：
+     * 一次性升级迁移只能擦掉历史存量，而导入备份、或将来某次改动
+     * 漏掉删除时的清理，都会让孤儿行重新长出来。挂在删除与导入之后
+     * 调用，可以保证垃圾不会长期累积。
+     */
+    public int pruneOrphanMetadata() {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        try {
+            return db.delete("metadata_cache",
+                    "game_id NOT IN (SELECT id FROM games)", null);
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     public long startPlaySession(long gameId, long start, String launchType) {
@@ -741,7 +767,12 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
 
     public int deleteSampleGames() {
         SQLiteDatabase db = helper.getWritableDatabase();
-        return db.delete("games", "root_uri LIKE ?", new String[]{"sample://%"});
+        int removed = db.delete("games", "root_uri LIKE ?", new String[]{"sample://%"});
+        // 常态自查：本方法在每次启动时调用，顺手清掉资料缓存孤儿行。
+        // 幂等，没有孤儿时等于空跑，因此不依赖数据库版本号的一次性迁移，
+        // 即使将来某处删游戏漏了清理，也会在下次启动时自动补上。
+        pruneOrphanMetadata();
+        return removed;
     }
 
     private ContentValues toValues(Game g) {

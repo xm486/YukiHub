@@ -89,7 +89,10 @@ public class MetadataRepository {
     public JSONArray exportMetadataJson() throws Exception {
         JSONArray arr = new JSONArray();
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT m.game_id,g.root_uri,g.title,m.source,m.source_id,m.json,m.updated_at FROM metadata_cache m LEFT JOIN games g ON g.id=m.game_id ORDER BY m.updated_at ASC", null);
+        // INNER JOIN 而非 LEFT JOIN：没有对应游戏的孤儿行不导出。
+        // 导入侧本来就会因匹配不到 gameId 而丢弃它们（game_root_uri/game_title 皆为空），
+        // 导出时直接排除可避免无意义地撑大备份体积。
+        Cursor c = db.rawQuery("SELECT m.game_id,g.root_uri,g.title,m.source,m.source_id,m.json,m.updated_at FROM metadata_cache m JOIN games g ON g.id=m.game_id ORDER BY m.updated_at ASC", null);
         try {
             while (c.moveToNext()) {
                 JSONObject o = new JSONObject();
