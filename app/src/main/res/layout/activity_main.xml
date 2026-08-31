@@ -345,9 +345,7 @@
                     <TextView android:id="@+id/filterAll" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="全部" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/filterFavorite" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="♡ 收藏" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/filterRecent" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="本地游戏" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
-                    <TextView android:id="@+id/filterPlaying" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="在玩" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
-                    <TextView android:id="@+id/filterCompleted" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="玩过" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
-                    <TextView android:id="@+id/filterUnplayed" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="未玩" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
+                    <TextView android:id="@+id/filterStatus" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="▸ 游玩状态" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/filterDeveloper" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="▸ 开发商" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/btnSort" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="⇅ 排序" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                 </LinearLayout>
@@ -418,13 +416,42 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- 开发商下拉区域 -->
-        <LinearLayout
-            android:id="@+id/developerList"
+        <!-- 游玩状态二级分类：横向可滑动芯片行，与开发商面板同一套视觉。
+             两个二级面板互斥展开，避免同时占两行高度。 -->
+        <HorizontalScrollView
+            android:id="@+id/statusScroll"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone" />
+            android:layout_marginTop="4dp"
+            android:fillViewport="false"
+            android:scrollbars="none"
+            android:overScrollMode="never"
+            android:visibility="gone">
+            <LinearLayout
+                android:id="@+id/statusList"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+        </HorizontalScrollView>
+
+        <!-- 开发商下拉区域：横向可滑动芯片行，与上方筛选栏同一套视觉 -->
+        <HorizontalScrollView
+            android:id="@+id/developerScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fillViewport="false"
+            android:scrollbars="none"
+            android:overScrollMode="never"
+            android:visibility="gone">
+            <LinearLayout
+                android:id="@+id/developerList"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+        </HorizontalScrollView>
 
         <!-- 游戏列表 + 右侧详情 -->
         <LinearLayout

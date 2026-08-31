@@ -63,7 +63,7 @@ public final class AiReviewPromptBuilder {
         sb.append("- 总游玩时长：").append(TimeFormatUtil.playTime(s.totalDuration)).append("\n");
         sb.append("- 活跃天数：").append(s.activeDays).append(" 天\n");
         sb.append("- 游玩游戏数：").append(s.gameCount()).append(" 款\n");
-        sb.append("- 本周涉及游戏状态：玩过/已完成 ").append(s.completedGameCount).append(" 款，在玩 ").append(s.playingGameCount).append(" 款，未玩 ").append(s.unplayedGameCount).append(" 款\n");
+        sb.append("- 本周涉及游戏状态：玩过/已完成 ").append(s.completedGameCount).append(" 款，在玩 ").append(s.playingGameCount).append(" 款，搁置 ").append(s.onHoldGameCount).append(" 款，抛弃 ").append(s.droppedGameCount).append(" 款，未玩 ").append(s.unplayedGameCount).append(" 款\n");
         sb.append("- 游玩次数：").append(s.sessionCount).append(" 次\n");
         sb.append("- 平均单次时长：").append(TimeFormatUtil.playTime(s.averageSessionDuration)).append("\n");
         sb.append("- 最长单次：").append(TimeFormatUtil.playTime(s.longestSessionDuration));

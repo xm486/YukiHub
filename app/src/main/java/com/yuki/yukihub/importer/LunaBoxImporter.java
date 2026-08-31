@@ -26,11 +26,14 @@ import java.util.zip.ZipInputStream;
  * - database/game_tags.csv      标签（CSV，每游戏多条）
  * - covers/*.webp              封面图片（文件名 = 游戏 ID + .webp）
  *
- * games.csv 列：
+ * games.csv 列（v163 备份实测，列会随 LunaBox 版本增加，本导入器按列名寻址，
+ * 因此列的增删换位都不影响解析）：
  *   id,name,cover_url,company,summary,rating,release_date,path,save_path,
  *   process_name,wine_runner,wine_args,wine_prefix,launch_mode,status,
  *   source_type,cached_at,source_id,created_at,updated_at,
  *   use_locale_emulator,use_magpie,metadata_locked
+ *   v1.12.1（migration 164+）另有：is_nsfw,aliases,cover_source_url,game_directory,
+ *   steam_launch_id,steam_launch_kind,steam_user_id 等，其中 is_nsfw 已被本导入器使用。
  *
  * play_sessions.csv 列：
  *   id,game_id,start_time,end_time,duration,updated_at
@@ -166,11 +169,15 @@ public class LunaBoxImporter {
             g.sourceType = mapSourceType(getCol(row, colMap, "source_type"));
             g.sourceId = getCol(row, colMap, "source_id");
 
-            // 游玩状态映射：LunaBox 5态 → YukiHub 3态
+            // 游玩状态映射：LunaBox 5态 → YukiHub 5态
             // not_started → unplayed, playing → playing, completed → completed
-            // want_to_play → unplayed, on_hold → unplayed
+            // on_hold → onhold, want_to_play → unplayed（无对应状态）
             String lunaStatus = getCol(row, colMap, "status");
             g.playStatus = mapPlayStatus(lunaStatus);
+
+            // NSFW 标记：LunaBox v1.12.1（migration 164）起有 is_nsfw 布尔列。
+            // 旧版备份没有该列，getCol 返回空串，解析为 false，与 LunaBox 默认值一致。
+            g.nsfw = parseBoolSafe(getCol(row, colMap, "is_nsfw"));
 
             // 封面
             String coverUrl = getCol(row, colMap, "cover_url");
@@ -350,12 +357,24 @@ public class LunaBoxImporter {
     // ==================== 辅助方法 ====================
 
     /**
-     * LunaBox 5 态 → YukiHub 3 态映射：
-     * not_started → unplayed  (未开始 → 未玩)
-     * playing     → playing   (游玩中 → 在玩)
-     * completed   → completed  (已通关 → 玩过)
-     * want_to_play → unplayed (想玩   → 未玩)
-     * on_hold     → unplayed  (搁置   → 未玩)
+     * LunaBox 5 态 → YukiHub 5 态映射。
+     *
+     * LunaBox 侧枚举（internal/common/enums/game_status_enum.go，v1.12.1 确认）：
+     * not_started  未开始
+     * want_to_play 想玩
+     * playing      游玩中
+     * completed    已通关
+     * on_hold      搁置
+     *
+     * 对应关系：
+     * not_started  → unplayed  (未开始 → 未玩)
+     * playing      → playing   (游玩中 → 在玩)
+     * completed    → completed (已通关 → 玩过)
+     * on_hold      → onhold    (搁置   → 搁置)
+     * want_to_play → unplayed  (想玩   → 未玩，YukiHub 无「想玩」状态)
+     *
+     * LunaBox 没有「抛弃」状态，dropped 分支仅为兼容其它平台或将来
+     * LunaBox 新增该状态时不必再改这里。
      */
     private static String mapPlayStatus(String lunaStatus) {
         if (lunaStatus == null || lunaStatus.isEmpty()) return "unplayed";
@@ -365,7 +384,18 @@ public class LunaBoxImporter {
                 return "playing";
             case "completed":
                 return "completed";
+            case "on_hold":
+            case "onhold":
+            case "on-hold":
+            case "shelved":
+            case "paused":
+                return "onhold";
+            case "dropped":
+            case "abandoned":
+            case "give_up":
+                return "dropped";
             default:
+                // not_started / want_to_play / 未知值
                 return "unplayed";
         }
     }
@@ -393,6 +423,19 @@ public class LunaBoxImporter {
     private static int parseIntSafe(String s, int def) {
         if (s == null || s.isEmpty()) return def;
         try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
+    }
+
+    /**
+     * 解析 LunaBox 备份里的布尔列。
+     *
+     * DuckDB 导出 BOOLEAN 到 CSV 时写的是小写 true / false（已用真实备份包核对）。
+     * 这里同时容忍 t / 1 / yes 等写法，缺列或空值一律按 false，
+     * 与 LunaBox 侧 DEFAULT FALSE 的语义一致。
+     */
+    private static boolean parseBoolSafe(String s) {
+        if (s == null) return false;
+        String v = s.trim().toLowerCase(Locale.ROOT);
+        return v.equals("true") || v.equals("t") || v.equals("1") || v.equals("yes");
     }
 
     private static boolean isImageFile(String name) {

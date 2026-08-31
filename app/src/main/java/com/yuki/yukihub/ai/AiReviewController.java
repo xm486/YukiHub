@@ -562,6 +562,8 @@ private String aiPlayStatusLabel(String status) {
     String s = normalizePlayStatus(status);
     if ("completed".equals(s)) return "🏆 玩过（等同通关/已完成）";
     if ("playing".equals(s)) return "🎮 在玩（尚未通关）";
+    if ("onhold".equals(s)) return "⏸ 搁置（开过但暂时停下，之后还想继续）";
+    if ("dropped".equals(s)) return "🗑 抛弃（明确不再继续）";
     return "☆ 未玩（未开始/未通关）";
 }
 
@@ -601,6 +603,8 @@ private WeeklyPlayStats buildWeeklyPlayStatsImpl(AiReviewSettings aiSettings, bo
             stats.gameStatuses.put(title, aiPlayStatusLabel(status));
             if ("completed".equals(status)) stats.completedGameCount++;
             else if ("playing".equals(status)) stats.playingGameCount++;
+            else if ("onhold".equals(status)) stats.onHoldGameCount++;
+            else if ("dropped".equals(status)) stats.droppedGameCount++;
             else stats.unplayedGameCount++;
         }
         if (a.duration > stats.longestSessionDuration) {

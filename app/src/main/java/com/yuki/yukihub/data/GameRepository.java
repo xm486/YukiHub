@@ -929,6 +929,12 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         String s = status.trim().toLowerCase();
         if ("completed".equals(s) || "played".equals(s) || "done".equals(s)) return "completed";
         if ("playing".equals(s) || "current".equals(s)) return "playing";
+        // 搁置：开了但暂时不打算继续，将来还想回来
+        if ("onhold".equals(s) || "on_hold".equals(s) || "on-hold".equals(s)
+                || "shelved".equals(s) || "paused".equals(s) || "hold".equals(s)) return "onhold";
+        // 抛弃：明确不再继续
+        if ("dropped".equals(s) || "drop".equals(s) || "abandoned".equals(s)
+                || "abandon".equals(s) || "give_up".equals(s)) return "dropped";
         return "unplayed";
     }
 

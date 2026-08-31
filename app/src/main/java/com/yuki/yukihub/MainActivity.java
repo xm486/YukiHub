@@ -1102,7 +1102,7 @@ private void scheduleVideoThemeExtraction() {
     // --- Apply extracted colors to UI component backgrounds/borders only ---
 
     //Sidebar filter items (background only)
-    int[] sidebarIds = {R.id.filterAll, R.id.filterFavorite, R.id.filterRecent, R.id.filterPlaying, R.id.filterCompleted, R.id.filterUnplayed, R.id.filterDeveloper};
+    int[] sidebarIds = {R.id.filterAll, R.id.filterFavorite, R.id.filterRecent, R.id.filterStatus, R.id.filterDeveloper};
     for (int id : sidebarIds) {
         TextView tv = findViewById(id);
         if (tv != null) {
@@ -1209,7 +1209,7 @@ private void scheduleVideoThemeExtraction() {
     }
 
     // Filter bar items + sort button (use bg_input style)
-    int[] filterIds = {R.id.filterAll, R.id.filterFavorite, R.id.filterRecent, R.id.filterPlaying, R.id.filterCompleted, R.id.filterUnplayed, R.id.filterDeveloper, R.id.btnSort};
+    int[] filterIds = {R.id.filterAll, R.id.filterFavorite, R.id.filterRecent, R.id.filterStatus, R.id.filterDeveloper, R.id.btnSort};
     for (int id : filterIds) {
         View fv = findViewById(id);
         if (fv != null) {
@@ -1902,8 +1902,8 @@ if (profilePanel != null) {
     profilePanel.setOnClickListener(v -> { clickFeedback(v); showProfileDialog(); });
 }
         setupDeveloperToggle();
+        setupStatusToggle();
 bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "LOCAL");
-bindFilter(R.id.filterPlaying, "PLAYING"); bindFilter(R.id.filterCompleted, "COMPLETED"); bindFilter(R.id.filterUnplayed, "UNPLAYED");
         updateFilterSelection();
         ((EditText)findViewById(R.id.etSearch)).addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
@@ -4016,7 +4016,10 @@ if (g.playedTimeMap != null) sessionCount += g.playedTimeMap.size();
          if (g.playStatus != null && !g.playStatus.isEmpty() && !"unplayed".equals(g.playStatus)) {
              if ("completed".equals(g.playStatus)) info.append("  · 🏆已完成");
              else if ("playing".equals(g.playStatus)) info.append("  · 🎮在玩");
+             else if ("onhold".equals(g.playStatus)) info.append("  · ⏸搁置");
+             else if ("dropped".equals(g.playStatus)) info.append("  · 🗑抛弃");
          }
+         if (g.nsfw) info.append("  · 🔞NSFW");
 if (g.playedTimeMap != null && !g.playedTimeMap.isEmpty()) info.append("  · 游玩记录 ").append(g.playedTimeMap.size()).append(" 天");
           if (g.vniteTimers != null && !g.vniteTimers.isEmpty()) info.append("  · 游玩记录 ").append(g.vniteTimers.size()).append(" 条");
           if (g.lunaBoxSessions != null && !g.lunaBoxSessions.isEmpty()) info.append("  · 游玩记录 ").append(g.lunaBoxSessions.size()).append(" 条");
@@ -4357,18 +4360,174 @@ private String buildTodayActivityText() {
 
 private void setupDeveloperToggle() {
     TextView title = findViewById(R.id.filterDeveloper);
-    View list = findViewById(R.id.developerList);
-    if (title == null || list == null) return;
+    View scroll = findViewById(R.id.developerScroll);
+    if (title == null || scroll == null) return;
     title.setOnClickListener(v -> {
         playUiSound(UI_SOUND_SWITCH);
-        boolean show = list.getVisibility() != View.VISIBLE;
-        list.setVisibility(show ? View.VISIBLE : View.GONE);
+        boolean show = scroll.getVisibility() != View.VISIBLE;
+        // 两个二级面板互斥：展开一个就收起另一个，避免占两行高度
+        if (show) collapseStatusPanel();
+        scroll.setVisibility(show ? View.VISIBLE : View.GONE);
         title.setText(show ? "▾ 开发商" : "▸ 开发商");
     });
 }
 
+// ==================== 游玩状态二级分类 ====================
+
+/** 游玩状态二级分类：{筛选值, 显示文案}，顺序即展示顺序。 */
+private static final String[][] STATUS_FILTERS = {
+        {"", "全部"},
+        {"PLAYING", "🎮 在玩"},
+        {"COMPLETED", "🏆 玩过"},
+        {"UNPLAYED", "☆ 未玩"},
+        {"ONHOLD", "⏸ 搁置"},
+        {"DROPPED", "🗑 抛弃"},
+};
+
+/** 当前选中的游玩状态筛选值，空串表示不按状态过滤。 */
+private String statusFilter = "";
+
+private void setupStatusToggle() {
+    TextView title = findViewById(R.id.filterStatus);
+    View scroll = findViewById(R.id.statusScroll);
+    if (title == null || scroll == null) return;
+    title.setOnClickListener(v -> {
+        playUiSound(UI_SOUND_SWITCH);
+        boolean show = scroll.getVisibility() != View.VISIBLE;
+        if (show) collapseDeveloperPanel();
+        scroll.setVisibility(show ? View.VISIBLE : View.GONE);
+        updateStatusTitle();
+    });
+    rebuildStatusFilters();
+}
+
+private void collapseStatusPanel() {
+    View scroll = findViewById(R.id.statusScroll);
+    if (scroll != null) scroll.setVisibility(View.GONE);
+    updateStatusTitle();
+}
+
+private void collapseDeveloperPanel() {
+    View scroll = findViewById(R.id.developerScroll);
+    TextView title = findViewById(R.id.filterDeveloper);
+    if (scroll != null) scroll.setVisibility(View.GONE);
+    if (title != null) title.setText("▸ 开发商");
+}
+
+/**
+ * 一级标题文案：收起时若已选了具体状态就直接显示该状态，
+ * 这样面板收起后依然能看出当前在筛什么。
+ */
+private void updateStatusTitle() {
+    TextView title = findViewById(R.id.filterStatus);
+    View scroll = findViewById(R.id.statusScroll);
+    if (title == null) return;
+    boolean expanded = scroll != null && scroll.getVisibility() == View.VISIBLE;
+    String label = "游玩状态";
+    if (!expanded && statusFilter != null && !statusFilter.isEmpty()) {
+        for (String[] item : STATUS_FILTERS) {
+            if (item[0].equals(statusFilter)) { label = item[1]; break; }
+        }
+    }
+    title.setText((expanded ? "▾ " : "▸ ") + label);
+}
+
+private void rebuildStatusFilters() {
+    LinearLayout list = findViewById(R.id.statusList);
+    if (list == null) return;
+    list.removeAllViews();
+    for (String[] item : STATUS_FILTERS) {
+        list.addView(statusFilterItem(item[1], item[0]));
+    }
+    updateStatusFilterSelection();
+}
+
+private TextView statusFilterItem(String text, String value) {
+    TextView v = new TextView(this);
+    v.setText(text);
+    v.setTag(value == null ? "" : value);
+    v.setGravity(android.view.Gravity.CENTER);
+    v.setTextSize(8);
+    v.setSingleLine(true);
+    v.setBackgroundResource(R.drawable.bg_input);
+    v.setTextColor(getColorCompat(R.color.yh_text));
+    v.setPadding(dp(10), 0, dp(10), 0);
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, dp(26));
+    lp.setMarginStart(dp(4));
+    v.setLayoutParams(lp);
+    v.setMinWidth(dp(48));
+    v.setClickable(true);
+    v.setFocusable(true);
+    v.setOnClickListener(view -> {
+        playUiSound(UI_SOUND_CLICK);
+        statusFilter = value == null ? "" : value;
+        // 选了具体状态就退出「收藏 / 本地游戏」这类互斥的一级分类，
+        // 否则两个条件叠加会让用户以为筛选没生效。
+        if (!statusFilter.isEmpty() && !"ALL".equals(filter)
+                && !isEngineFilter(filter)) {
+            filter = "ALL";
+        }
+        updateStatusFilterSelection();
+        updateFilterSelection();
+        applyFilter();
+    });
+    return v;
+}
+
+/**
+ * 状态筛选值（大写）→ 数据库里的状态值（小写）。
+ */
+private String statusFilterValue(String filterValue) {
+    if (filterValue == null) return "";
+    switch (filterValue) {
+        case "PLAYING": return "playing";
+        case "COMPLETED": return "completed";
+        case "ONHOLD": return "onhold";
+        case "DROPPED": return "dropped";
+        case "UNPLAYED": return "unplayed";
+        default: return "";
+    }
+}
+
+/** 引擎类一级分类可以和状态并存（例如「KRKR + 在玩」）。 */
+private boolean isEngineFilter(String value) {
+    if (value == null) return false;
+    switch (value) {
+        case "KIRIKIRI": case "ONS": case "TYRANO": case "ARTEMIS":
+        case "WINLATOR": case "GAMEHUB": case "PSP": case "ANDROID":
+        case "UNKNOWN":
+            return true;
+        default:
+            return false;
+    }
+}
+
+private void updateStatusFilterSelection() {
+    LinearLayout list = findViewById(R.id.statusList);
+    updateStatusTitle();
+    if (list == null) return;
+    for (int i = 0; i < list.getChildCount(); i++) {
+        View child = list.getChildAt(i);
+        if (!(child instanceof TextView)) continue;
+        String value = child.getTag() instanceof String ? (String) child.getTag() : "";
+        boolean selected = (statusFilter == null ? "" : statusFilter).equals(value);
+        TextView tv = (TextView) child;
+        child.setAlpha(selected ? 1f : 0.82f);
+        if (selected) {
+            child.setBackgroundResource(R.drawable.bg_yuki_button);
+            tv.setTextColor(0xFF071221);
+        } else {
+            child.setBackgroundResource(R.drawable.bg_input);
+            tv.setTextColor(getColorCompat(R.color.yh_text));
+        }
+        tv.setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+    }
+}
+
 private void rebuildDeveloperFilters() {
     LinearLayout list = findViewById(R.id.developerList);
+    View scroll = findViewById(R.id.developerScroll);
     TextView title = findViewById(R.id.filterDeveloper);
     if (list == null || title == null) return;
     list.removeAllViews();
@@ -4389,29 +4548,43 @@ private void rebuildDeveloperFilters() {
         empty.setEnabled(false);
         list.addView(empty);
         title.setAlpha(0.55f);
+        if (scroll != null) scroll.setVisibility(View.GONE);
+        title.setText("▸ 开发商");
         return;
     }
     title.setAlpha(1f);
-    TextView all = sidebarDeveloperItem("全部开发商", "");
-    list.addView(all);
-    for (java.util.Map.Entry<String, Integer> e : counts.entrySet()) {
-        list.addView(sidebarDeveloperItem(e.getKey() + " (" + e.getValue() + ")", e.getKey()));
+    list.addView(sidebarDeveloperItem("全部", ""));
+    // 按游戏数降序，数量相同按名称，常玩的开发商排在前面便于横向查找
+    List<java.util.Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
+    java.util.Collections.sort(entries, (a, b) -> {
+        int r = b.getValue().compareTo(a.getValue());
+        if (r != 0) return r;
+        return a.getKey().compareToIgnoreCase(b.getKey());
+    });
+    for (java.util.Map.Entry<String, Integer> e : entries) {
+        list.addView(sidebarDeveloperItem(e.getKey() + " · " + e.getValue(), e.getKey()));
     }
     updateDeveloperFilterSelection();
 }
-
 private TextView sidebarDeveloperItem(String text, String developer) {
     TextView v = new TextView(this);
     v.setText(text);
     v.setTag(developer == null ? "" : developer);
-    v.setGravity(android.view.Gravity.CENTER_VERTICAL);
-    v.setMinHeight(dp(24));
-    v.setPadding(dp(14), 0, dp(4), 0);
+    v.setGravity(android.view.Gravity.CENTER);
     v.setTextSize(8);
     v.setSingleLine(true);
+    v.setMaxWidth(dp(150));
     v.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    v.setBackgroundResource(R.drawable.bg_sidebar_item);
-    v.setTextColor(getColorCompat(R.color.yh_text_muted));
+    v.setBackgroundResource(R.drawable.bg_input);
+    v.setTextColor(getColorCompat(R.color.yh_text));
+    v.setPadding(dp(10), 0, dp(10), 0);
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, dp(26));
+    lp.setMarginStart(dp(4));
+    v.setLayoutParams(lp);
+    v.setMinWidth(dp(48));
+    v.setClickable(true);
+    v.setFocusable(true);
     v.setOnClickListener(view -> {
         playUiSound(UI_SOUND_CLICK);
         developerFilter = developer == null ? "" : developer;
@@ -4420,7 +4593,6 @@ private TextView sidebarDeveloperItem(String text, String developer) {
     });
     return v;
 }
-
 private void updateDeveloperFilterSelection() {
     LinearLayout list = findViewById(R.id.developerList);
     if (list == null) return;
@@ -4429,10 +4601,16 @@ private void updateDeveloperFilterSelection() {
         if (!(child instanceof TextView)) continue;
         String dev = child.getTag() instanceof String ? (String) child.getTag() : "";
         boolean selected = (developerFilter == null ? "" : developerFilter).equals(dev);
-        child.setSelected(selected);
-        child.setAlpha(selected ? 1f : 0.72f);
-        ((TextView) child).setTextColor(selected ? getColorCompat(R.color.yh_text) : getColorCompat(R.color.yh_text_muted));
-        ((TextView) child).setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+        TextView tv = (TextView) child;
+        child.setAlpha(selected ? 1f : 0.82f);
+        if (selected) {
+            child.setBackgroundResource(R.drawable.bg_yuki_button);
+            tv.setTextColor(0xFF071221);
+        } else {
+            child.setBackgroundResource(R.drawable.bg_input);
+            tv.setTextColor(getColorCompat(R.color.yh_text));
+        }
+        tv.setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
     }
 }
 
@@ -4448,6 +4626,8 @@ private void bindFilter(int id, String value) {
             playUiSound(UI_SOUND_CLICK);
             filter = value;
             developerFilter = "";
+            // 点「全部 / 收藏 / 本地游戏」视为重置筛选，状态二级分类一并清空
+            statusFilter = "";
             if ("LOCAL".equals(value)) localInstalledCache.clear(); // 进入本地游戏分类：重新检测最新文件状态
             updateFilterSelection();
             applyFilter();
@@ -4458,10 +4638,8 @@ private void bindFilter(int id, String value) {
         updateFilterItem(R.id.filterAll, "ALL");
         updateFilterItem(R.id.filterFavorite, "FAVORITE");
         updateFilterItem(R.id.filterRecent, "LOCAL");
-        updateFilterItem(R.id.filterPlaying, "PLAYING");
-        updateFilterItem(R.id.filterCompleted, "COMPLETED");
-        updateFilterItem(R.id.filterUnplayed, "UNPLAYED");
         updateDeveloperFilterSelection();
+        updateStatusFilterSelection();
     }
 
     private void updateFilterItem(int id, String value) {
@@ -4537,9 +4715,9 @@ scanMissingCoversIfNeeded();
             if (!q.isEmpty() && (g.title == null || !g.title.toLowerCase(Locale.ROOT).contains(q))) continue;
             if ("LOCAL".equals(filter) && !isGameInstalled(g)) continue;
             if ("FAVORITE".equals(filter) && !g.favorite) continue;
-            if ("PLAYING".equals(filter) && !"playing".equals(normalizePlayStatus(g.playStatus))) continue;
-            if ("COMPLETED".equals(filter) && !"completed".equals(normalizePlayStatus(g.playStatus))) continue;
-            if ("UNPLAYED".equals(filter) && !"unplayed".equals(normalizePlayStatus(g.playStatus))) continue;
+            // 游玩状态是独立维度（statusFilter），可与引擎分类、开发商叠加
+            if (statusFilter != null && !statusFilter.isEmpty()
+                    && !statusFilterValue(statusFilter).equals(normalizePlayStatus(g.playStatus))) continue;
             if ("KIRIKIRI".equals(filter) && g.engine != EngineType.KIRIKIRI) continue;
         if ("ONS".equals(filter) && g.engine != EngineType.ONS) continue;
         if ("TYRANO".equals(filter) && g.engine != EngineType.TYRANO) continue;
@@ -7457,32 +7635,40 @@ private void checkUpdateOnStartupIfEnabled() {
     String s = status.trim().toLowerCase(Locale.ROOT);
     if ("completed".equals(s) || "played".equals(s) || "done".equals(s)) return "completed";
     if ("playing".equals(s) || "current".equals(s)) return "playing";
+    // 搁置：开了但暂时不打算继续，将来还想回来
+    if ("onhold".equals(s) || "on_hold".equals(s) || "on-hold".equals(s)
+            || "shelved".equals(s) || "paused".equals(s) || "hold".equals(s)) return "onhold";
+    // 抛弃：明确不再继续
+    if ("dropped".equals(s) || "drop".equals(s) || "abandoned".equals(s)
+            || "abandon".equals(s) || "give_up".equals(s)) return "dropped";
     return "unplayed";
 }
-
 private String playStatusLabel(String status) {
     String s = normalizePlayStatus(status);
     if ("completed".equals(s)) return "🏆 玩过";
     if ("playing".equals(s)) return "🎮 在玩";
+    if ("onhold".equals(s)) return "⏸ 搁置";
+    if ("dropped".equals(s)) return "🗑 抛弃";
     return "☆ 未玩";
 }
-
 private int playStatusIndex(String status) {
     String s = normalizePlayStatus(status);
     if ("playing".equals(s)) return 1;
     if ("completed".equals(s)) return 2;
+    if ("onhold".equals(s)) return 3;
+    if ("dropped".equals(s)) return 4;
     return 0;
 }
-
 private String playStatusFromIndex(int index) {
     if (index == 1) return "playing";
     if (index == 2) return "completed";
+    if (index == 3) return "onhold";
+    if (index == 4) return "dropped";
     return "unplayed";
 }
-
 private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     if (game == null) return;
-    String[] labels = new String[]{"☆ 未玩", "🎮 在玩", "🏆 玩过"};
+    String[] labels = new String[]{"☆ 未玩", "🎮 在玩", "🏆 玩过", "⏸ 搁置", "🗑 抛弃"};
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundResource(R.drawable.bg_dialog);
@@ -7514,7 +7700,7 @@ private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     }
     AlertDialog dialog = new AlertDialog.Builder(this)
             .setTitle("设置游玩状态")
-            .setView(root)
+            .setView(wrapDialogScroll(root))
             .setNegativeButton("取消", null)
             .show();
     ref[0] = dialog;
@@ -7522,6 +7708,26 @@ private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     if (dialog.getWindow() != null) {
         dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.42f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
     }
+}
+
+/**
+ * 把弹窗内容包进 ScrollView，避免内容高度超过屏幕时选项被截断且无法滑动。
+ *
+ * 弹窗高度按内容自适应；只有内容真的超出可用高度时才会出现滚动，
+ * 所以选项少的时候观感与原来完全一致。
+ */
+private android.view.View wrapDialogScroll(android.view.View content) {
+    android.widget.ScrollView sv = new android.widget.ScrollView(this);
+    sv.setLayoutParams(new android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
+    sv.setFillViewport(false);
+    sv.setVerticalScrollBarEnabled(false);
+    sv.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER);
+    sv.addView(content, new android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
+    return sv;
 }
 
 private void showDetailDialog(Game game) {
@@ -10046,7 +10252,11 @@ private String pref(Map<String, String> prefs, String key, String def) {
                 || lower.endsWith(".dat") || lower.endsWith(".pfs") || lower.endsWith(".desktop")
                 || lower.endsWith(".nsa") || lower.endsWith(".sar")
                 || lower.endsWith(".iso") || lower.endsWith(".cso") || lower.endsWith(".chd")
-                || lower.endsWith(".elf") || lower.endsWith(".pbp");
+                || lower.endsWith(".elf") || lower.endsWith(".pbp")
+                // .exe：部分 KR 整合版把真正入口放在同名 exe 上（例：是谁杀了知更鸟.exe），
+                // 内核可以直接吃 exe 路径。EmulatorLauncher 早已支持该后缀，
+                // 这里补上候选，否则下拉里选不到。
+                || lower.endsWith(".exe");
     }
 
     private int findLaunchSelection(List<String> options, String target) {

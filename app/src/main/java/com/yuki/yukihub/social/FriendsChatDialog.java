@@ -1103,8 +1103,13 @@ public class FriendsChatDialog {
                                 maxMessageId = msg.id;
                             }
                         }
-                        scrollToBottom();
-                        markChatRead();
+                        // 用户正在上翻看历史时不要抢走视口：只有原本贴着底部才跟随新消息。
+                        // 没跟随时也不标记已读，让「回到底部」按钮继续提示下面有未读。
+                        if (followNewMessageIfAtBottom(chatScrollView, chatMessageList)) {
+                            markChatRead();
+                        } else {
+                            updateChatFloatingButtons();
+                        }
                     });
                 }
             } catch (Throwable t) {
@@ -2030,8 +2035,13 @@ public class FriendsChatDialog {
                                 groupMaxMessageId = msg.id;
                             }
                         }
-                        scrollGroupToBottom();
-                        markGroupRead();
+                        // 用户正在上翻看历史时不要抢走视口：只有原本贴着底部才跟随新消息。
+                        // 没跟随时也不标记已读，让「回到底部」按钮继续提示下面有未读。
+                        if (followNewMessageIfAtBottom(groupScrollView, groupMessageList)) {
+                            markGroupRead();
+                        } else {
+                            updateGroupFloatingButtons();
+                        }
                     }
                     // 等级实时刷新：有人升级或首次见到某人的等级，原地更新徽章
                     if (lvChangedFinal) refreshRenderedLevelBadges();
@@ -3403,7 +3413,39 @@ public class FriendsChatDialog {
     }
 
     /**
-     * 可靠地滚到列表底部。
+     * 用户当前是否贴在列表底部附近。
+     *
+     * 用于区分两种滚动场景：
+     *   - 贴底时收到新消息 → 跟随滚动（符合直觉）
+     *   - 用户上翻看历史时收到新消息 → 保持当前位置，只提示有新消息
+     *
+     * 阈值取一屏的 1/4（下限 dp(80)）：比"回到底部"按钮的显示阈值（1/3）更宽松，
+     * 保证按钮已经显示时必定判为"没贴底"，两者不会出现矛盾状态。
+     */
+    private boolean isNearBottom(ScrollView sv, LinearLayout list) {
+        if (sv == null || list == null) return true;
+        int contentH = list.getHeight();
+        int viewH = sv.getHeight();
+        // 首屏还没测量完（高度为 0）时按贴底处理，否则打开会话就停在顶部
+        if (contentH <= 0 || viewH <= 0) return true;
+        int distanceToBottom = contentH - viewH - sv.getScrollY();
+        return distanceToBottom <= Math.max(dp(80), viewH / 4);
+    }
+
+    /**
+     * 收到别人的新消息后的滚动策略：贴底才跟随，否则原地不动。
+     *
+     * @return true 表示已跟随滚动到底部（调用方可据此决定是否标记已读）
+     */
+    private boolean followNewMessageIfAtBottom(ScrollView sv, LinearLayout list) {
+        if (!isNearBottom(sv, list)) return false;
+        scrollToBottomReliably(sv, list);
+        return true;
+    }
+
+
+    /**
+     * 可靠地滚到列表底部（用户主动行为：打开会话、自己发消息、点「回到底部」）。
      *
      * 原来的写法是 list.post(() -> parent.scrollTo(0, list.getHeight()))，
      * post 只等一帧，而首屏可能一次性塞进 200 条气泡（还有异步加载的图片），
@@ -3413,14 +3455,27 @@ public class FriendsChatDialog {
      *   1. fullScroll(FOCUS_DOWN) —— 由 ScrollView 自己算底部，不依赖外部取高度
      *   2. 连续几帧重试 —— 覆盖气泡陆续测量完的过程
      *   3. OnLayoutChangeListener —— 图片等异步内容撑高后再兜一次
+     *
+     * 追底窗口长达 1200ms。为了不在此期间把用户手动上翻的视口拽回去，
+     * 重试动作会记录上一次自己滚到的位置：位置没被改动才继续追底，
+     * 一旦发现 scrollY 被外力改小（用户上翻），立即放弃后续重试。
      */
     private void scrollToBottomReliably(final ScrollView sv, final LinearLayout list) {
         if (sv == null || list == null) return;
+        // 记录"最近一次由本方法滚到的位置"，用于识别用户是否中途上翻
+        final int[] lastAutoScrollY = new int[]{-1};
+        Runnable step = () -> {
+            // 用户在追底窗口内往上翻（当前位置明显小于我们上次滚到的位置）→ 放弃追底
+            if (lastAutoScrollY[0] >= 0 && sv.getScrollY() < lastAutoScrollY[0] - dp(24)) return;
+            sv.fullScroll(View.FOCUS_DOWN);
+            lastAutoScrollY[0] = sv.getScrollY();
+        };
+        step.run();
 
         // 每次调用只保留最新一个兜底监听，避免重复叠加
         final View.OnLayoutChangeListener[] holder = new View.OnLayoutChangeListener[1];
         holder[0] = (v, l, t, r, b, ol, ot, or_, ob) -> {
-            if (b != ob) sv.fullScroll(View.FOCUS_DOWN);
+            if (b != ob) step.run();
         };
         list.addOnLayoutChangeListener(holder[0]);
         // 内容高度稳定后撤掉监听，防止干扰用户手动上翻
@@ -3429,10 +3484,10 @@ public class FriendsChatDialog {
         }, 1200);
 
         // 连续几帧重试：气泡是逐帧测量完的，单次 post 往往还没到位
-        sv.post(() -> sv.fullScroll(View.FOCUS_DOWN));
-        sv.postDelayed(() -> sv.fullScroll(View.FOCUS_DOWN), 60);
-        sv.postDelayed(() -> sv.fullScroll(View.FOCUS_DOWN), 200);
-        sv.postDelayed(() -> sv.fullScroll(View.FOCUS_DOWN), 450);
+        sv.post(step);
+        sv.postDelayed(step, 60);
+        sv.postDelayed(step, 200);
+        sv.postDelayed(step, 450);
     }
 
     private View divider() {
@@ -4274,7 +4329,7 @@ public class FriendsChatDialog {
         return "https://yukihub.zh.kg" + url;
     }
 
-    /** 全屏看大图（点击任意处关闭） */
+    /** 全屏看大图（点任意处关闭，长按图片本体或点右下角按钮保存到相册） */
     private void showImageViewer(String url) {
         if (url == null || url.isEmpty()) return;
         FrameLayout root = new FrameLayout(activity);
@@ -4290,11 +4345,191 @@ public class FriendsChatDialog {
         Dialog viewer = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         viewer.setContentView(root);
         viewer.setCancelable(true);
+        // 点任意处关闭，保持原有习惯
         root.setOnClickListener(v -> viewer.dismiss());
+        big.setOnClickListener(v -> viewer.dismiss());
+        // 长按保存：ImageView 铺满全屏但图片只占中间一块（FIT_CENTER 会留黑边），
+        // 所以要判断长按点是否真的落在图片上，否则长按黑边也会触发保存。
+        final float[] downPoint = new float[]{-1f, -1f};
+        big.setOnTouchListener((v, ev) -> {
+            // 记录按下位置，供 onLongClick 判断是否在图片内
+            if (ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                downPoint[0] = ev.getX();
+                downPoint[1] = ev.getY();
+            }
+            return false;  // 不拦截，点击/长按照常派发
+        });
+        big.setOnLongClickListener(v -> {
+            if (!isPointInsideDrawable(big, downPoint[0], downPoint[1])) {
+                return false;  // 长按黑边：交回普通点击处理（关闭查看器）
+            }
+            saveChatImageToGallery(url);
+            return true;
+        });
+
+        // 右下角「保存」按钮：长按不够直观，给一个明确入口
+        TextView saveBtn = new TextView(activity);
+        saveBtn.setText("⤓ 保存");
+        saveBtn.setTextColor(0xFFF5F7FF);
+        saveBtn.setTextSize(12);
+        saveBtn.setGravity(Gravity.CENTER);
+        saveBtn.setPadding(dp(14), dp(7), dp(14), dp(7));
+        saveBtn.setBackgroundResource(R.drawable.bg_social_button);
+        saveBtn.setOnClickListener(v -> saveChatImageToGallery(url));
+        FrameLayout.LayoutParams sLp = new FrameLayout.LayoutParams(-2, -2);
+        sLp.gravity = Gravity.END | Gravity.BOTTOM;
+        sLp.setMargins(0, 0, dp(18), dp(26));
+        root.addView(saveBtn, sLp);
+
         if (viewer.getWindow() != null) {
             viewer.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
         }
         viewer.show();
+    }
+
+    /**
+     * 判断指定坐标是否落在 ImageView 实际绘制的图片上。
+     *
+     * FIT_CENTER 下 View 铺满屏幕但图片只占中间一块，四周是黑边。
+     * 用 imageMatrix 把 drawable 的固有尺寸映射成 View 内的实际矩形来判定，
+     * 这样长按黑边不会误触保存，仍然按"点任意处关闭"处理。
+     */
+    private boolean isPointInsideDrawable(ImageView iv, float x, float y) {
+        if (iv == null || x < 0 || y < 0) return false;
+        android.graphics.drawable.Drawable d = iv.getDrawable();
+        if (d == null) return false;
+        int iw = d.getIntrinsicWidth();
+        int ih = d.getIntrinsicHeight();
+        if (iw <= 0 || ih <= 0) return false;
+        android.graphics.RectF rect = new android.graphics.RectF(0, 0, iw, ih);
+        iv.getImageMatrix().mapRect(rect);
+        rect.offset(iv.getPaddingLeft(), iv.getPaddingTop());
+        return rect.contains(x, y);
+    }
+
+    /**
+     * 把聊天图片保存到系统相册（Pictures/YukiHub）。
+     *
+     * Android 10+ 走 MediaStore，不需要存储权限；
+     * 10 以下写公共 Pictures 目录，需要 WRITE_EXTERNAL_STORAGE，
+     * 没授权时先申请并提示用户再点一次。
+     */
+    private void saveChatImageToGallery(String url) {
+        if (url == null || url.isEmpty()) return;
+        if (android.os.Build.VERSION.SDK_INT < 29 && android.os.Build.VERSION.SDK_INT >= 23
+                && activity.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            activity.requestPermissions(
+                    new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1002);
+            Toast.makeText(activity, "请授权存储权限后再点一次保存", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(activity, "正在保存...", Toast.LENGTH_SHORT).show();
+        AppExecutors.runOnIo(() -> {
+            try {
+                byte[] data = downloadRawBytes(url);
+                if (data == null || data.length == 0) throw new Exception("图片下载失败");
+                String ext = guessImageExt(url, data);
+                String name = "YukiHub_Chat_" + new java.text.SimpleDateFormat(
+                        "yyyyMMdd_HHmmss", java.util.Locale.ROOT)
+                        .format(new java.util.Date()) + "." + ext;
+                saveBytesToGallery(data, name, "image/" + ("jpg".equals(ext) ? "jpeg" : ext));
+                uiHandler.post(() -> Toast.makeText(activity,
+                        "已保存到相册：Pictures/YukiHub", Toast.LENGTH_LONG).show());
+            } catch (Throwable t) {
+                android.util.Log.w("YukiHub", "save chat image failed", t);
+                final String msg = t.getMessage() == null
+                        ? t.getClass().getSimpleName() : t.getMessage();
+                uiHandler.post(() -> Toast.makeText(activity,
+                        "保存失败：" + msg, Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    /** 直接下载原始字节（不解码成 Bitmap，保留原图质量与格式）。在 IO 线程调用。 */
+    private byte[] downloadRawBytes(String url) throws Exception {
+        java.net.HttpURLConnection conn =
+                (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(8000);
+        conn.setReadTimeout(15000);
+        conn.setInstanceFollowRedirects(true);
+        try {
+            int code = conn.getResponseCode();
+            if (code != 200) throw new Exception("HTTP " + code);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            try (java.io.InputStream in = conn.getInputStream()) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = in.read(buf)) != -1) bos.write(buf, 0, len);
+            }
+            return bos.toByteArray();
+        } finally {
+            try { conn.disconnect(); } catch (Throwable ignored) {}
+        }
+    }
+
+    /**
+     * 推断图片扩展名：先按字节头判断（最可靠），再退回 URL 后缀，最后默认 jpg。
+     * 聊天图片经过服务端压缩，URL 后缀不一定反映真实格式。
+     */
+    private String guessImageExt(String url, byte[] data) {
+        if (data != null && data.length >= 12) {
+            int b0 = data[0] & 0xFF, b1 = data[1] & 0xFF, b2 = data[2] & 0xFF, b3 = data[3] & 0xFF;
+            if (b0 == 0x89 && b1 == 0x50 && b2 == 0x4E && b3 == 0x47) return "png";
+            if (b0 == 0xFF && b1 == 0xD8) return "jpg";
+            if (b0 == 0x47 && b1 == 0x49 && b2 == 0x46) return "gif";
+            // RIFF....WEBP
+            if (b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46
+                    && (data[8] & 0xFF) == 0x57 && (data[9] & 0xFF) == 0x45) return "webp";
+        }
+        String low = url == null ? "" : url.toLowerCase(java.util.Locale.ROOT);
+        if (low.endsWith(".png")) return "png";
+        if (low.endsWith(".webp")) return "webp";
+        if (low.endsWith(".gif")) return "gif";
+        return "jpg";
+    }
+
+    /** 写入相册。Android 10+ 用 MediaStore，以下写公共 Pictures 目录并通知扫描。 */
+    private void saveBytesToGallery(byte[] data, String displayName, String mimeType) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.content.ContentResolver resolver = activity.getContentResolver();
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, displayName);
+            values.put(android.provider.MediaStore.Images.Media.MIME_TYPE, mimeType);
+            values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_PICTURES + "/YukiHub");
+            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
+            android.net.Uri outUri = resolver.insert(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (outUri == null) throw new Exception("MediaStore insert failed");
+            try {
+                try (java.io.OutputStream out = resolver.openOutputStream(outUri)) {
+                    if (out == null) throw new Exception("open gallery stream failed");
+                    out.write(data);
+                    out.flush();
+                }
+                android.content.ContentValues done = new android.content.ContentValues();
+                done.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(outUri, done, null, null);
+            } catch (Throwable t) {
+                // 失败时清掉半成品记录，避免相册里留下 0 字节条目
+                try { resolver.delete(outUri, null, null); } catch (Throwable ignored) {}
+                if (t instanceof Exception) throw (Exception) t;
+                throw new Exception(t);
+            }
+            return;
+        }
+        java.io.File base = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_PICTURES);
+        java.io.File dir = new java.io.File(base, "YukiHub");
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception("创建相册目录失败");
+        java.io.File outFile = new java.io.File(dir, displayName);
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(outFile)) {
+            out.write(data);
+            out.flush();
+        }
+        android.media.MediaScannerConnection.scanFile(activity,
+                new String[]{outFile.getAbsolutePath()}, new String[]{mimeType}, null);
     }
 
     /**

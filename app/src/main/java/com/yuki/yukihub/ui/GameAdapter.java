@@ -424,36 +424,40 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         badge.setVisibility(View.VISIBLE);
         if (themeActive) badge.setTextColor(0xFFE8EDF5);
         else badge.setTextColor(badge.getContext().getResources().getColor(R.color.yh_text));
+
+        String text;
+        int themeBase;   // 主题模式下的底色来源
+        int themeAlpha;  // 主题模式下的底色透明度
+        int bgRes;       // 非主题模式下的背景资源
         if ("completed".equals(s)) {
-            badge.setText("🏆玩过");
-            if (themeActive) {
-                GradientDrawable bg = new GradientDrawable();
-                bg.setColor((0x5A << 24) | (themeSecondaryColor & 0x00FFFFFF));
-                bg.setCornerRadius((int) dp(badge, 999));
-                badge.setBackground(bg);
-            } else {
-                badge.setBackgroundResource(R.drawable.bg_status_completed);
-            }
+            text = "🏆玩过";
+            themeBase = themeSecondaryColor; themeAlpha = 0x5A;
+            bgRes = R.drawable.bg_status_completed;
         } else if ("playing".equals(s)) {
-            badge.setText("🎮在玩");
-            if (themeActive) {
-                GradientDrawable bg = new GradientDrawable();
-                bg.setColor((0x5A << 24) | (themePrimaryColor & 0x00FFFFFF));
-                bg.setCornerRadius((int) dp(badge, 999));
-                badge.setBackground(bg);
-            } else {
-                badge.setBackgroundResource(R.drawable.bg_status_playing);
-            }
+            text = "🎮在玩";
+            themeBase = themePrimaryColor; themeAlpha = 0x5A;
+            bgRes = R.drawable.bg_status_playing;
+        } else if ("onhold".equals(s)) {
+            text = "⏸搁置";
+            themeBase = themePrimaryColor; themeAlpha = 0x38;
+            bgRes = R.drawable.bg_status_onhold;
+        } else if ("dropped".equals(s)) {
+            text = "🗑抛弃";
+            themeBase = themeCard2Color; themeAlpha = 0x7A;
+            bgRes = R.drawable.bg_status_dropped;
         } else {
-            badge.setText("☆未玩");
-            if (themeActive) {
-                GradientDrawable bg = new GradientDrawable();
-                bg.setColor((0x5A << 24) | (themeCard2Color & 0x00FFFFFF));
-                bg.setCornerRadius((int) dp(badge, 999));
-                badge.setBackground(bg);
-            } else {
-                badge.setBackgroundResource(R.drawable.bg_status_unplayed);
-            }
+            text = "☆未玩";
+            themeBase = themeCard2Color; themeAlpha = 0x5A;
+            bgRes = R.drawable.bg_status_unplayed;
+        }
+        badge.setText(text);
+        if (themeActive) {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor((themeAlpha << 24) | (themeBase & 0x00FFFFFF));
+            bg.setCornerRadius((int) dp(badge, 999));
+            badge.setBackground(bg);
+        } else {
+            badge.setBackgroundResource(bgRes);
         }
     }
 

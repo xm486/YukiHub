@@ -135,6 +135,8 @@ public class ImporterService {
             if (igd.playStatus != null && !igd.playStatus.isEmpty()) {
                 game.playStatus = igd.playStatus;
             }
+            // NSFW：沿用来源平台的标记（目前只有 LunaBox 的 is_nsfw 提供该信息）
+            game.nsfw = igd.nsfw;
             game.createdAt = igd.createdAt > 0 ? igd.createdAt : System.currentTimeMillis();
             game.updatedAt = System.currentTimeMillis();
 

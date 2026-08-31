@@ -21,7 +21,8 @@ public String coverUrl;     // 远程封面 URL（http/https）
     public java.util.List<String> tags;
     public long createdAt;
     public long totalPlayTime;       // 总游戏时长（秒）
-    public String playStatus;         // 游玩状态：unplayed / playing / completed（来自 LunaBox status 映射）
+    public String playStatus;         // 游玩状态：unplayed / playing / completed / onhold / dropped（来自各平台状态映射）
+    public boolean nsfw;              // 是否 NSFW（LunaBox is_nsfw 等来源平台的标记；平台无此概念时为 false）
     public boolean exists;           // 是否已有同标题游戏（预览标记）
 
     // ===== 以下为预览阶段使用的字段 =====

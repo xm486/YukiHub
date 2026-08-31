@@ -25,6 +25,8 @@ public class WeeklyPlayStats {
     public int totalGameCount;
     public int completedGameCount;
     public int playingGameCount;
+    public int onHoldGameCount;
+    public int droppedGameCount;
     public int unplayedGameCount;
     public final LinkedHashMap<String, Long> topGames = new LinkedHashMap<>();
     public final List<PlayActivity> recentSessions = new ArrayList<>();
