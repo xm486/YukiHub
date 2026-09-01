@@ -300,6 +300,8 @@ public class ChatCacheHelper {
         m.isMine = c.getInt(11) != 0;
         m.replyToId = c.getColumnCount() > 12 ? c.getInt(12) : 0;
         // senderLevel 不入缓存：等级会变，缓存值必然过期，一律用服务端实时值
+        // senderNameColor 同理（用户随时能在商店换色），保持 null 表示「未知」，
+        // 让 recordGroupNameColors 跳过它而不是误判成「已卸下颜色」
         return m;
     }
 

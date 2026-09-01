@@ -12,6 +12,13 @@ public class GroupMessage {
     public boolean senderIsAdmin;
     /** 发送者等级（0 = 未知，此时不显示徽章，避免乐观 UI 闪错值） */
     public int senderLevel;
+    /**
+     * 发送者昵称颜色，形如 "#f48fb1"；空串表示未装备，昵称走默认色。
+     *
+     * 与 senderLevel 同理不入本地缓存：用户随时能在萌萌点商店换色，
+     * 缓存值必然过期，一律用服务端实时值。
+     */
+    public String senderNameColor;
     public String content;
     public String msgType;    // "text" | "emoji" | "image"
     public String createdAt;

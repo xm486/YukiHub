@@ -676,6 +676,9 @@ public class SocialApiClient {
         msg.senderUid = obj.optInt("senderUid", 0);
         msg.senderIsAdmin = obj.optBoolean("senderIsAdmin", false);
         msg.senderLevel = obj.optInt("senderLevel", 0);
+        // 字段缺失（旧版服务端）留 null 表示「未知」，只有服务端确实下发了才采信。
+        // 若一律 optString 成空串，会被当成「已卸下颜色」而清掉本地已知的颜色。
+        msg.senderNameColor = obj.has("senderNameColor") ? obj.optString("senderNameColor", "") : null;
         msg.content = obj.optString("content", "");
         msg.msgType = obj.optString("msgType", "text");
         msg.createdAt = obj.optString("createdAt", "");

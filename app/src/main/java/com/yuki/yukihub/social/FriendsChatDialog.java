@@ -44,6 +44,14 @@ public class FriendsChatDialog {
     private static final String KEY_AUTH_NICKNAME = "auth_nickname";
     private static final String KEY_AUTH_AVATAR = "auth_avatar";
     private static final String KEY_AUTH_UID = "auth_uid";
+    /**
+     * 自己的昵称颜色（hex，如 "#f48fb1"）。
+     *
+     * 群聊每次同步会顺手刷新它，这样下次进会话/发消息时不必等服务端回包
+     * 就能给自己的昵称直接上色 —— 等级徽章能做到「一发出就有」是因为进会话时
+     * 历史消息已经把自己的等级记进 groupLevelMap，颜色靠这个 prefs 达到同样效果。
+     */
+    private static final String KEY_AUTH_NAME_COLOR = "auth_name_color";
 
     // 头像缓存（避免重复加载）
     private static final int AVATAR_CACHE_SIZE = 64;
@@ -1295,6 +1303,9 @@ public class FriendsChatDialog {
         final int groupId = chatGroup.id;
         openingGroupId = groupId;
         ChatNotifier.setActiveConversation(ChatNotifier.groupKey(groupId));
+        // 渲染前先把本机记住的自己的昵称颜色填进颜色表，
+        // 这样首屏和乐观气泡里自己的昵称就是彩色，不会先蓝一下
+        seedMyNameColor();
         AppExecutors.runOnIo(() -> {
             // 1. 读本地缓存渲染（先乐观允许翻历史，服务器同步后再修正）
             List<GroupMessage> cached = chatCache.getGroupMessages(groupId, RENDER_LIMIT);
@@ -1386,6 +1397,7 @@ public class FriendsChatDialog {
         // 等级只从服务端来，拿到就立刻记进等级表，
         // 这样接下来渲染缓存消息时也能带上等级（不必等第二次进会话）
         final boolean[] lvChanged = new boolean[]{false};
+        final boolean[] colorChanged = new boolean[]{false};
         List<GroupMessage> fresh = new ArrayList<>();
         boolean changed = false;
         int offset = 0;
@@ -1395,6 +1407,7 @@ public class FriendsChatDialog {
             if (onlineCountOut != null) onlineCountOut[0] = result.onlineCount;
             chatCache.upsertGroupMessages(groupId, result.messages);
             if (recordGroupLevels(result.messages)) lvChanged[0] = true;
+            if (recordGroupNameColors(result.messages)) colorChanged[0] = true;
             for (GroupMessage m : result.messages) {
                 if (m.deleted) {
                     // 删除状态变化：需重绘（缓存已移除该条）
@@ -1414,12 +1427,15 @@ public class FriendsChatDialog {
             if (offset >= 200) break; // 安全上限：最多拉 10 页
         }
         chatCache.pruneGroupMessages(groupId);
-        // 等级有更新 → 原地刷新已渲染气泡上的徽章（不必整屏重绘）
-        if (lvChanged[0]) {
+        // 等级/昵称颜色有更新 → 原地刷新已渲染气泡（不必整屏重绘）
+        if (lvChanged[0] || colorChanged[0]) {
             final int gidLv = groupId;
+            final boolean doLv = lvChanged[0];
+            final boolean doColor = colorChanged[0];
             uiHandler.post(() -> {
                 if (openingGroupId != gidLv) return;
-                refreshRenderedLevelBadges();
+                if (doLv) refreshRenderedLevelBadges();
+                if (doColor) refreshRenderedNickColors();
             });
         }
         if (serverHasMoreOut != null) serverHasMoreOut[0] = serverHasMore;
@@ -1599,6 +1615,159 @@ public class FriendsChatDialog {
         return v == null ? 0 : v;
     }
 
+    /** 群聊昵称默认色：未装备萌萌点颜色时使用。 */
+    private static final int GROUP_NICK_DEFAULT_COLOR = 0xFF8AB4FF;
+
+    /**
+     * 会话内的昵称颜色表，同 groupLevelMap：
+     * 本地乐观消息拿不到颜色，靠这张表补上同一个人在其它消息里带来的色值。
+     */
+    private final java.util.Map<String, String> groupNameColorMap = new java.util.HashMap<>();
+
+    /**
+     * 记录本批消息里的昵称颜色。
+     *
+     * @return true = 有颜色发生变化（需要刷新已渲染的昵称）
+     */
+    private boolean recordGroupNameColors(List<GroupMessage> msgs) {
+        if (msgs == null || msgs.isEmpty()) return false;
+        boolean changed = false;
+        String myId = getMyUserId();
+        for (GroupMessage m : msgs) {
+            if (m == null) continue;
+            String key = m.senderId == null ? "" : m.senderId;
+            if (key.isEmpty()) continue;
+            // 服务端每条消息都会带这个字段（未装备为空串），所以空串是「确实没有颜色」，
+            // 要能覆盖掉旧值 —— 用户在商店卸下颜色后昵称应当回到默认色。
+            // 但本地乐观消息的 senderNameColor 是 null，那种不参与记录。
+            if (m.senderNameColor == null) continue;
+            String val = m.senderNameColor.trim();
+            // 是自己的消息就把颜色落到 prefs：下次进会话/发消息时乐观气泡能立刻上色，
+            // 不必等这一轮同步回来（等级徽章相当于靠历史消息拿到，颜色靠这个）
+            if (!myId.isEmpty() && myId.equals(key)) saveMyNameColor(val);
+            String old = groupNameColorMap.get(key);
+            if (old == null || !old.equals(val)) {
+                groupNameColorMap.put(key, val);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /** 读取本机记住的自己的昵称颜色（hex，未装备或未同步过时为空串） */
+    private String getMyNameColor() {
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return p.getString(KEY_AUTH_NAME_COLOR, "");
+    }
+
+    /** 记住自己的昵称颜色；值没变时不写盘 */
+    private void saveMyNameColor(String hex) {
+        String val = hex == null ? "" : hex.trim();
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (val.equals(p.getString(KEY_AUTH_NAME_COLOR, ""))) return;
+        p.edit().putString(KEY_AUTH_NAME_COLOR, val).apply();
+    }
+
+    /**
+     * 把本机记住的自己的颜色预填进会话颜色表。
+     *
+     * 在渲染任何气泡之前调用，让自己的昵称从第一帧就是彩色，
+     * 而不是先蓝一下再被服务端回包刷成彩色。
+     */
+    private void seedMyNameColor() {
+        String myId = getMyUserId();
+        if (myId.isEmpty()) return;
+        String mine = getMyNameColor();
+        // 只在有值时才预填：空串会被当成「已确认没有颜色」，反而挡住后面
+        // fetchMyNameColorAsync 拿到真实值时的写入判断。
+        if (!mine.isEmpty() && !groupNameColorMap.containsKey(myId)) {
+            groupNameColorMap.put(myId, mine);
+        }
+        // prefs 还没有值（刚登录、或从没在群里发过言）就异步问一次 /user/level 补上。
+        // 只补这一种情况，避免每次进会话都多打一个请求。
+        if (mine.isEmpty()) fetchMyNameColorAsync(myId);
+    }
+
+    /**
+     * 异步拉取自己的昵称颜色并落到 prefs。
+     *
+     * 拉到非空值时同步进颜色表并原地刷新已渲染的昵称，所以即使这次请求
+     * 比首屏渲染慢，昵称也会自己变成彩色。
+     */
+    private void fetchMyNameColorAsync(String myId) {
+        if (myId == null || myId.isEmpty()) return;
+        AppExecutors.runOnIo(() -> {
+            try {
+                org.json.JSONObject lv = apiClient.getMyLevel();
+                String hex = lv.optString("nameColorHex", "").trim();
+                if (hex.isEmpty()) return;
+                saveMyNameColor(hex);
+                uiHandler.post(() -> {
+                    if (dialog == null || !dialog.isShowing()) return;
+                    String old = groupNameColorMap.get(myId);
+                    if (old != null && !old.isEmpty()) return; // 同步已拿到真实值，别覆盖
+                    groupNameColorMap.put(myId, hex);
+                    refreshRenderedNickColors();
+                });
+            } catch (Throwable ignored) {
+                // 拿不到就退回默认色，不打扰用户
+            }
+        });
+    }
+
+    /** 取某人的昵称颜色：消息自带值优先，其次查会话内的颜色表；无色返回默认蓝。 */
+    private int nickColorOf(GroupMessage msg) {
+        if (msg == null) return GROUP_NICK_DEFAULT_COLOR;
+        int c = parseNameColor(msg.senderNameColor);
+        if (c != 0) return c;
+        if (msg.senderId == null || msg.senderId.isEmpty()) return GROUP_NICK_DEFAULT_COLOR;
+        c = parseNameColor(groupNameColorMap.get(msg.senderId));
+        return c == 0 ? GROUP_NICK_DEFAULT_COLOR : c;
+    }
+
+    /**
+     * 解析服务端下发的 "#rrggbb" 色值，补上不透明的 alpha。
+     *
+     * @return 0 表示空值或格式不认，调用方应退回默认色（真实颜色不会是全透明的 0）
+     */
+    private int parseNameColor(String hex) {
+        if (hex == null) return 0;
+        String s = hex.trim();
+        if (s.isEmpty()) return 0;
+        try {
+            int c = android.graphics.Color.parseColor(s);
+            // 服务端给的是 6 位 hex，parseColor 会补成不透明；这里再兜一层，
+            // 防止将来配置里出现带 alpha 的值导致昵称半透明看不见。
+            return 0xFF000000 | (c & 0x00FFFFFF);
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    /** 原地刷新已渲染的昵称颜色，逻辑同 refreshRenderedLevelBadges。 */
+    private void refreshRenderedNickColors() {
+        if (groupMessageList == null) return;
+        for (int i = 0; i < groupMessageList.getChildCount(); i++) {
+            applyNickColorIn(groupMessageList.getChildAt(i));
+        }
+    }
+
+    /** 递归查找并更新某个气泡子树里的昵称文本颜色 */
+    private void applyNickColorIn(View v) {
+        if (v == null) return;
+        Object tag = v.getTag();
+        if (tag instanceof String && ((String) tag).startsWith("nick:") && v instanceof TextView) {
+            String sid = ((String) tag).substring("nick:".length());
+            int c = parseNameColor(groupNameColorMap.get(sid));
+            ((TextView) v).setTextColor(c == 0 ? GROUP_NICK_DEFAULT_COLOR : c);
+            return;
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) applyNickColorIn(g.getChildAt(i));
+        }
+    }
+
     /**
      * 原地刷新已渲染气泡上的等级徽章，无需整屏重绘、也不用退出重进。
      * 徽章的 tag 存的是 "lvbadge:<senderId>"，据此定位并更新。
@@ -1730,8 +1899,9 @@ public class FriendsChatDialog {
 
             TextView nickView = new TextView(activity);
             nickView.setText(myNick);
-            nickView.setTextColor(0xFF8AB4FF);
+            nickView.setTextColor(nickColorOf(msg));
             nickView.setTextSize(11);
+            if (msg.senderId != null && !msg.senderId.isEmpty()) nickView.setTag("nick:" + msg.senderId);
             myNickRow.addView(nickView);
 
             // 等级徽章紧跟昵称，管理标识在最后
@@ -1857,8 +2027,9 @@ public class FriendsChatDialog {
 
             TextView nickView = new TextView(activity);
             nickView.setText(nick);
-            nickView.setTextColor(0xFF8AB4FF);
+            nickView.setTextColor(nickColorOf(msg));
             nickView.setTextSize(11);
+            if (msg.senderId != null && !msg.senderId.isEmpty()) nickView.setTag("nick:" + msg.senderId);
             nickRow.addView(nickView);
 
             // 等级徽章紧跟昵称，管理标识在最后
@@ -1986,9 +2157,12 @@ public class FriendsChatDialog {
                     if (!msgContent.equals(sent.content)) {
                         updateBubbleContent(bubbleView, sent.content);
                     }
-                    // 服务端响应带自己的等级：记下后补上乐观气泡缺的徽章
+                    // 服务端响应带自己的等级和昵称颜色：记下后补上乐观气泡缺的部分
                     if (recordGroupLevels(java.util.Collections.singletonList(sent))) {
                         refreshRenderedLevelBadges();
+                    }
+                    if (recordGroupNameColors(java.util.Collections.singletonList(sent))) {
+                        refreshRenderedNickColors();
                     }
                 });
             } catch (Throwable t) {
@@ -2010,14 +2184,18 @@ public class FriendsChatDialog {
                 SocialApiClient.GroupPollResult result = apiClient.pollGroupMessages(chatGroup.id, groupMaxMessageId);
                 List<GroupMessage> newMsgs = result.messages;
                 boolean lvChanged = false;
+                boolean colorChanged = false;
                 if (!newMsgs.isEmpty()) {
                     // 轮询到的新消息写入本地缓存（含撤回状态同步）
                     chatCache.upsertGroupMessages(chatGroup.id, newMsgs);
                     chatCache.pruneGroupMessages(chatGroup.id);
                     // 等级变化（升级 / 首次见到这个人）也在这里同步
                     lvChanged = recordGroupLevels(newMsgs);
+                    // 昵称颜色同理：有人换了颜色 / 首次见到这个人
+                    colorChanged = recordGroupNameColors(newMsgs);
                 }
                 final boolean lvChangedFinal = lvChanged;
+                final boolean colorChangedFinal = colorChanged;
                 uiHandler.post(() -> {
                     if (!newMsgs.isEmpty()) {
                         for (GroupMessage msg : newMsgs) {
@@ -2045,6 +2223,8 @@ public class FriendsChatDialog {
                     }
                     // 等级实时刷新：有人升级或首次见到某人的等级，原地更新徽章
                     if (lvChangedFinal) refreshRenderedLevelBadges();
+                    // 昵称颜色实时刷新：有人在商店换/卸颜色，原地更新已渲染昵称
+                    if (colorChangedFinal) refreshRenderedNickColors();
                     // 更新在线人数
                     updateOnlineCount(result.onlineCount);
                 });
@@ -3907,6 +4087,13 @@ public class FriendsChatDialog {
                 chatCache.pruneGroupMessages(chatGroup.id);
                 uiHandler.post(() -> {
                     if (sent.id > groupMaxMessageId) groupMaxMessageId = sent.id;
+                    // 与文字消息一致：服务端回包带自己的等级和昵称颜色，补上乐观气泡缺的部分
+                    if (recordGroupLevels(java.util.Collections.singletonList(sent))) {
+                        refreshRenderedLevelBadges();
+                    }
+                    if (recordGroupNameColors(java.util.Collections.singletonList(sent))) {
+                        refreshRenderedNickColors();
+                    }
                 });
             } catch (Throwable t) {
                 uiHandler.post(() -> Toast.makeText(activity, "发送失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
