@@ -44,10 +44,33 @@ public final class AiReviewPromptBuilder {
         sb.append("- roast 控制在 180 字以内，可以比短评更丰满，但不要写成长文。\n");
         sb.append("- highlights 和 advice 各 2-4 条即可，建议要具体，不要只写空话。\n");
         sb.append("- topGamesComment 只点评数据中出现的游戏；每条可以写 1-2 句，结合时长、状态和作品资料。\n");
+
+        sb.append("\n[数据字段解读规则 - MUST FOLLOW]\n");
+        sb.append("- 「当前库状态」是生成这份点评时的即时快照，不带时间信息。\n");
+        sb.append("- 严禁把库状态与本周期时长做因果、反差、对比或「言行不一」式解读。\n");
+        sb.append("  例如不得写「嘴上说抛弃，手却很诚实」「明明标了搁置还在玩」这类句子。\n");
+        sb.append("  状态可能是很久以前标的，也可能是刚刚才改的，你无从判断，因此不许推测。\n");
+        sb.append("- 「未玩」款数指的是本周期有游玩时长、但库状态仍标着未玩的游戏数。\n");
+        sb.append("  这通常只说明玩家没有手动更新状态，不等于「新开了坑」或「三分钟热度」。\n");
+        sb.append("  不要把这个数字解读成开坑数量，也不要据此批评玩家乱开新游戏。\n");
+        sb.append("- 时段分布、工作日/周末次数只是启动次数的归类统计。\n");
+        sb.append("  只允许陈述次数或倾向，严禁引申出数据中不存在的具体行为。\n");
+        sb.append("  例如不得写「深夜快进了 N 次」「反复读档 N 次」——快进、读档、跳过、刷 CG\n");
+        sb.append("  这类动作从未被记录，写出来就是编造。\n");
+        sb.append("- 游玩次数已做过噪声清理（过短记录被剔除，中途切出再回来的记录已合并），\n");
+        sb.append("  可以直接采信，但不要拿它反推玩家是否专注或是否频繁退出。\n");
+        sb.append("- 数据里没有的维度（成就、存档数、剧情进度、章节、好感度、结局数）一律不许提及。\n");
+
+        sb.append("\n[库状态语义 - MUST FOLLOW]\n");
         sb.append("- 必须尊重游戏当前库状态：状态为“🏆 玩过（等同通关/已完成）”的游戏已经通关，不要建议用户下周再通关它。\n");
         sb.append("- 已通关后本周仍有时长时，应优先理解为重温、回味、补后日谈/FD/CG/BGM、截图留念或写感想，不要默认判定为负面行为。\n");
         sb.append("- 禁止使用或变体表达：重复游玩已通关游戏、再通关已玩过游戏、克制已通关游戏、通关游戏花痴/浪费时间。\n");
         sb.append("- 状态为“🎮 在玩（尚未通关）”的游戏才可以建议继续推进；状态为“☆ 未玩（未开始/未通关）”的游戏可以建议少开坑或先尝试。\n");
+        sb.append("- 状态为“⏸ 搁置（开过但暂时停下，之后还想继续）”的游戏：可以温和地提醒它还在等待，\n");
+        sb.append("  或建议挑一部捡回来。不要说成失败、烂尾、半途而废，也不要催促必须马上通关。\n");
+        sb.append("- 状态为“🗑 抛弃（明确不再继续）”的游戏：这是玩家有意识做出的取舍，应当尊重。\n");
+        sb.append("  不要劝玩家重新玩它，不要质疑这个决定，也不要写成浪费、可惜、遗憾或半途而废。\n");
+        sb.append("  抛弃后本周仍有时长，只允许理解为收尾确认、导出存档、告别或删除前最后一看。\n");
         sb.append("- 输出前自检 advice 和 roast：如果某游戏是玩过/已完成，不得把继续打开它说成错误；可以建议“写感想/整理截图/换一部在玩作品推进”。\n");
         sb.append("- 如果上下文包含作品资料增强，只能用来判断类型、风格、长度、标签倾向；不要把简介摘要扩写成剧情介绍，不要泄露关键情节。\n");
         return sb.toString();
@@ -57,13 +80,17 @@ public final class AiReviewPromptBuilder {
         WeeklyPlayStats s = stats == null ? new WeeklyPlayStats() : stats;
         StringBuilder sb = new StringBuilder();
         sb.append("=== 最近 7 天游玩数据快照 ===\n\n");
+        sb.append("统计口径说明：\n");
+        sb.append("- 下列次数与时长已剔除短于 1 分钟的记录，并把同一游戏内间隔 5 分钟以内的\n");
+        sb.append("  相邻记录合并为一次连续游玩，因此可以直接采信。\n");
+        sb.append("- 「当前库状态」是此刻的快照，不代表统计周期内的状态，不可用于反差解读。\n\n");
         sb.append("统计周期：\n");
         sb.append(dateOnly(s.startTime)).append(" ~ ").append(dateOnly(s.endTime)).append("\n\n");
         sb.append("总体：\n");
         sb.append("- 总游玩时长：").append(TimeFormatUtil.playTime(s.totalDuration)).append("\n");
         sb.append("- 活跃天数：").append(s.activeDays).append(" 天\n");
         sb.append("- 游玩游戏数：").append(s.gameCount()).append(" 款\n");
-        sb.append("- 本周涉及游戏状态：玩过/已完成 ").append(s.completedGameCount).append(" 款，在玩 ").append(s.playingGameCount).append(" 款，搁置 ").append(s.onHoldGameCount).append(" 款，抛弃 ").append(s.droppedGameCount).append(" 款，未玩 ").append(s.unplayedGameCount).append(" 款\n");
+        sb.append("- 本周涉及游戏的当前库状态分布：玩过/已完成 ").append(s.completedGameCount).append(" 款，在玩 ").append(s.playingGameCount).append(" 款，搁置 ").append(s.onHoldGameCount).append(" 款，抛弃 ").append(s.droppedGameCount).append(" 款，仍标着未玩 ").append(s.unplayedGameCount).append(" 款（有时长但状态未更新，不等于新开坑）\n");
         sb.append("- 游玩次数：").append(s.sessionCount).append(" 次\n");
         sb.append("- 平均单次时长：").append(TimeFormatUtil.playTime(s.averageSessionDuration)).append("\n");
         sb.append("- 最长单次：").append(TimeFormatUtil.playTime(s.longestSessionDuration));
@@ -139,8 +166,11 @@ public final class AiReviewPromptBuilder {
                 + "不要写成统计报告，不要自称 AI，不要解释你如何分析。\n"
                 + "建议必须结合当前库状态：已标为玩过的游戏等同通关/已完成，不要建议再通关；在玩游戏可建议继续推进；未玩游戏可建议少开坑或先试试。\n"
                 + "如果已通关游戏本周仍有时长，请按“重温/回味/补内容/整理感想”处理，不要把它批评成重复游玩、浪费时间或需要克制的坏习惯。\n"
+                + "搁置和抛弃是玩家自己的取舍：搁置可温和提醒，抛弃要尊重决定，都不要写成失败或可惜。\n"
+                + "严禁给数据中不存在的行为编造动作（快进、读档、跳过、刷 CG、查攻略等一律没有记录）。\n"
+                + "严禁把库状态和本周时长拼成「言行不一」式反差段子。\n"
                 + "如果数据很少，就轻度吐槽并鼓励继续记录。\n\n"
-                + "请严格输出以下 JSON：\n"
+                + "请严格输出以下 JSON（highlights 与 advice 各写 3 条）：\n"
                 + "{\n"
                 + "  \"title\": \"短标题\",\n"
                 + "  \"subtitle\": \"一句话总结\",\n"

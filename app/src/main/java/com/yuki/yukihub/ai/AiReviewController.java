@@ -70,6 +70,7 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -320,9 +321,34 @@ private void showAiReviewSettingsDialogImpl() {
     root.addView(endpointHint);
 
     root.addView(profileLabel("API Key"));
+    // Key 很长又容易输错，给一个显示/隐藏切换；默认仍是隐藏。
+    LinearLayout keyRow = new LinearLayout(activity);
+    keyRow.setOrientation(LinearLayout.HORIZONTAL);
+    keyRow.setGravity(Gravity.CENTER_VERTICAL);
     EditText apiKey = profileEdit(settings.apiKey, "sk-...");
     apiKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-    root.addView(apiKey, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+    LinearLayout.LayoutParams keyLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+    keyRow.addView(apiKey, keyLp);
+    TextView keyToggle = new TextView(activity);
+    keyToggle.setText("👁");
+    keyToggle.setTextSize(16);
+    keyToggle.setGravity(Gravity.CENTER);
+    keyToggle.setTextColor(getColorCompat(R.color.yh_text_muted));
+    LinearLayout.LayoutParams toggleLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+    toggleLp.setMargins(dp(6), 0, 0, 0);
+    keyRow.addView(keyToggle, toggleLp);
+    keyToggle.setOnClickListener(v -> {
+        boolean masked = (apiKey.getInputType() & InputType.TYPE_TEXT_VARIATION_PASSWORD) != 0;
+        // 切换后光标会跳到开头，手动挪回末尾，免得接着输入插到前面
+        apiKey.setInputType(masked
+                ? (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+                : (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD));
+        apiKey.setTextSize(13);
+        apiKey.setSelection(apiKey.getText().length());
+        keyToggle.setText(masked ? "🙈" : "👁");
+        keyToggle.setTextColor(getColorCompat(masked ? R.color.yh_primary : R.color.yh_text_muted));
+    });
+    root.addView(keyRow, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
 
     root.addView(profileLabel("模型"));
     EditText model = profileEdit(settings.model, "deepseek-chat / gpt-4o-mini");
@@ -532,7 +558,9 @@ private void testAiReviewConnection(AiReviewSettings settings, Button button) {
                         }
                         AlertDialog d = new AlertDialog.Builder(activity)
                                 .setTitle("AI 连接失败")
-                                .setMessage("实际请求地址：\n" + endpoint + "\n\n错误：\n" + emptyText(t.getMessage(), t.getClass().getSimpleName()))
+                                .setMessage("实际请求地址：\n" + endpoint + "\n\n模型：" + settings.model
+                                        + "\n\n错误：\n" + describeThrowable(t)
+                                        + "\n\n若是超时或连接中断，多为网络抖动，可再试一次；\n若显示 HTTP 401/403 请检查 API Key，HTTP 404 请检查接口地址，\nHTTP 400 多为模型名不对。")
                                 .setPositiveButton("知道了", null)
                                 .show();
                         styleAlertDialogDark(d);
@@ -540,6 +568,23 @@ private void testAiReviewConnection(AiReviewSettings settings, Button button) {
                 }
         }
     });
+}
+
+/** 异常信息可读化：message 为空时退回类名，并带上根因，避免弹窗只显示一个空白。 */
+private String describeThrowable(Throwable t) {
+    if (t == null) return "未知错误";
+    StringBuilder sb = new StringBuilder();
+    String msg = t.getMessage();
+    sb.append(msg == null || msg.trim().isEmpty() ? t.getClass().getSimpleName() : msg.trim());
+    Throwable cause = t.getCause();
+    int depth = 0;
+    while (cause != null && cause != t && depth < 3) {
+        String cm = cause.getMessage();
+        sb.append("\n← ").append(cm == null || cm.trim().isEmpty() ? cause.getClass().getSimpleName() : cm.trim());
+        cause = cause.getCause();
+        depth++;
+    }
+    return sb.toString();
 }
 
 private String providerValue(String label) {
@@ -568,6 +613,75 @@ private String aiPlayStatusLabel(String status) {
 }
 
 
+/**
+ * 合并阈值：同一游戏两段记录之间的空档短于此值时，视为一次连续游玩。
+ *
+ * finishCurrentPlaySessionIfAny() 挂在 onResume 上，玩到一半切出去查攻略
+ * 再切回来就会被结算成两条记录，「启动次数」因此虚高。
+ */
+private static final long AI_SESSION_MERGE_GAP_MS = 5L * 60L * 1000L;
+
+/**
+ * 有效游玩下限：短于此值的记录不计入喂给模型的统计。
+ *
+ * 数据层的 MIN_PLAY_SESSION_MS 是 0，启动失败、秒退、误触都会留下记录，
+ * 模型拿这些噪声算出的「平均单次 1 分钟」「三分钟热度」并不反映真实习惯。
+ */
+private static final long AI_MIN_SESSION_MS = 60L * 1000L;
+
+/**
+ * 只在喂给模型的统计里做噪声修正，数据库和其它界面的口径保持原样。
+ *
+ * 两步：先按游戏把间隔很短的相邻记录并回一次完整游玩，再丢掉过短的碎片。
+ * 返回结果按 end_time 降序，与调用方「最近优先」的预期一致。
+ */
+private List<PlayActivity> mergeAndFilterSessionsForAi(List<PlayActivity> raw) {
+    List<PlayActivity> ordered = new ArrayList<>();
+    if (raw != null) {
+        for (PlayActivity a : raw) if (a != null && a.duration > 0) ordered.add(a);
+    }
+    // 查询按 end_time 降序返回，合并需要时间升序
+    Collections.sort(ordered, (a, b) -> Long.compare(a.startTime, b.startTime));
+    List<PlayActivity> merged = new ArrayList<>();
+    for (PlayActivity a : ordered) {
+        PlayActivity prev = null;
+        for (int i = merged.size() - 1; i >= 0; i--) {
+            if (merged.get(i).gameId == a.gameId) { prev = merged.get(i); break; }
+        }
+        // 差值为负说明两段有重叠（异常数据），同样并起来
+        if (prev != null && a.startTime - prev.endTime <= AI_SESSION_MERGE_GAP_MS) {
+            prev.duration += a.duration;
+            prev.endTime = Math.max(prev.endTime, a.endTime);
+            continue;
+        }
+        merged.add(copyPlayActivity(a));
+    }
+    List<PlayActivity> result = new ArrayList<>();
+    for (PlayActivity a : merged) if (a.duration >= AI_MIN_SESSION_MS) result.add(a);
+    Collections.sort(result, (a, b) -> Long.compare(b.endTime, a.endTime));
+    return result;
+}
+
+/** 合并会改写 duration/endTime，复制一份避免影响传入的对象。 */
+private PlayActivity copyPlayActivity(PlayActivity src) {
+    PlayActivity a = new PlayActivity();
+    a.sessionId = src.sessionId;
+    a.sessionUuid = src.sessionUuid;
+    a.gameId = src.gameId;
+    a.gameTitle = src.gameTitle;
+    a.startTime = src.startTime;
+    a.endTime = src.endTime;
+    a.duration = src.duration;
+    a.launchType = src.launchType;
+    a.playStatus = src.playStatus;
+    return a;
+}
+
+private String aiSessionTitle(PlayActivity a) {
+    if (a == null || a.gameTitle == null || a.gameTitle.trim().isEmpty()) return "未命名游戏";
+    return a.gameTitle;
+}
+
 private WeeklyPlayStats buildWeeklyPlayStatsImpl(AiReviewSettings aiSettings, boolean allowOnlineLookup) {
     WeeklyPlayStats stats = new WeeklyPlayStats();
     long end = System.currentTimeMillis();
@@ -578,24 +692,34 @@ private WeeklyPlayStats buildWeeklyPlayStatsImpl(AiReviewSettings aiSettings, bo
     stats.startTime = start;
     stats.endTime = end;
     if (delegate.gameRepository() == null) return stats;
-    Map<String, Long> durations = delegate.gameRepository().getPlayDurationsBetween(start, end);
-    List<Map.Entry<String, Long>> entries = new ArrayList<>(durations.entrySet());
+    // 时长不再走 getPlayDurationsBetween：那个是 SUM 全部记录，含秒退噪声，
+    // 与过滤后的 sessionCount 对不上。统一从过滤后的记录自己聚合。
+    List<PlayActivity> sessions = mergeAndFilterSessionsForAi(
+            delegate.gameRepository().getPlayActivitiesBetween(start, end, 2000));
+    LinkedHashMap<String, Long> durationByGame = new LinkedHashMap<>();
+    for (PlayActivity a : sessions) {
+        String title = aiSessionTitle(a);
+        Long old = durationByGame.get(title);
+        durationByGame.put(title, (old == null ? 0L : old) + a.duration);
+    }
+    List<Map.Entry<String, Long>> entries = new ArrayList<>(durationByGame.entrySet());
     Collections.sort(entries, (a, b) -> Long.compare(b.getValue() == null ? 0L : b.getValue(), a.getValue() == null ? 0L : a.getValue()));
-    stats.totalGameCount = durations.size();
+    stats.totalGameCount = durationByGame.size();
     for (Map.Entry<String, Long> e : entries) {
         long duration = e.getValue() == null ? 0L : e.getValue();
         if (duration <= 0) continue;
         stats.totalDuration += duration;
-        if (stats.topGames.size() < 8) stats.topGames.put(e.getKey(), duration);
+        // 只留 5 个：上下文只输出 Top 5，封面也只从这里挑，多存会让卡片
+        // 出现模型没点评过的游戏。
+        if (stats.topGames.size() < 5) stats.topGames.put(e.getKey(), duration);
     }
-    List<PlayActivity> sessions = delegate.gameRepository().getPlayActivitiesBetween(start, end, 1000);
     java.util.Set<String> days = new java.util.HashSet<>();
     Calendar c = Calendar.getInstance();
     for (PlayActivity a : sessions) {
         if (a == null) continue;
         stats.sessionCount++;
         if (stats.recentSessions.size() < 8) stats.recentSessions.add(a);
-        String title = a.gameTitle == null || a.gameTitle.trim().isEmpty() ? "未命名游戏" : a.gameTitle;
+        String title = aiSessionTitle(a);
         Integer old = stats.gameSessionCounts.get(title);
         stats.gameSessionCounts.put(title, old == null ? 1 : old + 1);
         if (!stats.gameStatuses.containsKey(title)) {
@@ -1223,6 +1347,28 @@ private void copyStream(InputStream in, OutputStream out) throws Exception {
     out.flush();
 }
 
+/**
+ * 分享卡片统一的底部区域高度：footer 文字独占，正文不许侵入。
+ *
+ * 之前 footer 固定画在 h - 54，而 h 是估算值，highlights/advice 一折行就超，
+ * oneLine 会压到 footer 上。现在正文按实测行数累加，footer 区独立预留。
+ */
+private static final int CARD_FOOTER_ZONE = 96;
+
+/** 一段 bullet 的实际高度：与 drawBulletLine 的绘制步进保持一致。 */
+private int measureBulletHeight(String text, Paint paint, int x, int gutter, int lineHeight, int bottomPadding) {
+    int lines = Math.max(1, wrapText(text, paint, 1080 - x * 2 - gutter).size());
+    return lines * lineHeight + bottomPadding;
+}
+
+/** 一整个 bullet 小节（不含标题行）的实际高度。 */
+private int measureBulletSection(List<String> items, String fallback, Paint paint, int x, int gutter, int lineHeight, int bottomPadding) {
+    if (items == null || items.isEmpty()) return measureBulletHeight(fallback, paint, x, gutter, lineHeight, bottomPadding);
+    int h = 0;
+    for (String item : items) h += measureBulletHeight(item, paint, x, gutter, lineHeight, bottomPadding);
+    return h;
+}
+
 private Bitmap buildAiReviewShareBitmap(AiReviewResult result, int templateStyle) {
     if (templateStyle == 1) return buildAiReviewNotebookBitmap(result);
     if (templateStyle == 2) return buildAiReviewMinimalBitmap(result);
@@ -1239,10 +1385,20 @@ private Bitmap buildAiReviewShareBitmap(AiReviewResult result, int templateStyle
     List<String> highlights = result.highlights;
     List<String> advice = result.advice;
     List<Game> coverGames = findAiReviewCoverGames(result, 3);
-    int h = 360 + subtitleLines.size() * 38 + roastLines.size() * 46 + oneLines.size() * 40;
-    h += coverGames.isEmpty() ? 100 : 360;
-    h += Math.max(1, highlights.size()) * 58 + Math.max(1, advice.size()) * 58 + 360;
-    h = Math.max(1500, Math.min(2600, h));
+
+    // 高度按实际绘制步进逐段累加，与下面的绘制流程一一对应。
+    int h = 78 + 96;                                  // 顶部徽章到标题基线
+    h += 48 + subtitleLines.size() * 38 + 24;         // 标题 + 副标题
+    h += 168;                                         // 评分卡
+    if (!coverGames.isEmpty()) h += 34 + 250 + 88;    // 封面小节
+    h += 72 + roastLines.size() * 46 + 54;            // 吐槽卡
+    h += 44 + measureBulletSection(highlights, "还没有抓到太多证据，欧尼酱下周多玩点再来挨点评。", smallPaint, pad, 36, 36, 10);
+    h += 28 + 44 + measureBulletSection(advice, "保持记录，别让清坑计划又被新坑偷袭。", smallPaint, pad, 36, 36, 10);
+    if (!oneLines.isEmpty()) h += 28 + oneLines.size() * 40;
+    h += CARD_FOOTER_ZONE;
+    // 只保留下限保证短内容也有卡片感；不设上限，内容多就让图变长，不截断。
+    h = Math.max(1500, h);
+
     Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
     Canvas c = new Canvas(bitmap);
     Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1340,11 +1496,17 @@ private Bitmap buildAiReviewNotebookBitmap(AiReviewResult result) {
     List<String> subtitleLines = wrapText(result.subtitle, subPaint, w - pad * 2);
     List<String> oneLines = wrapText(result.oneLine, accentPaint, w - pad * 2);
     List<Game> coverGames = findAiReviewCoverGames(result, 3);
-    int h = 900 + subtitleLines.size() * 38 + roastLines.size() * 42 + oneLines.size() * 44;
-    h += coverGames.isEmpty() ? 80 : 370;
-    h += estimateNotebookBulletSectionHeight(result.highlights, smallPaint, "证据不足，下周多记录一点再来写手账。");
-    h += estimateNotebookBulletSectionHeight(result.advice, smallPaint, "保持记录，清坑和回味都值得被好好写下来。");
-    h = Math.max(1720, Math.min(5200, h));
+
+    // 逐段累加，与下面绘制流程一一对应（起始基线 300，行高见各段注释）。
+    int h = 300 + 44 + subtitleLines.size() * 38 + 32;   // 页头 + 标题 + 副标题
+    h += 225;                                            // 三张统计卡
+    if (!coverGames.isEmpty()) h += 34 + 230 + 78;       // 封面贴纸
+    h += 70 + roastLines.size() * 42 + 56;               // 便签卡
+    h += 44 + measureBulletSection(result.highlights, "证据不足，下周多记录一点再来写手账。", smallPaint, pad, 44, 36, 10);
+    h += 28 + 44 + measureBulletSection(result.advice, "保持记录，清坑和回味都值得被好好写下来。", smallPaint, pad, 44, 36, 10);
+    if (!oneLines.isEmpty()) h += 30 + oneLines.size() * 40;
+    h += CARD_FOOTER_ZONE;
+    h = Math.max(1720, h);
     Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
     Canvas c = new Canvas(bitmap);
     Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1420,11 +1582,17 @@ private Bitmap buildAiReviewMinimalBitmap(AiReviewResult result) {
     List<String> subtitleLines = wrapText(result.subtitle, subPaint, w - pad * 2);
     List<String> oneLines = wrapText(result.oneLine, accentPaint, w - pad * 2);
     List<Game> coverGames = findAiReviewCoverGames(result, 3);
-    int h = 760 + subtitleLines.size() * 38 + roastLines.size() * 42 + oneLines.size() * 44;
-    h += coverGames.isEmpty() ? 80 : 330;
-    h += estimateMinimalBulletSectionHeight(result.highlights, smallPaint, "暂无明显亮点，继续记录后再分析。");
-    h += estimateMinimalBulletSectionHeight(result.advice, smallPaint, "保持记录，按自己的节奏清坑。");
-    h = Math.max(1480, Math.min(4800, h));
+
+    // 逐段累加，与下面绘制流程一一对应（起始基线 205）。
+    int h = 205 + 46 + subtitleLines.size() * 38 + 36;    // 顶栏 + 标题 + 副标题
+    h += 140;                                            // 大号分数与进度条
+    if (!coverGames.isEmpty()) h += 220 + 58;             // 封面（无小标题）
+    h += 48 + roastLines.size() * 42 + 40;                // COMMENT
+    h += 42 + measureBulletSection(result.highlights, "暂无明显亮点，继续记录后再分析。", smallPaint, pad, 34, 34, 8);
+    h += 24 + 42 + measureBulletSection(result.advice, "保持记录，按自己的节奏清坑。", smallPaint, pad, 34, 34, 8);
+    if (!oneLines.isEmpty()) h += 28 + oneLines.size() * 40;
+    h += CARD_FOOTER_ZONE;
+    h = Math.max(1480, h);
     Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
     Canvas c = new Canvas(bitmap);
     c.drawColor(0xFFF8FAFC);
@@ -1531,25 +1699,6 @@ private void drawNotebookStatCard(Canvas c, int x, int y, int w, int h, String l
     c.drawText(label, x + (w - lb.width()) / 2f, y + 118, labelPaint);
 }
 
-private int estimateNotebookBulletSectionHeight(List<String> items, Paint paint, String fallback) {
-    int h = 44 + 28;
-    if (items == null || items.isEmpty()) return h + estimateWrappedLineHeight(fallback, paint, 1080 - 74 * 2 - 44, 36, 10);
-    for (String item : items) h += estimateWrappedLineHeight(item, paint, 1080 - 74 * 2 - 44, 36, 10);
-    return h;
-}
-
-private int estimateMinimalBulletSectionHeight(List<String> items, Paint paint, String fallback) {
-    int h = 42 + 24;
-    if (items == null || items.isEmpty()) return h + estimateWrappedLineHeight(fallback, paint, 1080 - 72 * 2 - 34, 34, 8);
-    for (String item : items) h += estimateWrappedLineHeight(item, paint, 1080 - 72 * 2 - 34, 34, 8);
-    return h;
-}
-
-private int estimateWrappedLineHeight(String text, Paint paint, float maxWidth, int lineHeight, int bottomPadding) {
-    int lines = Math.max(1, wrapText(text, paint, maxWidth).size());
-    return lines * lineHeight + bottomPadding;
-}
-
 private int drawNotebookBullet(Canvas c, String text, int x, int y, Paint paint) {
     List<String> lines = wrapText(text, paint, 1080 - x * 2 - 44);
     Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1607,7 +1756,7 @@ private void drawNotebookCoverBlock(Canvas c, Game game, int x, int y, int w, in
     }
     Paint labelPaint = aiPaint(22, 0xFF6E4034, true);
     String title = game == null ? "未命名游戏" : emptyText(game.title, "未命名游戏");
-    List<String> lines = wrapText(title, labelPaint, w - 14);
+    List<String> lines = clampTitleLines(title, labelPaint, w - 14, 1);
     if (!lines.isEmpty()) c.drawText(lines.get(0), x + 7, y + h + 27, labelPaint);
     c.restore();
 }
@@ -1637,7 +1786,7 @@ private void drawMinimalCoverBlock(Canvas c, Game game, int x, int y, int w, int
     c.drawRoundRect(new RectF(x, y + h - 56, x + w, y + h), 18, 18, p);
     Paint labelPaint = aiPaint(22, 0xFFFFFFFF, true);
     String title = game == null ? "未命名游戏" : emptyText(game.title, "未命名游戏");
-    List<String> lines = wrapText(title, labelPaint, w - 20);
+    List<String> lines = clampTitleLines(title, labelPaint, w - 20, 1);
     if (!lines.isEmpty()) c.drawText(lines.get(0), x + 10, y + h - 20, labelPaint);
 }
 
@@ -1723,6 +1872,25 @@ private Game findGameByTitleForAi(String title) {
     return null;
 }
 
+/**
+ * 把标题裁到指定行数，超出时在末尾补省略号。
+ *
+ * 之前 drawGameCoverBlock 取的是最后两行（lines.size()-2 起），长标题会丢开头，
+ * 于是「…的老师与沉迷吹泡泡的助手」这种缺头的名字就出现在卡片上了。
+ */
+private List<String> clampTitleLines(String title, Paint paint, float maxWidth, int maxLines) {
+    List<String> lines = wrapText(title, paint, maxWidth);
+    if (lines.size() <= maxLines) return lines;
+    List<String> out = new ArrayList<>(lines.subList(0, maxLines));
+    String last = out.get(maxLines - 1);
+    // 逐字回退，直到「正文 + …」能放进一行
+    while (last.length() > 1 && paint.measureText(last + "…") > maxWidth) {
+        last = last.substring(0, last.length() - 1);
+    }
+    out.set(maxLines - 1, last + "…");
+    return out;
+}
+
 private void drawGameCoverBlock(Canvas c, Game game, int x, int y, int w, int h) {
     RectF rect = new RectF(x, y, x + w, y + h);
     Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1749,10 +1917,11 @@ private void drawGameCoverBlock(Canvas c, Game game, int x, int y, int w, int h)
     }
     Paint namePaint = aiPaint(24, 0xFFFFFFFF, true);
     String title = game == null ? "未命名游戏" : emptyText(game.title, "未命名游戏");
-    List<String> lines = wrapText(title, namePaint, w - 24);
-    int ty = y + h - 46;
-    for (int i = Math.max(0, lines.size() - 2); i < lines.size(); i++) {
-        c.drawText(lines.get(i), x + 12, ty, namePaint);
+    List<String> lines = clampTitleLines(title, namePaint, w - 24, 2);
+    // 从下往上排：两行时上移一行高度，保证末行仍落在原基线上
+    int ty = y + h - 46 - (lines.size() - 1) * 28;
+    for (String line : lines) {
+        c.drawText(line, x + 12, ty, namePaint);
         ty += 28;
     }
 }

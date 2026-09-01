@@ -40,8 +40,23 @@ public class AiReviewClient {
         messages.put(new JSONObject()
                 .put("role", "user")
                 .put("content", "连接测试，请只回复 OK。"));
-        String content = requestChatCompletions(settings, messages, 0f, 16);
-        return content == null ? "" : content.trim();
+        // 连通性测试要的是「能不能通」，一次瞬时网络抖动不该判定为配置错误。
+        // 只对连接层异常重试，鉴权失败、模型不存在这类业务错误立即抛出。
+        Exception last = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                String content = requestChatCompletions(settings, messages, 0f, 16);
+                return content == null ? "" : content.trim();
+            } catch (java.io.IOException e) {
+                last = e;
+                // 服务端明确返回了 HTTP 状态码，说明链路是通的，属于配置问题，不重试
+                if (e.getMessage() != null && e.getMessage().startsWith("HTTP ")) throw e;
+                if (attempt < 2) {
+                    try { Thread.sleep(400L * (attempt + 1)); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+        }
+        throw last != null ? last : new RuntimeException("AI 连接测试失败");
     }
 
     public String requestReview(AiReviewSettings settings, WeeklyPlayStats stats) throws Exception {
@@ -57,7 +72,21 @@ public class AiReviewClient {
                 .put("role", "user")
                 .put("content", AiReviewPromptBuilder.buildContextPrompt(stats) + "\n\n" + AiReviewPromptBuilder.buildTaskPrompt()));
 
-        return requestChatCompletions(settings, messages, settings.temperature, 0);
+        // 与 testConnection 同一策略：连接层抖动重试，业务错误直接抛。
+        // 生成一次点评耗时较长，重试次数压到 2 次避免用户干等。
+        Exception last = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                return requestChatCompletions(settings, messages, settings.temperature, 0);
+            } catch (java.io.IOException e) {
+                last = e;
+                if (e.getMessage() != null && e.getMessage().startsWith("HTTP ")) throw e;
+                if (attempt < 1) {
+                    try { Thread.sleep(500L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+        }
+        throw last != null ? last : new RuntimeException("AI 点评生成失败");
     }
 
     private String requestChatCompletions(AiReviewSettings settings, JSONArray messages, float temperature, int maxTokens) throws Exception {
@@ -100,6 +129,10 @@ public class AiReviewClient {
             }
             OkHttpClient client = HttpClient.defaultBuilder()
                     .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                    // HttpClient 全局关掉了 retryOnConnectionFailure，AI 这条链路要单独放开：
+                    // 连接池里的 keep-alive 连接被服务端静默回收后，复用会拿到死连接直接抛 IO，
+                    // 表现就是「隔一会儿点测试必失败、马上再点又成功」。放开后 OkHttp 会自动换新连接重试。
+                    .retryOnConnectionFailure(true)
                     .addInterceptor(chain -> chain.proceed(chain.request().newBuilder()
                             .header("Accept", "application/json")
                             .build()))
