@@ -188,6 +188,8 @@ public class SocialApiClient {
             info.lastHeartbeat = f.optString("lastHeartbeat", "");
             info.friendSince = f.optString("friendSince", "");
             info.note = f.optString("note", "");
+            info.nameColor = f.optString("nameColor", "");
+            info.frame = AvatarFrame.fromJson(f.optJSONObject("frame"));
             friends.add(info);
         }
         return friends;
@@ -679,6 +681,12 @@ public class SocialApiClient {
         // 字段缺失（旧版服务端）留 null 表示「未知」，只有服务端确实下发了才采信。
         // 若一律 optString 成空串，会被当成「已卸下颜色」而清掉本地已知的颜色。
         msg.senderNameColor = obj.has("senderNameColor") ? obj.optString("senderNameColor", "") : null;
+        // 头像框同理：字段缺失留 null（未知），服务端下发了才采信。
+        // 服务端下发 JSON null 表示「确认没戴框」，fromJson 会转成 NO_FRAME 哨兵，
+        // 这样「摘下框」这个事实才能覆盖会话表里的旧框。
+        msg.senderFrame = obj.has("senderFrame")
+                ? AvatarFrame.fromJson(obj.optJSONObject("senderFrame"))
+                : null;
         msg.content = obj.optString("content", "");
         msg.msgType = obj.optString("msgType", "text");
         msg.createdAt = obj.optString("createdAt", "");

@@ -15,6 +15,10 @@ public class FriendInfo {
     public int unreadCount;    // 未读消息数
     public String lastHeartbeat; // 最后心跳时间（ISO 格式，用于离线时显示"最后在线"）
     public String friendSince;   // 好友关系建立时间（YYYY-MM-DD HH:MM:SS）
+    /** 昵称颜色 hex（形如 "#f48fb1"），空串=未装备，昵称走默认色 */
+    public String nameColor;
+    /** 头像框（null = 没戴或未知，渲染时跳过） */
+    public AvatarFrame frame;
 
     public FriendInfo() {}
 

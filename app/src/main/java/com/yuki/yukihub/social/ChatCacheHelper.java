@@ -302,6 +302,7 @@ public class ChatCacheHelper {
         // senderLevel 不入缓存：等级会变，缓存值必然过期，一律用服务端实时值
         // senderNameColor 同理（用户随时能在商店换色），保持 null 表示「未知」，
         // 让 recordGroupNameColors 跳过它而不是误判成「已卸下颜色」
+        // senderFrame 同上：保持 null，避免缓存里的旧框覆盖会话表里的实时值
         return m;
     }
 

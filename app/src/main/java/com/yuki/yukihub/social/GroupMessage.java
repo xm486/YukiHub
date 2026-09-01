@@ -19,6 +19,14 @@ public class GroupMessage {
      * 缓存值必然过期，一律用服务端实时值。
      */
     public String senderNameColor;
+    /**
+     * 发送者头像框，服务端下发的 JSON 对象原文（含 imageUrl/scale/offsetX/offsetY）。
+     *
+     * null 语义与 senderNameColor 一致 —— 表示「未知」（字段缺失、缓存读出、
+     * 本地乐观消息），不参与覆盖；服务端明确下发的 null 会被转成 NO_FRAME 哨兵，
+     * 代表「确认没戴框」，能覆盖旧值。详见 FriendsChatDialog.recordGroupFrames。
+     */
+    public AvatarFrame senderFrame;
     public String content;
     public String msgType;    // "text" | "emoji" | "image"
     public String createdAt;

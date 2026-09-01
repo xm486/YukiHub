@@ -52,11 +52,27 @@ public class FriendsChatDialog {
      * 历史消息已经把自己的等级记进 groupLevelMap，颜色靠这个 prefs 达到同样效果。
      */
     private static final String KEY_AUTH_NAME_COLOR = "auth_name_color";
+    /**
+     * 自己的头像框（序列化后的 JSON 文本，空串=没戴）。
+     *
+     * 与 KEY_AUTH_NAME_COLOR 完全同一套路：让自己的头像在乐观气泡渲染的
+     * 第一帧就带框，不必等服务端回包。
+     */
+    private static final String KEY_AUTH_FRAME = "auth_avatar_frame";
 
     // 头像缓存（避免重复加载）
     private static final int AVATAR_CACHE_SIZE = 64;
     private static final android.util.LruCache<String, android.graphics.Bitmap> avatarCache =
             new android.util.LruCache<>(AVATAR_CACHE_SIZE);
+    /**
+     * 头像框素材缓存。
+     *
+     * 与 avatarCache 分开是因为两者的处理方式不同：头像存的是裁圆后的位图，
+     * 框必须保留原始方图和透明通道（裁圆会把外圈装饰切掉）。
+     * 容量小一些：全站框的种类数远少于用户数，同一个框会被大量复用。
+     */
+    private static final android.util.LruCache<String, android.graphics.Bitmap> frameCache =
+            new android.util.LruCache<>(24);
 
     // 表情包缓存（key = emoji URL）
     private static final int EMOJI_CACHE_SIZE = 64;
@@ -334,6 +350,7 @@ public class FriendsChatDialog {
         contentHost.removeAllViews();
         contentContainer = new LinearLayout(activity);
         contentContainer.setOrientation(LinearLayout.VERTICAL);
+
         if (scrollable) {
             ScrollView scrollView = new ScrollView(activity);
             scrollView.setFillViewport(true);
@@ -456,27 +473,30 @@ public class FriendsChatDialog {
         rlp.setMargins(0, dp(2), 0, dp(2));
         row.setLayoutParams(rlp);
 
-        // 圆形头像占位（首字母）
-        int avatarSize = 36;
+        // 圆形头像占位（首字母），包进带框容器
+        int avatarSize = FRIEND_AVATAR_SIZE_DP;
         String initial = friend.nickname != null && !friend.nickname.isEmpty()
                 ? friend.nickname.substring(0, 1) : "?";
         int bgColor = avatarBgColor(friend.nickname);
         TextView avatar = createCircleTextAvatar(avatarSize, initial, bgColor);
+        FrameLayout avatarBox = wrapAvatarWithFrame(avatarSize, null);
+        avatarBox.addView(avatar, frameBoxAvatarParams(avatarSize));
         LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(dp(avatarSize), dp(avatarSize));
-        al.setMargins(0, 0, dp(10), 0);
-        row.addView(avatar, al);
+        // 槽位（64）比裸头像（36）宽 28dp，余量已覆盖原本的 10dp 间距，margin 归零
+        al.setMargins(0, 0, 0, 0);
+        row.addView(avatarBox, al);
 
         // 圆形头像图片（覆盖在首字母上面）
         if (friend.avatarUrl != null && !friend.avatarUrl.isEmpty()) {
             ImageView avatarImg = new ImageView(activity);
             avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(dp(avatarSize), dp(avatarSize));
-            imLp.setMargins(0, 0, dp(10), 0);
-            avatarImg.setLayoutParams(imLp);
             avatarImg.setVisibility(View.GONE);
-            row.addView(avatarImg, 0);
+            avatarBox.addView(avatarImg, frameBoxAvatarParams(avatarSize));
             loadAvatarInto(friend.avatarUrl, avatarImg, avatar);
         }
+
+        // 头像框叠在最上层（好友列表数据一次性拉全，不需要原地刷新机制）
+        applyFrameToBox(avatarBox, avatarSize, friend.frame);
 
         // 信息列
         LinearLayout col = new LinearLayout(activity);
@@ -488,7 +508,9 @@ public class FriendsChatDialog {
         nameRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView name = new TextView(activity);
         name.setText(friend.displayName());
-        name.setTextColor(0xFFF5F7FF);
+        // 昵称颜色：装备了萌萌点颜色就用它，否则默认白
+        int nameColor = parseNameColor(friend.nameColor);
+        name.setTextColor(nameColor == 0 ? 0xFFF5F7FF : nameColor);
         name.setTextSize(14);
         name.setTypeface(null, android.graphics.Typeface.BOLD);
         nameRow.addView(name);
@@ -1306,6 +1328,7 @@ public class FriendsChatDialog {
         // 渲染前先把本机记住的自己的昵称颜色填进颜色表，
         // 这样首屏和乐观气泡里自己的昵称就是彩色，不会先蓝一下
         seedMyNameColor();
+        seedMyFrame();
         AppExecutors.runOnIo(() -> {
             // 1. 读本地缓存渲染（先乐观允许翻历史，服务器同步后再修正）
             List<GroupMessage> cached = chatCache.getGroupMessages(groupId, RENDER_LIMIT);
@@ -1398,6 +1421,7 @@ public class FriendsChatDialog {
         // 这样接下来渲染缓存消息时也能带上等级（不必等第二次进会话）
         final boolean[] lvChanged = new boolean[]{false};
         final boolean[] colorChanged = new boolean[]{false};
+        final boolean[] frameChanged = new boolean[]{false};
         List<GroupMessage> fresh = new ArrayList<>();
         boolean changed = false;
         int offset = 0;
@@ -1408,6 +1432,7 @@ public class FriendsChatDialog {
             chatCache.upsertGroupMessages(groupId, result.messages);
             if (recordGroupLevels(result.messages)) lvChanged[0] = true;
             if (recordGroupNameColors(result.messages)) colorChanged[0] = true;
+            if (recordGroupFrames(result.messages)) frameChanged[0] = true;
             for (GroupMessage m : result.messages) {
                 if (m.deleted) {
                     // 删除状态变化：需重绘（缓存已移除该条）
@@ -1427,15 +1452,17 @@ public class FriendsChatDialog {
             if (offset >= 200) break; // 安全上限：最多拉 10 页
         }
         chatCache.pruneGroupMessages(groupId);
-        // 等级/昵称颜色有更新 → 原地刷新已渲染气泡（不必整屏重绘）
-        if (lvChanged[0] || colorChanged[0]) {
+        // 等级/昵称颜色/头像框有更新 → 原地刷新已渲染气泡（不必整屏重绘）
+        if (lvChanged[0] || colorChanged[0] || frameChanged[0]) {
             final int gidLv = groupId;
             final boolean doLv = lvChanged[0];
             final boolean doColor = colorChanged[0];
+            final boolean doFrame = frameChanged[0];
             uiHandler.post(() -> {
                 if (openingGroupId != gidLv) return;
                 if (doLv) refreshRenderedLevelBadges();
                 if (doColor) refreshRenderedNickColors();
+                if (doFrame) refreshRenderedFrames();
             });
         }
         if (serverHasMoreOut != null) serverHasMoreOut[0] = serverHasMore;
@@ -1617,6 +1644,37 @@ public class FriendsChatDialog {
 
     /** 群聊昵称默认色：未装备萌萌点颜色时使用。 */
     private static final int GROUP_NICK_DEFAULT_COLOR = 0xFF8AB4FF;
+    /**
+     * 群聊气泡头像的槽位边长（dp）—— 框的绘制空间。
+     *
+     * 必须 ≥ 戴框头像 × 支持的最大 scale（40 × 1.6 = 64），
+     * 否则大 scale 的框会被槽位边界压缩、显示不全。
+     * 槽位多出来的余量同时充当头像与气泡之间的间距，所以调用处 margin 为 0。
+     */
+    private static final int GROUP_AVATAR_SIZE_DP = 64;
+    /** 群聊裸头像（没戴框）的边长（dp）。保持改造前的 34，没买框的人观感不变 */
+    private static final int GROUP_AVATAR_BARE_DP = 34;
+    /** 群聊戴框头像的边长（dp）。刻意比裸头像大，戴框应当是增益而不是缩水 */
+    private static final int GROUP_AVATAR_FRAMED_DP = 40;
+    /** 资料页头像槽位（dp） */
+    private static final int PROFILE_AVATAR_SIZE_DP = 122;
+    /** 资料页裸头像边长（dp），保持改造前的 72 */
+    private static final int PROFILE_AVATAR_BARE_DP = 72;
+    /** 资料页戴框头像边长（dp） */
+    private static final int PROFILE_AVATAR_FRAMED_DP = 76;
+    /** 好友列表头像槽位（dp） */
+    private static final int FRIEND_AVATAR_SIZE_DP = 64;
+    /** 好友列表裸头像边长（dp），保持改造前的 36 */
+    private static final int FRIEND_AVATAR_BARE_DP = 36;
+    /** 好友列表戴框头像边长（dp） */
+    private static final int FRIEND_AVATAR_FRAMED_DP = 40;
+    /**
+     * 头像与相邻内容（气泡 / 信息列）之间的间距（dp）。
+     *
+     * 只在「没戴框」时作为 margin 生效 —— 戴框时槽位本身预留的余量
+     * 就充当了这段间距，再加 margin 会显得过宽。见 applySlotSize。
+     */
+    private static final int AVATAR_GAP_DP = 10;
 
     /**
      * 会话内的昵称颜色表，同 groupLevelMap：
@@ -1765,6 +1823,353 @@ public class FriendsChatDialog {
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) applyNickColorIn(g.getChildAt(i));
+        }
+    }
+
+    // ==================== 头像框 ====================
+    //
+    // 【整体思路】完全照昵称颜色那一套：会话内一张表 + 自己的值落 prefs + 原地刷新。
+    // 差别只在渲染方式 —— 颜色是改 TextView 的属性，框要往头像上叠一个 ImageView。
+    //
+    // 【为什么框不能直接 addView 进气泡行】
+    // 框和头像必须叠在一起，而 LinearLayout 只会把它们并排放。所以头像先包进一个
+    // FrameLayout（槽位尺寸不变），框和头像在里面重叠 —— 框占满槽位、头像按
+    // 1/scale 缩小，两者都不溢出容器。详见 applyFrameToBox。
+
+    /** 会话内的头像框表，同 groupNameColorMap：补上本地乐观消息拿不到的框 */
+    private final java.util.Map<String, AvatarFrame> groupFrameMap = new java.util.HashMap<>();
+
+    /**
+     * 记录本批消息里的头像框。
+     *
+     * @return true = 有框发生变化（需要刷新已渲染的头像）
+     */
+    private boolean recordGroupFrames(List<GroupMessage> msgs) {
+        if (msgs == null || msgs.isEmpty()) return false;
+        boolean changed = false;
+        String myId = getMyUserId();
+        for (GroupMessage m : msgs) {
+            if (m == null) continue;
+            String key = m.senderId == null ? "" : m.senderId;
+            if (key.isEmpty()) continue;
+            // null = 未知（旧版服务端 / 本地乐观消息 / 缓存），不参与记录。
+            // NO_FRAME = 服务端确认没戴框，要能覆盖旧值（用户摘下框后头像得跟着摘）。
+            if (m.senderFrame == null) continue;
+            if (!myId.isEmpty() && myId.equals(key)) saveMyFrame(m.senderFrame);
+            AvatarFrame old = groupFrameMap.get(key);
+            if (old == null || !old.sameAs(m.senderFrame)) {
+                groupFrameMap.put(key, m.senderFrame);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /** 读取本机记住的自己的头像框（没戴或没同步过时返回 null） */
+    private AvatarFrame getMyFrame() {
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String raw = p.getString(KEY_AUTH_FRAME, "");
+        if (raw == null || raw.trim().isEmpty()) return null;
+        try {
+            return AvatarFrame.fromJson(new JSONObject(raw));
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** 记住自己的头像框；值没变时不写盘。传 null 或 NO_FRAME 表示清空 */
+    private void saveMyFrame(AvatarFrame frame) {
+        String val = "";
+        if (frame != null && frame.isValid()) {
+            JSONObject o = frame.toJson();
+            if (o != null) val = o.toString();
+        }
+        SharedPreferences p = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (val.equals(p.getString(KEY_AUTH_FRAME, ""))) return;
+        p.edit().putString(KEY_AUTH_FRAME, val).apply();
+    }
+
+    /**
+     * 把本机记住的自己的框预填进会话表，并在缺失时异步补一次。
+     * 必须在渲染任何气泡之前调用，否则自己的头像会先无框、再被回包刷出框。
+     */
+    private void seedMyFrame() {
+        String myId = getMyUserId();
+        if (myId.isEmpty()) return;
+        AvatarFrame mine = getMyFrame();
+        // 只在有值时预填：塞 NO_FRAME 会挡住 fetchMyFrameAsync 的写入判断
+        if (mine != null && mine.isValid() && !groupFrameMap.containsKey(myId)) {
+            groupFrameMap.put(myId, mine);
+        }
+        if (mine == null || !mine.isValid()) fetchMyFrameAsync(myId);
+    }
+
+    /**
+     * 异步拉取自己的头像框并落到 prefs（走 /user/level，与昵称颜色同一个接口）。
+     */
+    private void fetchMyFrameAsync(String myId) {
+        if (myId == null || myId.isEmpty()) return;
+        AppExecutors.runOnIo(() -> {
+            try {
+                JSONObject lv = apiClient.getMyLevel();
+                AvatarFrame f = AvatarFrame.fromJson(lv.optJSONObject("frame"));
+                if (!f.isValid()) return;
+                saveMyFrame(f);
+                uiHandler.post(() -> {
+                    if (dialog == null || !dialog.isShowing()) return;
+                    AvatarFrame old = groupFrameMap.get(myId);
+                    if (old != null && old.isValid()) return; // 同步已拿到真实值，别覆盖
+                    groupFrameMap.put(myId, f);
+                    refreshRenderedFrames();
+                });
+            } catch (Throwable ignored) {
+                // 拿不到就不显示框，不打扰用户
+            }
+        });
+    }
+
+    /** 取某人的头像框：消息自带值优先，其次查会话表；都没有返回 null */
+    private AvatarFrame frameOf(GroupMessage msg) {
+        if (msg == null) return null;
+        if (msg.senderFrame != null && msg.senderFrame.isValid()) return msg.senderFrame;
+        if (msg.senderId == null || msg.senderId.isEmpty()) return null;
+        AvatarFrame f = groupFrameMap.get(msg.senderId);
+        return (f != null && f.isValid()) ? f : null;
+    }
+
+    /**
+     * 创建带框容器。容器尺寸就等于原来头像的尺寸，不放大、不溢出。
+     *
+     * @param avatarSizeDp 头像槽位边长（dp）
+     * @param tagKey       容器 tag，形如 "frame:<senderId>"，供原地刷新时定位；可为 null
+     */
+    private FrameLayout wrapAvatarWithFrame(int avatarSizeDp, String tagKey) {
+        FrameLayout box = new FrameLayout(activity);
+        if (tagKey != null) box.setTag(tagKey);
+        return box;
+    }
+
+    /**
+     * 头像本体在带框容器里的 LayoutParams（居中）。
+     *
+     * 给的是「没戴框时」的尺寸 —— 此时头像不应该占满整个放大后的槽位，
+     * 而要维持改造前的观感尺寸（GROUP_AVATAR_BARE_DP），否则没买框的人
+     * 头像会莫名变大。戴框后由 {@link #applyFrameToBox} 重新算尺寸。
+     */
+    private FrameLayout.LayoutParams frameBoxAvatarParams(int avatarSizeDp) {
+        int bare = bareAvatarSidePx(avatarSizeDp);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(bare, bare);
+        lp.gravity = Gravity.CENTER;
+        return lp;
+    }
+
+    /**
+     * 无框状态下头像的实际边长（px）。
+     *
+     * 群聊和资料页的槽位都为头像框放大过（群聊 34→40、资料页 72→86），
+     * 但没戴框的人头像要维持原来的观感尺寸，否则所有用户的头像都会莫名变大。
+     * 好友列表槽位没动，裸头像就等于槽位本身。
+     */
+    private int bareAvatarSidePx(int avatarSizeDp) {
+        if (avatarSizeDp == GROUP_AVATAR_SIZE_DP) return dp(GROUP_AVATAR_BARE_DP);
+        if (avatarSizeDp == PROFILE_AVATAR_SIZE_DP) return dp(PROFILE_AVATAR_BARE_DP);
+        if (avatarSizeDp == FRIEND_AVATAR_SIZE_DP) return dp(FRIEND_AVATAR_BARE_DP);
+        return dp(avatarSizeDp);
+    }
+
+    /**
+     * 戴框状态下头像的实际边长（px）。
+     *
+     * 比裸头像大一圈 —— 买了框的人头像应该更醒目，而不是被框挤小。
+     * 找不到对应槽位时退回裸尺寸。
+     */
+    private int framedAvatarSidePx(int avatarSizeDp) {
+        if (avatarSizeDp == GROUP_AVATAR_SIZE_DP) return dp(GROUP_AVATAR_FRAMED_DP);
+        if (avatarSizeDp == PROFILE_AVATAR_SIZE_DP) return dp(PROFILE_AVATAR_FRAMED_DP);
+        if (avatarSizeDp == FRIEND_AVATAR_SIZE_DP) return dp(FRIEND_AVATAR_FRAMED_DP);
+        return bareAvatarSidePx(avatarSizeDp);
+    }
+
+    /**
+     * 在带框容器里创建/更新框图层，并把头像调到对应尺寸。
+     *
+     * 【尺寸关系】头像尺寸是固定的常量，框按 scale 相对头像放大：
+     *   头像边长 = GROUP/PROFILE/FRIEND_AVATAR_FRAMED_DP（戴框）或 _BARE_DP（没框）
+     *   框边长   = 头像边长 × scale
+     *   偏移量   = 头像边长 × offset / 100
+     * 这与网页端 frameOverlayHtml、后台 feApplyFrameStyle 完全同一套公式。
+     *
+     * 【为什么头像尺寸要写死而不是从 scale 反推】
+     * 之前的版本用「槽位 ÷ scale」算头像，结果头像大小被素材牵着走 ——
+     * 框的留白越多、后台调的 scale 越大，头像就被算得越小，完全不可控。
+     * 现在反过来：头像尺寸由代码定死（戴框时刻意比裸头像大一圈，
+     * 让框成为视觉增益而不是缩水），框去适应头像。
+     *
+     * 【为什么框不会被裁】
+     * 槽位（_SIZE_DP）留了足够余量装下「头像 × 常见 scale」，框在槽位内绘制，
+     * 不溢出容器、不依赖任何 clipChildren 设置。scale 特别大的框会被槽位边界
+     * 限制住（有 Math.min 保护），此时把对应的 _SIZE_DP 调大即可。
+     */
+    private void applyFrameToBox(FrameLayout box, int avatarSizeDp, AvatarFrame frame) {
+        applyFrameToBox(box, avatarSizeDp, frame, false);
+    }
+
+    /**
+     * @param gapOnLeft 无框时把间距补在左侧（自己的消息头像在右）还是右侧
+     */
+    private void applyFrameToBox(FrameLayout box, int avatarSizeDp, AvatarFrame frame,
+                                 boolean gapOnLeft) {
+        if (box == null) return;
+        // 先移掉旧框（换框/摘框时会走到这里）
+        View old = box.findViewWithTag("frame_overlay");
+        if (old != null) box.removeView(old);
+
+        if (frame == null || !frame.isValid()) {
+            // 没框：头像用裸尺寸，并把槽位收缩到与头像等大。
+            // 【为什么必须收缩槽位】槽位为框预留了大量余量（如群聊 64 vs 裸头像 34），
+            // 不收缩的话没戴框的人会有一个 34dp 的头像居中在 64dp 的空槽位里，
+            // 左右各空 15dp，看起来又小又孤立 —— 尺寸没变但观感差了一截。
+            int bare = bareAvatarSidePx(avatarSizeDp);
+            resizeAvatarInBox(box, bare, 0, 0);
+            applySlotSize(box, bare, avatarSizeDp, false, gapOnLeft);
+            return;
+        }
+
+        // 戴框：头像用固定的戴框尺寸（比裸头像大），框按 scale 相对它放大
+        int avatarSide = framedAvatarSidePx(avatarSizeDp);
+        int dx = (int) (avatarSide * frame.offsetX / 100f);
+        int dy = (int) (avatarSide * frame.offsetY / 100f);
+        resizeAvatarInBox(box, avatarSide, 0, 0);
+
+        // 槽位放开到完整尺寸，给框的外圈装饰留出绘制空间
+        int slot = dp(avatarSizeDp);
+        applySlotSize(box, slot, avatarSizeDp, true, gapOnLeft);
+
+        // 框尺寸受槽位限制，避免超大 scale 把框画到容器外被裁
+        int frameSide = Math.min(slot, (int) (avatarSide * frame.scale));
+
+        ImageView fv = new ImageView(activity);
+        fv.setTag("frame_overlay");
+        fv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        // 框是装饰，不能吃掉头像的点击/长按（查看资料、@ 对方都绑在头像上）
+        fv.setClickable(false);
+        fv.setFocusable(false);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(frameSide, frameSide);
+        lp.gravity = Gravity.CENTER;
+        lp.leftMargin = dx;
+        lp.topMargin = dy;
+        box.addView(fv, lp);
+        loadFrameInto(frame.imageUrl, fv);
+    }
+
+    /**
+     * 调整带框容器自身的尺寸与外边距。
+     *
+     * 没框时槽位收缩到头像大小，并补回原本的头像间距（margin）；
+     * 戴框时槽位放开到完整尺寸，此时槽位余量本身就充当了间距，margin 归零。
+     * 这样两种状态下「头像边缘到气泡」的视觉距离才一致。
+     *
+     * @param sideNew      槽位目标边长（px）
+     * @param avatarSizeDp 用于识别位置（群聊/好友列表/资料页），从而取正确的间距
+     * @param framed       是否处于戴框状态
+     * @param gapOnLeft    间距加在左侧（自己的消息，头像在右）还是右侧（其余情况）
+     */
+    private void applySlotSize(FrameLayout box, int sideNew, int avatarSizeDp,
+                               boolean framed, boolean gapOnLeft) {
+        ViewGroup.LayoutParams raw = box.getLayoutParams();
+        if (!(raw instanceof LinearLayout.LayoutParams)) return;
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
+        lp.width = sideNew;
+        lp.height = sideNew;
+        // 没框时补回间距：槽位不再自带余量，得用 margin 把头像与气泡撑开。
+        // 资料页原本就是 14dp 的头像-信息列间距，群聊/好友列表是 10dp，
+        // 这里按位置恢复各自改造前的值，不能一刀切。
+        int gapDp = avatarSizeDp == PROFILE_AVATAR_SIZE_DP ? 14 : AVATAR_GAP_DP;
+        int gap = framed ? 0 : dp(gapDp);
+        if (gapOnLeft) lp.setMargins(gap, 0, 0, 0);
+        else lp.setMargins(0, 0, gap, 0);
+        box.setLayoutParams(lp);
+    }
+
+    /**
+     * 调整带框容器里所有头像图层（文字头像 / 头像图 / 蓝环）的尺寸与偏移。
+     * 框本身（tag=frame_overlay）跳过。
+     */
+    private void resizeAvatarInBox(FrameLayout box, int side, int dx, int dy) {
+        for (int i = 0; i < box.getChildCount(); i++) {
+            View child = box.getChildAt(i);
+            if ("frame_overlay".equals(child.getTag())) continue;
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(side, side);
+            lp.gravity = Gravity.CENTER;
+            lp.leftMargin = dx;
+            lp.topMargin = dy;
+            child.setLayoutParams(lp);
+            // 文字头像（首字母兜底）的字号要跟着缩，否则缩小后字会溢出圆形底。
+            // 0.4 是与 createCircleTextAvatar 一致的字号/边长比例。
+            // 资料页把头像包在 avatarRing 里，所以要往下钻一层找 TextView。
+            if (child instanceof TextView) {
+                ((TextView) child).setTextSize(side / (float) dp(1) * 0.4f);
+            } else if (child instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) child;
+                for (int j = 0; j < g.getChildCount(); j++) {
+                    View inner = g.getChildAt(j);
+                    if (inner instanceof TextView) {
+                        ((TextView) inner).setTextSize(side / (float) dp(1) * 0.4f);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 加载框素材。复用头像那套三级缓存（内存 → 磁盘 → 网络），
+     * 但不做圆形裁剪 —— 框本身是带透明通道的方图，裁圆会把外圈装饰切掉。
+     */
+    private void loadFrameInto(String url, ImageView target) {
+        if (url == null || url.trim().isEmpty() || target == null) return;
+        // 复用现成的地址补全（框素材和聊天图片同源）
+        final String full = absoluteChatImageUrl(url.trim());
+        android.graphics.Bitmap cached = frameCache.get(full);
+        if (cached != null) {
+            target.setImageBitmap(cached);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                android.graphics.Bitmap bmp = bitmapFromDiskCache(full);
+                if (bmp == null) bmp = downloadBitmapWithCache(full);
+                if (bmp == null) return;
+                final android.graphics.Bitmap result = bmp;
+                frameCache.put(full, result);
+                activity.runOnUiThread(() -> target.setImageBitmap(result));
+            } catch (Throwable ignored) {
+                // 框加载失败就是不显示框，不影响头像本身
+            }
+        }, "YukiHub-Frame-Load").start();
+    }
+
+    /** 原地刷新已渲染的头像框，逻辑同 refreshRenderedNickColors */
+    private void refreshRenderedFrames() {
+        if (groupMessageList == null) return;
+        for (int i = 0; i < groupMessageList.getChildCount(); i++) {
+            applyFrameIn(groupMessageList.getChildAt(i));
+        }
+    }
+
+    /** 递归查找并更新某个气泡子树里的头像框 */
+    private void applyFrameIn(View v) {
+        if (v == null) return;
+        Object tag = v.getTag();
+        if (tag instanceof String && ((String) tag).startsWith("frame:") && v instanceof FrameLayout) {
+            String sid = ((String) tag).substring("frame:".length());
+            // 自己的消息气泡在右侧，无框时间距应补在左边；其他人在左侧补右边
+            boolean isMine = sid.equals(getMyUserId());
+            applyFrameToBox((FrameLayout) v, GROUP_AVATAR_SIZE_DP, groupFrameMap.get(sid), isMine);
+            return;
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) applyFrameIn(g.getChildAt(i));
         }
     }
 
@@ -1949,13 +2354,20 @@ public class FriendsChatDialog {
 
             row.addView(leftCol);
 
-            // 右侧：圆形头像
+            // 右侧：圆形头像（包进带框容器，框会溢出容器但不占布局空间）
             String myAvatar = msg.senderAvatar != null ? msg.senderAvatar : getMyAvatar();
             int selfBg = avatarBgColor(myNick);
-            TextView avatarText = createCircleTextAvatar(34, myNick.isEmpty() ? "?" : myNick.substring(0, 1).toUpperCase(), selfBg);
-            LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-            abLp.setMargins(dp(10), 0, 0, 0);
-            row.addView(avatarText, abLp);
+            TextView avatarText = createCircleTextAvatar(GROUP_AVATAR_SIZE_DP, myNick.isEmpty() ? "?" : myNick.substring(0, 1).toUpperCase(), selfBg);
+            FrameLayout avatarBox = wrapAvatarWithFrame(GROUP_AVATAR_SIZE_DP,
+                    msg.senderId != null && !msg.senderId.isEmpty() ? "frame:" + msg.senderId : null);
+            avatarBox.addView(avatarText, frameBoxAvatarParams(GROUP_AVATAR_SIZE_DP));
+            LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(
+                    dp(GROUP_AVATAR_SIZE_DP), dp(GROUP_AVATAR_SIZE_DP));
+            // 槽位（64）比裸头像（34）宽 30dp，这些余量是给框的绘制空间。
+            // 余量的一半（15dp）已经超过原本的 10dp 间距，所以 margin 归零 ——
+            // 槽位自带的空白就充当了头像与气泡之间的间距。
+            abLp.setMargins(0, 0, 0, 0);
+            row.addView(avatarBox, abLp);
 
             // 点击自己的头像也查看资料
             if (msg.senderUid > 0) {
@@ -1967,7 +2379,8 @@ public class FriendsChatDialog {
                 ImageView avatarImg = new ImageView(activity);
                 avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 avatarImg.setVisibility(View.GONE);
-                row.addView(avatarImg, row.indexOfChild(avatarText), abLp);
+                // 插在文字头像之后（覆盖它），但在框之前 —— 框最后 addView 才会压在最上层
+                avatarBox.addView(avatarImg, frameBoxAvatarParams(GROUP_AVATAR_SIZE_DP));
                 // 头像 ImageView 也绑点击
                 if (msg.senderUid > 0) {
                     final int sUid = msg.senderUid;
@@ -1976,6 +2389,11 @@ public class FriendsChatDialog {
                 loadAvatarInto(myAvatar, avatarImg, avatarText);
             }
 
+            // 头像框叠在最上层。首帧就取值：seedMyFrame 已把自己的框预填进表，
+            // 所以自己发的消息一渲染就带框，不必等服务端回包
+            // 自己的头像在气泡右侧，无框时把间距补在左边。
+            applyFrameToBox(avatarBox, GROUP_AVATAR_SIZE_DP, frameOf(msg), true);
+
             wrapper.addView(row);
         } else {
             // 他人消息：头像 + 昵称 + 气泡
@@ -1983,21 +2401,25 @@ public class FriendsChatDialog {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.TOP);
 
-            // 圆形头像
+            // 圆形头像（包进带框容器）
             String nick = msg.senderNickname != null ? msg.senderNickname : "?";
             int otherBg = avatarBgColor(nick);
-            TextView avatarText = createCircleTextAvatar(34, nick.isEmpty() ? "?" : nick.substring(0, 1).toUpperCase(), otherBg);
-            LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-            abLp.setMargins(0, 0, dp(10), 0);
-            row.addView(avatarText, abLp);
+            TextView avatarText = createCircleTextAvatar(GROUP_AVATAR_SIZE_DP, nick.isEmpty() ? "?" : nick.substring(0, 1).toUpperCase(), otherBg);
+            FrameLayout avatarBox = wrapAvatarWithFrame(GROUP_AVATAR_SIZE_DP,
+                    msg.senderId != null && !msg.senderId.isEmpty() ? "frame:" + msg.senderId : null);
+            avatarBox.addView(avatarText, frameBoxAvatarParams(GROUP_AVATAR_SIZE_DP));
+            LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(
+                    dp(GROUP_AVATAR_SIZE_DP), dp(GROUP_AVATAR_SIZE_DP));
+            // 同上：槽位余量已覆盖原本的 10dp 间距，margin 归零
+            abLp.setMargins(0, 0, 0, 0);
+            row.addView(avatarBox, abLp);
 
             if (msg.senderAvatar != null && !msg.senderAvatar.isEmpty()) {
                 ImageView avatarImg = new ImageView(activity);
                 avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 avatarImg.setVisibility(View.GONE);
-                LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-                imLp.setMargins(0, 0, dp(10), 0);
-                row.addView(avatarImg, 0, imLp); // 插到最前面覆盖文字
+                // 覆盖在文字头像上；框稍后 addView，会压在最上层
+                avatarBox.addView(avatarImg, frameBoxAvatarParams(GROUP_AVATAR_SIZE_DP));
                 // 头像 ImageView 也绑点击
                 if (msg.senderUid > 0) {
                     final int sUid = msg.senderUid;
@@ -2013,6 +2435,9 @@ public class FriendsChatDialog {
                 avatarText.setOnClickListener(v -> showUserProfile(sUid));
             }
             avatarText.setOnLongClickListener(v -> { mentionInGroup(msg); return true; });
+
+            // 头像框叠在最上层
+            applyFrameToBox(avatarBox, GROUP_AVATAR_SIZE_DP, frameOf(msg));
 
             // 右侧：昵称 + 气泡
             LinearLayout rightCol = new LinearLayout(activity);
@@ -2164,6 +2589,11 @@ public class FriendsChatDialog {
                     if (recordGroupNameColors(java.util.Collections.singletonList(sent))) {
                         refreshRenderedNickColors();
                     }
+                    // 头像框同理：回包带自己的框，补上乐观气泡缺的部分。
+                    // 正常情况下 seedMyFrame 已经预填过，这里只在框刚换过时才真正生效
+                    if (recordGroupFrames(java.util.Collections.singletonList(sent))) {
+                        refreshRenderedFrames();
+                    }
                 });
             } catch (Throwable t) {
                 uiHandler.post(() ->
@@ -2185,6 +2615,7 @@ public class FriendsChatDialog {
                 List<GroupMessage> newMsgs = result.messages;
                 boolean lvChanged = false;
                 boolean colorChanged = false;
+                boolean frameChanged = false;
                 if (!newMsgs.isEmpty()) {
                     // 轮询到的新消息写入本地缓存（含撤回状态同步）
                     chatCache.upsertGroupMessages(chatGroup.id, newMsgs);
@@ -2193,9 +2624,12 @@ public class FriendsChatDialog {
                     lvChanged = recordGroupLevels(newMsgs);
                     // 昵称颜色同理：有人换了颜色 / 首次见到这个人
                     colorChanged = recordGroupNameColors(newMsgs);
+                    // 头像框同理：有人换/摘框，或首次见到这个人
+                    frameChanged = recordGroupFrames(newMsgs);
                 }
                 final boolean lvChangedFinal = lvChanged;
                 final boolean colorChangedFinal = colorChanged;
+                final boolean frameChangedFinal = frameChanged;
                 uiHandler.post(() -> {
                     if (!newMsgs.isEmpty()) {
                         for (GroupMessage msg : newMsgs) {
@@ -2225,6 +2659,8 @@ public class FriendsChatDialog {
                     if (lvChangedFinal) refreshRenderedLevelBadges();
                     // 昵称颜色实时刷新：有人在商店换/卸颜色，原地更新已渲染昵称
                     if (colorChangedFinal) refreshRenderedNickColors();
+                    // 头像框实时刷新：有人在商店换/摘框，原地更新已渲染头像
+                    if (frameChangedFinal) refreshRenderedFrames();
                     // 更新在线人数
                     updateOnlineCount(result.onlineCount);
                 });
@@ -2593,28 +3029,41 @@ public class FriendsChatDialog {
         headerRow.setGravity(Gravity.CENTER_VERTICAL);
         headerRow.setPadding(dp(4), dp(4), dp(4), dp(8));
 
-        // 头像（带蓝色环形边框，Steam 风格）
+        // 头像 + 头像框。头像尺寸固定、框按 scale 相对它放大（见 applyFrameToBox）。
+        // 槽位（122）比裸头像（72）宽 50dp，这些余量是给框的绘制空间，
+        // 也顺带充当了与右侧信息列之间的间距，所以 margin 归零。
+        final int profileAvatarDp = PROFILE_AVATAR_SIZE_DP;
         FrameLayout avatarBox = new FrameLayout(activity);
-        avatarBox.setBackgroundResource(R.drawable.bg_profile_avatar_ring);
-        LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(dp(72), dp(72));
-        avatarLp.setMargins(0, 0, dp(14), 0);
+        LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(
+                dp(profileAvatarDp), dp(profileAvatarDp));
+        avatarLp.setMargins(0, 0, 0, 0);
         avatarBox.setLayoutParams(avatarLp);
+
+        // 蓝环挂在内层容器上：戴框时它会跟着头像一起缩小，不会和框叠在一起打架
+        FrameLayout avatarRing = new FrameLayout(activity);
+        avatarRing.setBackgroundResource(R.drawable.bg_profile_avatar_ring);
+        avatarBox.addView(avatarRing, frameBoxAvatarParams(profileAvatarDp));
 
         TextView avatarText = new TextView(activity);
         avatarText.setText(nickname.isEmpty() ? "?" : nickname.substring(0, 1).toUpperCase());
         avatarText.setTextColor(0xFFF5F7FF);
         avatarText.setTextSize(26);
         avatarText.setGravity(Gravity.CENTER);
-        avatarBox.addView(avatarText, new FrameLayout.LayoutParams(-1, -1));
+        avatarRing.addView(avatarText, new FrameLayout.LayoutParams(-1, -1));
 
         ImageView avatarImg = null;
         if (!avatarUrl.isEmpty()) {
             avatarImg = new ImageView(activity);
             avatarImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
             avatarImg.setVisibility(View.GONE);
-            avatarBox.addView(avatarImg, new FrameLayout.LayoutParams(-1, -1));
+            avatarRing.addView(avatarImg, new FrameLayout.LayoutParams(-1, -1));
             loadAvatarInto(avatarUrl, avatarImg, avatarText);
         }
+
+        // 头像框叠在最上层
+        applyFrameToBox(avatarBox, profileAvatarDp,
+                AvatarFrame.fromJson(profile.optJSONObject("frame")));
+
         headerRow.addView(avatarBox);
 
         // 右侧信息列
@@ -2629,7 +3078,9 @@ public class FriendsChatDialog {
 
         TextView nameView = new TextView(activity);
         nameView.setText(nickname);
-        nameView.setTextColor(0xFFF5F7FF);
+        // 昵称颜色：装备了萌萌点颜色就用它，否则默认白
+        int profileNameColor = parseNameColor(profile.optString("nameColor", ""));
+        nameView.setTextColor(profileNameColor == 0 ? 0xFFF5F7FF : profileNameColor);
         nameView.setTextSize(19);
         nameView.setTypeface(null, android.graphics.Typeface.BOLD);
         nameView.setMaxLines(1);
@@ -4093,6 +4544,11 @@ public class FriendsChatDialog {
                     }
                     if (recordGroupNameColors(java.util.Collections.singletonList(sent))) {
                         refreshRenderedNickColors();
+                    }
+                    // 头像框同理：回包带自己的框，补上乐观气泡缺的部分。
+                    // 正常情况下 seedMyFrame 已经预填过，这里只在框刚换过时才真正生效
+                    if (recordGroupFrames(java.util.Collections.singletonList(sent))) {
+                        refreshRenderedFrames();
                     }
                 });
             } catch (Throwable t) {
