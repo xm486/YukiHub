@@ -214,6 +214,10 @@ private VnMetadata currentSideMetadata;
     private Game selectedGame;
     private Dialog pendingEditDialog;
     private String pendingDirUri, pendingCoverUri;
+    /** 当前编辑对话框对应的游戏 id（-1 = 新增模式）。Activity 重建恢复编辑状态用。 */
+    private long editingGameId = -1L;
+    /** 最近一次保存的编辑对话框状态（onSaveInstanceState 快照），用于重建后恢复及选封面兜底。 */
+    private Bundle lastEditDialogState;
     private long runningGameId = -1;
 private long runningSessionId = -1;
 private long sessionStart = 0;
@@ -255,10 +259,24 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private static final String KEY_ENGINE_LABEL_POSITION = "engine_label_position";
     private static final int DEFAULT_STARTUP_SCAN_DEPTH = 2;
     private static final int MAX_STARTUP_SCAN_DEPTH = 4;
-private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
+    private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
 private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
 private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
 private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
+/** 编辑对话框重建恢复：标记/状态/表单字段 key（onSaveInstanceState 保存）。 */
+private static final String KEY_EDIT_DIALOG_OPEN = "edit_dialog_open";
+private static final String KEY_EDIT_STATE = "edit_dialog_state";
+private static final String KEY_EDIT_GAME_ID = "edit_game_id";
+private static final String KEY_EDIT_TITLE = "edit_title";
+private static final String KEY_EDIT_PKG = "edit_pkg";
+private static final String KEY_EDIT_DESC = "edit_desc";
+private static final String KEY_EDIT_GAMEHUB_ID = "edit_gamehub_id";
+private static final String KEY_EDIT_ENGINE = "edit_engine";
+private static final String KEY_EDIT_LAUNCH_TARGET = "edit_launch_target";
+private static final String KEY_EDIT_WINLATOR_MODE = "edit_winlator_mode";
+private static final String KEY_EDIT_GAMEHUB_MODE = "edit_gamehub_mode";
+private static final String KEY_EDIT_DIR_URI = "edit_dir_uri";
+private static final String KEY_EDIT_COVER_URI = "edit_cover_uri";
 /** KRKR 引擎允许绘制刘海/挖孔区域（默认开启）。 */
 public static final String KEY_KR_DRAW_CUTOUT = "kr_draw_cutout";
 /** Artemis 引擎允许绘制刘海/挖孔区域（默认开启）。 */
@@ -496,6 +514,55 @@ if (!ensureDisclaimerAccepted()) {
         checkUpdateOnStartupIfEnabled();
         ensureStoragePermissionForInternalKrkr();
         handleHomeTargetIntent(getIntent());
+        // 编辑对话框可能在选封面/选目录期间因 Activity 重建而丢失：
+        // 检测到保存的编辑状态时，延迟重新弹出对话框并回填表单。
+        if (savedInstanceState != null && savedInstanceState.getBoolean(KEY_EDIT_DIALOG_OPEN, false)) {
+            final Bundle editState = savedInstanceState.getBundle(KEY_EDIT_STATE);
+            if (editState != null) {
+                lastEditDialogState = editState;
+                getWindow().getDecorView().post(() -> restoreEditDialog(editState));
+            }
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        // 编辑对话框打开时保存快照，Activity 重建（旋转/内存回收）后恢复编辑现场。
+        if (pendingEditDialog != null && pendingEditDialog.isShowing()) {
+            Bundle state = captureEditDialogState();
+            if (state != null) {
+                lastEditDialogState = state;
+                outState.putBoolean(KEY_EDIT_DIALOG_OPEN, true);
+                outState.putBundle(KEY_EDIT_STATE, state);
+            }
+        }
+    }
+
+    /** 读取编辑对话框当前表单，生成状态快照。 */
+    private Bundle captureEditDialogState() {
+        if (pendingEditDialog == null) return null;
+        Bundle b = new Bundle();
+        b.putLong(KEY_EDIT_GAME_ID, editingGameId);
+        b.putString(KEY_EDIT_DIR_URI, pendingDirUri);
+        b.putString(KEY_EDIT_COVER_URI, pendingCoverUri);
+        EditText title = pendingEditDialog.findViewById(R.id.etGameTitle);
+        if (title != null) b.putString(KEY_EDIT_TITLE, title.getText() == null ? "" : title.getText().toString());
+        EditText pkg = pendingEditDialog.findViewById(R.id.etEmulatorPackage);
+        if (pkg != null) b.putString(KEY_EDIT_PKG, pkg.getText() == null ? "" : pkg.getText().toString());
+        EditText desc = pendingEditDialog.findViewById(R.id.etDescription);
+        if (desc != null) b.putString(KEY_EDIT_DESC, desc.getText() == null ? "" : desc.getText().toString());
+        EditText ghId = pendingEditDialog.findViewById(R.id.etGameHubLocalGameId);
+        if (ghId != null) b.putString(KEY_EDIT_GAMEHUB_ID, ghId.getText() == null ? "" : ghId.getText().toString());
+        Spinner engineSp = pendingEditDialog.findViewById(R.id.spEngine);
+        if (engineSp != null && engineSp.getSelectedItem() != null) b.putString(KEY_EDIT_ENGINE, engineSp.getSelectedItem().toString());
+        Spinner launchSp = pendingEditDialog.findViewById(R.id.spLaunchTarget);
+        if (launchSp != null && launchSp.getSelectedItem() != null) b.putString(KEY_EDIT_LAUNCH_TARGET, launchSp.getSelectedItem().toString());
+        Spinner winSp = pendingEditDialog.findViewById(R.id.spWinlatorLaunchMode);
+        if (winSp != null && winSp.getSelectedItem() != null) b.putString(KEY_EDIT_WINLATOR_MODE, winSp.getSelectedItem().toString());
+        Spinner ghSp = pendingEditDialog.findViewById(R.id.spGameHubLaunchMode);
+        if (ghSp != null && ghSp.getSelectedItem() != null) b.putString(KEY_EDIT_GAMEHUB_MODE, ghSp.getSelectedItem().toString());
+        return b;
     }
 
     private void refreshRuntimeAccountState() {
@@ -718,7 +785,19 @@ pendingScanRootReplaceIndex = -2;
         coverLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
             if (uri != null) {
                 pendingCoverUri = copyCoverToInternalStorage(uri);
-                if (pendingEditDialog != null) ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(pendingCoverUri == null ? "封面复制失败" : pendingCoverUri);
+                if (pendingEditDialog != null) {
+                    ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(pendingCoverUri == null ? "封面复制失败" : pendingCoverUri);
+                } else {
+                    // 对话框已随 Activity 重建丢失：不再静默，提示并尝试用快照恢复
+                    Toast.makeText(MainActivity.this,
+                            pendingCoverUri == null ? "封面复制失败" : "封面已选择，正在恢复编辑窗口…",
+                            Toast.LENGTH_SHORT).show();
+                    if (lastEditDialogState != null) {
+                        final Bundle s = lastEditDialogState;
+                        if (pendingCoverUri != null) s.putString(KEY_EDIT_COVER_URI, pendingCoverUri);
+                        getWindow().getDecorView().post(() -> restoreEditDialog(s));
+                    }
+                }
             }
         });
 profileAvatarLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -8527,6 +8606,7 @@ private String displayPath(String value) {
     }
 
     private void showEditDialog(Game game) {
+        editingGameId = game == null ? -1L : game.id;
         pendingDirUri = game == null ? null : game.rootUri;
         pendingCoverUri = game == null ? null : game.coverUri;
         Dialog d = new Dialog(this); pendingEditDialog = d;
@@ -8754,11 +8834,111 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
             }
             d.dismiss(); loadGames();
         });
-        d.setOnDismissListener(x -> pendingEditDialog = null);
+        d.setOnDismissListener(x -> {
+            pendingEditDialog = null;
+            editingGameId = -1L;
+        });
         d.show();
         if (d.getWindow() != null) {
             d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
+    }
+
+    /**
+     * Activity 重建后恢复编辑对话框（选封面/选目录期间进程被系统回收的场景）。
+     * 已保存的目录/封面/表单字段会回填，用户无需重新输入。
+     */
+    private void restoreEditDialog(Bundle state) {
+        if (state == null || isFinishing() || isDestroyed()) return;
+        // 对话框可能已在重建流程中被重新打开（比如 coverLauncher 回调兜底），
+        // 此时只需用快照刷新封面/目录显示，避免重复弹窗。
+        if (pendingEditDialog != null && pendingEditDialog.isShowing()) {
+            String cover = state.getString(KEY_EDIT_COVER_URI);
+            if (cover != null) {
+                pendingCoverUri = cover;
+                TextView coverTv = pendingEditDialog.findViewById(R.id.tvSelectedCover);
+                if (coverTv != null) coverTv.setText(cover);
+            }
+            return;
+        }
+        long savedGameId = state.getLong(KEY_EDIT_GAME_ID, -1L);
+        Game game = null;
+        if (savedGameId > 0) {
+            for (Game g : allGames) {
+                if (g != null && g.id == savedGameId) { game = g; break; }
+            }
+            // allGames 未加载完时兜底：直接查库
+            if (game == null) {
+                try {
+                    java.util.List<Game> all = repository.getAll();
+                    if (all != null) {
+                        for (Game g : all) {
+                            if (g != null && g.id == savedGameId) { game = g; break; }
+                        }
+                    }
+                } catch (Throwable ignored) { }
+            }
+        }
+        final String savedDir = state.getString(KEY_EDIT_DIR_URI);
+        final String savedCover = state.getString(KEY_EDIT_COVER_URI);
+        showEditDialog(game);
+        if (pendingEditDialog == null) return;
+        // showEditDialog 开头会用 game 的 rootUri/coverUri 重置 pending 字段，这里恢复为快照值
+        pendingDirUri = savedDir;
+        pendingCoverUri = savedCover;
+        // 引擎选择会触发 listener（联动 Artemis 版本按钮、包名默认值等），必须先设置引擎再回填表单文本
+        Spinner engineSp = pendingEditDialog.findViewById(R.id.spEngine);
+        String engine = state.getString(KEY_EDIT_ENGINE, "");
+        if (engineSp != null && !engine.isEmpty()) {
+            ArrayAdapter<String> ad = (ArrayAdapter<String>) engineSp.getAdapter();
+            for (int i = 0; ad != null && i < ad.getCount(); i++) {
+                if (engine.equals(ad.getItem(i))) { engineSp.setSelection(i); break; }
+            }
+        }
+        // 回填表单（showEditDialog 已按 game 填过默认值，这里用快照覆盖为用户编辑中的值）
+        EditText title = pendingEditDialog.findViewById(R.id.etGameTitle);
+        if (title != null) title.setText(state.getString(KEY_EDIT_TITLE, ""));
+        EditText pkg = pendingEditDialog.findViewById(R.id.etEmulatorPackage);
+        if (pkg != null) pkg.setText(state.getString(KEY_EDIT_PKG, ""));
+        EditText desc = pendingEditDialog.findViewById(R.id.etDescription);
+        if (desc != null) desc.setText(state.getString(KEY_EDIT_DESC, ""));
+        EditText ghId = pendingEditDialog.findViewById(R.id.etGameHubLocalGameId);
+        if (ghId != null) ghId.setText(state.getString(KEY_EDIT_GAMEHUB_ID, ""));
+        ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedDir)).setText(emptyText(pendingDirUri, "未选择游戏目录"));
+        ((TextView) pendingEditDialog.findViewById(R.id.tvSelectedCover)).setText(emptyText(pendingCoverUri, "未选择封面"));
+        updateClearDirButton(pendingEditDialog.findViewById(R.id.btnClearDir), pendingDirUri);
+        Spinner launchSp = pendingEditDialog.findViewById(R.id.spLaunchTarget);
+        // 恢复的目录可能与 game.rootUri 不同（用户改过目录但未保存），按快照目录重建启动项列表
+        String gameRoot = game == null ? null : game.rootUri;
+        boolean dirChanged = savedDir != null && !savedDir.equals(gameRoot);
+        if (launchSp != null && dirChanged) {
+            List<String> options = buildLaunchOptions(pendingDirUri);
+            launchSp.setAdapter(krSpinnerAdapter(options.toArray(new String[0])));
+        }
+        String launchTarget = state.getString(KEY_EDIT_LAUNCH_TARGET, "");
+        if (launchSp != null && !launchTarget.isEmpty()) {
+            ArrayAdapter<String> ad = (ArrayAdapter<String>) launchSp.getAdapter();
+            for (int i = 0; ad != null && i < ad.getCount(); i++) {
+                if (launchTarget.equals(ad.getItem(i))) { launchSp.setSelection(i); break; }
+            }
+        }
+        Spinner winSp = pendingEditDialog.findViewById(R.id.spWinlatorLaunchMode);
+        String winMode = state.getString(KEY_EDIT_WINLATOR_MODE, "");
+        if (winSp != null && !winMode.isEmpty()) {
+            ArrayAdapter<String> ad = (ArrayAdapter<String>) winSp.getAdapter();
+            for (int i = 0; ad != null && i < ad.getCount(); i++) {
+                if (winMode.equals(ad.getItem(i))) { winSp.setSelection(i); break; }
+            }
+        }
+        Spinner ghSp = pendingEditDialog.findViewById(R.id.spGameHubLaunchMode);
+        String ghMode = state.getString(KEY_EDIT_GAMEHUB_MODE, "");
+        if (ghSp != null && !ghMode.isEmpty()) {
+            ArrayAdapter<String> ad = (ArrayAdapter<String>) ghSp.getAdapter();
+            for (int i = 0; ad != null && i < ad.getCount(); i++) {
+                if (ghMode.equals(ad.getItem(i))) { ghSp.setSelection(i); break; }
+            }
+        }
+        Toast.makeText(MainActivity.this, "已恢复编辑窗口，请检查后保存", Toast.LENGTH_SHORT).show();
     }
 
     private void updateClearDirButton(View btn, String dirUri) {
