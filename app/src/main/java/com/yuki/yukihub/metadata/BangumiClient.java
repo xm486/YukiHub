@@ -16,8 +16,16 @@ import okhttp3.RequestBody;
 import retrofit2.Retrofit;
 
 public class BangumiClient {
+    /**
+     * 镜像站基址。
+     *
+     * 迁移历史：bangumi.lol（已停止服务）→ bangumi.pro。
+     * 镜像站随时可能再挂，所以域名只在这里出现一次，换站只改这两个常量。
+     */
+    static final String MIRROR_BASE = "https://api.bangumi.pro/";
+
     private static final String SEARCH_ENDPOINT_BGM = "https://api.bgm.tv/v0/search/subjects";
-    private static final String SEARCH_ENDPOINT_MIRROR = "https://api.bangumi.lol/v0/search/subjects";
+    private static final String SEARCH_ENDPOINT_MIRROR = MIRROR_BASE + "v0/search/subjects";
     private static final int MAX_RETRIES = 2;
     private static final long RETRY_DELAY_MS = 1500;
 
@@ -100,7 +108,7 @@ public class BangumiClient {
                                     .header("Accept", "application/json")
                                     .build()))
                             .build();
-                    Retrofit retrofit = HttpClient.retrofit("https://api.bangumi.lol/", client);
+                    Retrofit retrofit = HttpClient.retrofit(MIRROR_BASE, client);
                     mirrorService = retrofit.create(ApiService.class);
                 }
             }
@@ -121,7 +129,11 @@ public class BangumiClient {
         JSONObject images = o.optJSONObject("images");
         if (images != null) {
             m.coverUrl = MetadataUtils.firstNonEmpty(images.optString("large", ""), MetadataUtils.firstNonEmpty(images.optString("common", ""), images.optString("grid", "")));
-            if (m.coverUrl.startsWith("//")) m.coverUrl = "https:" + m.coverUrl;
+            // 主站与镜像共用这个 parse，靠域名区分：
+            // 主站返回 lain.bgm.tv（国内不通，套反代），镜像返回 lain.bangumi.pro
+            // （自带图床、直连可达，原样保留）。proxyBangumiImage 内部按域名判断，
+            // 同时处理 "//" 开头的协议相对地址。
+            m.coverUrl = MetadataUtils.proxyBangumiImage(m.coverUrl);
         }
 
         JSONObject rating = o.optJSONObject("rating");

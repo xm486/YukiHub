@@ -60,7 +60,9 @@ public class VnMetadata {
             m.chineseTitle = o.optString("chineseTitle", "");
             m.originalTitle = o.optString("originalTitle", "");
             m.romanTitle = o.optString("romanTitle", "");
-            m.coverUrl = o.optString("coverUrl", "");
+            // 旧缓存里存的是 lain.bgm.tv 直连地址（现在国内不通），读出来时补上反代前缀。
+            // 非 bgm.tv 的地址会被原样返回，所以对 VNDB / 月幕 / Hikarinagi 无副作用。
+            m.coverUrl = MetadataUtils.proxyBangumiImage(o.optString("coverUrl", ""));
             m.description = o.optString("description", "");
             m.translatedDescription = o.optString("translatedDescription", "");
             m.released = o.optString("released", "");

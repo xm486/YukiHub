@@ -1131,6 +1131,9 @@ public class MetadataController {
 
     public boolean downloadImageAllowVndbWarningPage(String imageUrl, File cacheFile, int depth) {
         if (imageUrl == null || imageUrl.trim().isEmpty() || cacheFile == null || depth > 2) return false;
+        // 兜底：所有远程图片下载都经过这里。bgm.tv 图片域名国内直连不通，
+        // 统一在出口换成反代地址，这样导入的备份数据、旧缓存等绕过 parse 的路径也能覆盖到。
+        imageUrl = MetadataUtils.proxyBangumiImage(imageUrl);
         try {
             java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(imageUrl).openConnection();
             c.setInstanceFollowRedirects(true);
