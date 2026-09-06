@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/authScroll"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:fillViewport="true"
@@ -16,44 +17,68 @@
         android:paddingTop="20dp"
         android:paddingBottom="20dp">
 
-        <!-- Logo section -->
-        <LinearLayout
-            android:layout_width="wrap_content"
+        <!-- Header：Logo 居中，关闭按钮压在右上角。
+             用 FrameLayout 让关闭按钮不占据独立行、也不挤压 Logo 的居中位置。 -->
+        <FrameLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center"
             android:layout_marginBottom="20dp">
 
-            <TextView
+            <!-- Logo section -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="❄"
-                android:textSize="28sp"
-                android:layout_marginBottom="6dp" />
+                android:layout_gravity="center_horizontal"
+                android:orientation="vertical"
+                android:gravity="center">
 
-            <TextView
-                android:id="@+id/tvAuthLogo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="YukiHub"
-                android:textColor="#EAF7FF"
-                android:textSize="24sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.08"
-                android:shadowColor="#455AC8FA"
-                android:shadowDx="0"
-                android:shadowDy="0"
-                android:shadowRadius="12" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="❄"
+                    android:textSize="28sp"
+                    android:layout_marginBottom="6dp" />
 
+                <TextView
+                    android:id="@+id/tvAuthLogo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="YukiHub"
+                    android:textColor="#EAF7FF"
+                    android:textSize="24sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08"
+                    android:shadowColor="#455AC8FA"
+                    android:shadowDx="0"
+                    android:shadowDy="0"
+                    android:shadowRadius="12" />
+
+                <TextView
+                    android:id="@+id/tvAuthSubtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="连接你的游戏库"
+                    android:textColor="#5A6A8A"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 关闭按钮：替代原先「点击弹窗外部关闭」的行为。
+                 那个行为会让用户切去邮箱看验证码回来时发现页面已关，填的内容全丢。 -->
             <TextView
-                android:id="@+id/tvAuthSubtitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="连接你的游戏库"
-                android:textColor="#5A6A8A"
-                android:textSize="12sp" />
-        </LinearLayout>
+                android:id="@+id/btnAuthClose"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_gravity="end|top"
+                android:text="✕"
+                android:textColor="#7A8BA8"
+                android:textSize="17sp"
+                android:gravity="center"
+                android:background="@drawable/bg_auth_input"
+                android:contentDescription="关闭"
+                android:clickable="true"
+                android:focusable="true" />
+        </FrameLayout>
 
         <!-- Tab buttons -->
         <LinearLayout
@@ -220,17 +245,52 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp" />
             </LinearLayout>
+
+            <!-- 就近状态提示：底部的 tvAuthStatus 在长表单里常被挤出可视区，
+                 用户点了发送却看不到任何反馈，会反复点击导致重复发码。
+                 这一条紧贴验证码行，点完立刻能看到。 -->
+            <TextView
+                android:id="@+id/tvCodeStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textColor="#8E9AB5"
+                android:textSize="11sp"
+                android:visibility="gone" />
         </LinearLayout>
 
-        <!-- Password -->
-        <TextView
-            android:id="@+id/labelPassword"
+        <!-- Password label row：标签在左、忘记密码入口在右，
+             复用这一行本来就空着的右侧，避免入口单独占一行 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="密码"
-            android:textColor="#7A8BA8"
-            android:textSize="12sp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/labelPassword"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="密码"
+                android:textColor="#7A8BA8"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvForgotPassword"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="忘记密码？"
+                android:textColor="#5AC8FA"
+                android:textSize="12sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="2dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
 
         <androidx.appcompat.widget.AppCompatEditText
             android:id="@+id/etPassword"
@@ -279,7 +339,6 @@
                 android:singleLine="true"
                 android:inputType="textPassword" />
         </LinearLayout>
-
         <!-- Submit button -->
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnSubmit"

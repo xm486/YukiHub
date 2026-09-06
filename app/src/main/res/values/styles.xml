@@ -18,6 +18,10 @@
         <item name="android:backgroundDimAmount">0.7</item>
         <item name="android:windowIsFloating">true</item>
         <item name="android:windowContentOverlay">@null</item>
+        <!-- 点击弹窗外部不再关闭：登录/注册要切去邮箱抄验证码，
+             误触蒙层就关掉会让已填的邮箱、密码、验证码全部丢失。
+             关闭改由标题栏右上角的 btnAuthClose 与系统返回键负责。 -->
+        <item name="android:windowCloseOnTouchOutside">false</item>
         <item name="windowNoTitle">true</item>
         <item name="windowActionBar">false</item>
     </style>

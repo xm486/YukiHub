@@ -9109,14 +9109,15 @@ private void showEditPlayTimeDialog(Game game) {
         root.addView(info);
 
         TextView totalLabel = new TextView(this);
-        totalLabel.setText("\n设置新的总时长");
+        totalLabel.setText("\n重设总时长（留空则不改）");
         totalLabel.setTextColor(getColorCompat(R.color.yh_text));
         totalLabel.setTextSize(14);
         totalLabel.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(totalLabel);
 
-        EditText totalInput = krEdit("例如 3h 20m / 200m / 7200s / 2.5h", TimeFormatUtil.playTime(game.totalPlayTime));
-        totalInput.setText(parseDurationForEdit(game.totalPlayTime));
+        // 这里不再预填当前时长：预填会让「只想追加」的用户也带上一个总时长值，
+        // 从而误触重设路径（重设会清空历史游玩记录）。留空 = 不改，语义才清晰。
+        EditText totalInput = krEdit("留空则不改，当前 " + parseDurationForEdit(game.totalPlayTime), "");
         root.addView(totalInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
 
         TextView addLabel = new TextView(this);
@@ -9130,7 +9131,7 @@ private void showEditPlayTimeDialog(Game game) {
         root.addView(addInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
 
         TextView hint = new TextView(this);
-        hint.setText("说明：上面的“总时长”会直接覆盖该游戏的累计时长；“追加游玩时长”会在当前基础上增加。两者可以二选一，也可以都填。");
+        hint.setText("说明：“追加游玩时长”只在当前基础上增加，会新增一条游玩记录，历史记录不受影响。“重设总时长”会把累计时长直接改成填写的值，并清空该游戏已有的游玩记录，填写后会二次确认。");
         hint.setTextColor(getColorCompat(R.color.yh_text_muted));
         hint.setTextSize(11);
         hint.setLineSpacing(dp(2), 1.0f);
@@ -9148,35 +9149,70 @@ private void showEditPlayTimeDialog(Game game) {
             dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.52f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            Long totalMinutes = parseDurationToMinutes(totalInput.getText() == null ? "" : totalInput.getText().toString().trim());
-            Long addMinutes = parseDurationToMinutes(addInput.getText() == null ? "" : addInput.getText().toString().trim());
-            if ((totalMinutes == null || totalMinutes < 0) && (addMinutes == null || addMinutes <= 0)) {
+            Long totalMs = parseDurationToMillis(totalInput.getText() == null ? "" : totalInput.getText().toString().trim());
+            Long addMs = parseDurationToMillis(addInput.getText() == null ? "" : addInput.getText().toString().trim());
+            if ((totalMs == null || totalMs < 0) && (addMs == null || addMs <= 0)) {
                 Toast.makeText(MainActivity.this, "请填写有效的时长", Toast.LENGTH_SHORT).show();
                 return;
             }
-            long currentDuration = Math.max(0L, game.totalPlayTime);
-            long finalDuration = currentDuration;
-            if (totalMinutes != null && totalMinutes >= 0) {
-                finalDuration = totalMinutes * 60_000L;
+            // 重设与追加是两种语义，必须走不同的数据层方法：
+            // - 重设：setManualPlayTimeForGame（清空该游戏的游玩记录 + 推进 playtime_reset_at），不可逆，需确认
+            // - 追加：addManualPlayTime（只新增一条记录并累加总时长），历史记录与 reset_at 都不动
+            final long addDelta = addMs != null && addMs > 0 ? addMs : 0L;
+            if (totalMs != null && totalMs >= 0) {
+                final long resetTo = Math.max(0L, totalMs + addDelta);
+                AlertDialog confirm = new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("确认重设总时长")
+                        .setMessage("将把《" + game.title + "》的累计时长重设为 " + TimeFormatUtil.playTime(resetTo) + "。\n\n"
+                                + "· 该游戏已有的游玩记录会被清空\n"
+                                + "· 动态列表里这个游戏的历史条目会消失\n"
+                                + "· 此操作不可撤销\n\n"
+                                + "只想增加时长的话，请取消后只填「追加游玩时长」。")
+                        .setPositiveButton("确认重设", (d, w) -> {
+                            repository.setManualPlayTimeForGame(game.id, resetTo);
+                            Toast.makeText(MainActivity.this, "游玩时长已重设", Toast.LENGTH_SHORT).show();
+                            dialog.dismiss();
+                            refreshAfterPlayTimeEdit(game);
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+                styleAlertDialogDark(confirm);
+                return;
             }
-            if (addMinutes != null && addMinutes > 0) {
-                finalDuration += addMinutes * 60_000L;
-            }
-            repository.setManualPlayTimeForGame(game.id, finalDuration);
-            Toast.makeText(MainActivity.this, "游玩时长已更新", Toast.LENGTH_SHORT).show();
+            repository.addManualPlayTime(game.id, addDelta);
+            Toast.makeText(MainActivity.this, "已追加 " + TimeFormatUtil.playTime(addDelta), Toast.LENGTH_SHORT).show();
             dialog.dismiss();
-            loadGames();
-            updateSideDetail(game);
-            updateProfilePanel();
+            refreshAfterPlayTimeEdit(game);
         });
     }
 
-    private Long parseDurationToMinutes(String input) {
+    /** 时长编辑后统一刷新：游戏列表、侧栏详情、个人面板。 */
+    private void refreshAfterPlayTimeEdit(Game game) {
+        loadGames();
+        if (game != null) {
+            // loadGames 会重建 allGames，这里取回新实例，避免侧栏用到已失效的旧对象
+            Game latest = null;
+            for (Game g : allGames) {
+                if (g != null && g.id == game.id) { latest = g; break; }
+            }
+            updateSideDetail(latest != null ? latest : game);
+        }
+        updateProfilePanel();
+    }
+
+    /**
+     * 解析时长文本为毫秒。
+     *
+     * 之前返回分钟，导致 30s 这类输入被整除抹成 0（提示语却写着支持 7200s）。
+     * 统一返回毫秒后秒级输入才能保真。
+     */
+    private Long parseDurationToMillis(String input) {
         if (input == null) return null;
         String s = input.trim().toLowerCase(Locale.ROOT);
         if (s.isEmpty()) return null;
         try {
-            if (s.matches("^\\d+$")) return Long.parseLong(s);
+            // 纯数字按分钟解释，保持与旧版输入习惯一致
+            if (s.matches("^\\d+$")) return Long.parseLong(s) * 60_000L;
             long totalMs = 0L;
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*([dhms])").matcher(s);
             boolean matched = false;
@@ -9190,7 +9226,7 @@ private void showEditPlayTimeDialog(Game game) {
                 else if ("s".equals(unit)) totalMs += (long) (value * 1000d);
             }
             if (!matched) return null;
-            return Math.max(0L, totalMs / 60_000L);
+            return Math.max(0L, totalMs);
         } catch (Throwable ignored) {
             return null;
         }

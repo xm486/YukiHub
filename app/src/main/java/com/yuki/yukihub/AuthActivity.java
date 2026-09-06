@@ -76,17 +76,40 @@ public class AuthActivity extends AppCompatActivity {
     private static final String KEY_HIKARINAGI_OAUTH_NONCE = "hikarinagi_oauth_nonce";
     private static final String KEY_HIKARINAGI_OAUTH_STARTED_AT = "hikarinagi_oauth_started_at";
 
-    private boolean registerMode = false;
+    /**
+     * 表单模式。
+     *
+     * 原先只有登录/注册两态，用 boolean registerMode 表示；
+     * 加入找回密码后改成三态枚举，避免出现 !registerMode 既指登录又指重置的歧义。
+     */
+    private static final int MODE_LOGIN = 0;
+    private static final int MODE_REGISTER = 1;
+    private static final int MODE_RESET = 2;
+
+    private int formMode = MODE_LOGIN;
 private SharedPreferences prefs;
 
 private TextView tabLogin, tabRegister, tvFormTitle, tvFormHint, tvAuthStatus;
 private LinearLayout rowNickname, rowConfirmPassword, rowVerifyCode;
 private EditText etNickname, etEmail, etPassword, etConfirmPassword, etVerifyCode;
 private Button btnSubmit, btnSendCode, btnKungalLogin, btnHikarinagiLogin;
-private TextView tvContinueLocal;
+private TextView tvContinueLocal, tvForgotPassword;
+private TextView labelPassword, labelVerifyCode;
+private TextView tvCodeStatus;
+private TextView btnAuthClose;
+private android.widget.ScrollView authScroll;
 
 // 发送验证码倒计时
 private android.os.CountDownTimer sendCodeTimer;
+
+/**
+ * 发码请求是否在飞行中。
+ *
+ * 单靠 btnSendCode.setEnabled(false) 不够：按钮背景是无 disabled state 的
+ * bg_auth_input、文字色写死，禁用后外观毫无变化，用户会以为没点到而反复点击。
+ * 这里显式记录状态，配合按钮文案与就近提示给出可见反馈。
+ */
+private boolean sendCodeInFlight = false;
 
     @Override
 protected void onCreate(Bundle savedInstanceState) {
@@ -102,6 +125,11 @@ protected void onCreate(Bundle savedInstanceState) {
 
     prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
     enterImmersiveMode();
+
+    // 主题里已声明 windowCloseOnTouchOutside=false，这里再补一道代码保险：
+    // Dialog 主题的这个行为在部分 ROM 上不完全遵循主题属性。
+    // 用户为了抄验证码常要切到邮箱 App，回来时误触蒙层就丢失全部输入。
+    try { setFinishOnTouchOutside(false); } catch (Throwable ignored) { }
 
     // Set dialog size - taller
     if (getWindow() != null) {
@@ -120,6 +148,7 @@ protected void onCreate(Bundle savedInstanceState) {
 @Override
 protected void onDestroy() {
     super.onDestroy();
+    sendCodeInFlight = false;
     if (sendCodeTimer != null) {
         sendCodeTimer.cancel();
         sendCodeTimer = null;
@@ -145,6 +174,7 @@ protected void onDestroy() {
 
     btnSubmit = findViewById(R.id.btnSubmit);
     btnSendCode = findViewById(R.id.btnSendCode);
+    btnAuthClose = findViewById(R.id.btnAuthClose);
     btnKungalLogin = findViewById(R.id.btnKungalLogin);
     btnHikarinagiLogin = findViewById(R.id.btnHikarinagiLogin);
     // 限制鲲站图标尺寸，防止撑满按钮
@@ -166,6 +196,11 @@ protected void onDestroy() {
         }
     }
     tvContinueLocal = findViewById(R.id.tvContinueLocal);
+    tvForgotPassword = findViewById(R.id.tvForgotPassword);
+    labelPassword = findViewById(R.id.labelPassword);
+    labelVerifyCode = findViewById(R.id.labelVerifyCode);
+    tvCodeStatus = findViewById(R.id.tvCodeStatus);
+    authScroll = findViewById(R.id.authScroll);
 }
 
     private void setupListeners() {
@@ -176,6 +211,8 @@ protected void onDestroy() {
     btnSendCode.setOnClickListener(v -> onSendCode());
     if (btnKungalLogin != null) btnKungalLogin.setOnClickListener(v -> startKungalQuickLogin());
     if (btnHikarinagiLogin != null) btnHikarinagiLogin.setOnClickListener(v -> startHikarinagiQuickLogin());
+    if (tvForgotPassword != null) tvForgotPassword.setOnClickListener(v -> switchToReset());
+    if (btnAuthClose != null) btnAuthClose.setOnClickListener(v -> onCloseRequested());
 
     // 长按标题测试API连接
     tvFormTitle.setOnLongClickListener(v -> {
@@ -186,8 +223,50 @@ protected void onDestroy() {
     tvContinueLocal.setOnClickListener(v -> finish());
 }
 
-    private void switchToLogin() {
-    registerMode = false;
+/**
+ * 关闭按钮与系统返回键的统一处理。
+ *
+ * 找回密码是登录 tab 的子流程，此时应先退回登录页而不是直接关掉整个页面——
+ * 用户可能只是想改回用密码登录，直接退出等于让他重新进一遍。
+ */
+private void onCloseRequested() {
+    if (formMode == MODE_RESET) {
+        switchToLogin();
+        return;
+    }
+    finish();
+}
+
+@Override
+public void onBackPressed() {
+    // 与关闭按钮保持一致：找回密码模式下返回键先回登录页
+    if (formMode == MODE_RESET) {
+        switchToLogin();
+        return;
+    }
+    super.onBackPressed();
+}
+
+    /**
+ * 切换表单模式时清理验证码区域的残留提示。
+ *
+ * 注意不取消 sendCodeTimer：倒计时代表服务端 60 秒冷却仍在生效，
+ * 若在切 tab 时清掉，用户回来就能再点，结果只会撞上服务端 429。
+ * 同理只有在既没有请求在飞、也没有倒计时的情况下才复位按钮文案。
+ */
+private void resetCodeUiState() {
+    if (tvCodeStatus != null) {
+        tvCodeStatus.setVisibility(View.GONE);
+        tvCodeStatus.setText("");
+    }
+    if (!sendCodeInFlight && btnSendCode != null && btnSendCode.isEnabled()) {
+        btnSendCode.setText("发送验证码");
+    }
+}
+
+private void switchToLogin() {
+    formMode = MODE_LOGIN;
+    resetCodeUiState();
     DynamicTheme dt = DynamicTheme.getInstance();
     boolean themed = dt.isEnabled() && dt.getColors() != null;
     tabLogin.setTextColor(themed ? 0xFFF0F4FA : 0xFFEAF7FF);
@@ -198,16 +277,20 @@ protected void onDestroy() {
     tvFormTitle.setText("欢迎回来");
     tvFormHint.setText("登录后开启云同步和跨设备恢复");
     btnSubmit.setText("登录");
+    if (labelPassword != null) labelPassword.setText("密码");
+    etPassword.setHint("输入密码");
 
     rowNickname.setVisibility(View.GONE);
     rowConfirmPassword.setVisibility(View.GONE);
     rowVerifyCode.setVisibility(View.GONE);
+    if (tvForgotPassword != null) tvForgotPassword.setVisibility(View.VISIBLE);
 
     tvAuthStatus.setVisibility(View.GONE);
 }
 
 private void switchToRegister() {
-    registerMode = true;
+    formMode = MODE_REGISTER;
+    resetCodeUiState();
     DynamicTheme dt = DynamicTheme.getInstance();
     boolean themed = dt.isEnabled() && dt.getColors() != null;
     tabRegister.setTextColor(themed ? 0xFFF0F4FA : 0xFFEAF7FF);
@@ -218,10 +301,52 @@ private void switchToRegister() {
     tvFormTitle.setText("创建账户");
     tvFormHint.setText("注册后开启云同步、好友聊天和跨设备恢复");
     btnSubmit.setText("创建账户");
+    if (labelPassword != null) labelPassword.setText("密码");
+    if (labelVerifyCode != null) labelVerifyCode.setText("邮箱验证码");
+    etPassword.setHint("输入密码");
+    etConfirmPassword.setHint("再次输入密码");
 
     rowNickname.setVisibility(View.VISIBLE);
     rowConfirmPassword.setVisibility(View.VISIBLE);
     rowVerifyCode.setVisibility(View.VISIBLE);
+    if (tvForgotPassword != null) tvForgotPassword.setVisibility(View.GONE);
+
+    tvAuthStatus.setVisibility(View.GONE);
+}
+
+/**
+ * 找回密码模式。
+ *
+ * 复用注册模式的验证码行与确认密码行，只是把两个 tab 都置为未选中态
+ * （这是登录 tab 的一个子流程，不属于任何 tab）。
+ */
+private void switchToReset() {
+    formMode = MODE_RESET;
+    resetCodeUiState();
+    DynamicTheme dt = DynamicTheme.getInstance();
+    boolean themed = dt.isEnabled() && dt.getColors() != null;
+    tabLogin.setTextColor(themed ? 0xFFB0B8C8 : 0xFF4A5568);
+    tabLogin.setBackgroundResource(R.drawable.bg_auth_tab_inactive);
+    tabRegister.setTextColor(themed ? 0xFFB0B8C8 : 0xFF4A5568);
+    tabRegister.setBackgroundResource(R.drawable.bg_auth_tab_inactive);
+
+    tvFormTitle.setText("找回密码");
+    tvFormHint.setText("用注册邮箱接收验证码，设置新的密码");
+    btnSubmit.setText("重置密码");
+    if (labelPassword != null) labelPassword.setText("新密码");
+    if (labelVerifyCode != null) labelVerifyCode.setText("邮箱验证码");
+    etPassword.setHint("输入新密码（至少6位）");
+    etConfirmPassword.setHint("再次输入新密码");
+
+    rowNickname.setVisibility(View.GONE);
+    rowConfirmPassword.setVisibility(View.VISIBLE);
+    rowVerifyCode.setVisibility(View.VISIBLE);
+    if (tvForgotPassword != null) tvForgotPassword.setVisibility(View.GONE);
+
+    // 切进来时清掉上一模式残留的输入，避免误提交
+    etPassword.setText("");
+    etConfirmPassword.setText("");
+    etVerifyCode.setText("");
 
     tvAuthStatus.setVisibility(View.GONE);
 }
@@ -238,10 +363,25 @@ private void switchToRegister() {
         return;
     }
     if (password.length() < 6) {
-        showStatus("密码至少需要6位", 0xFFFF9500);
+        showStatus(formMode == MODE_RESET ? "新密码至少需要6位" : "密码至少需要6位", 0xFFFF9500);
         return;
     }
-    if (registerMode) {
+    if (formMode == MODE_RESET) {
+        if (!password.equals(confirmPassword)) {
+            showStatus("两次密码输入不一致", 0xFFFF9500);
+            return;
+        }
+        if (verifyCode.isEmpty()) {
+            showStatus("请输入邮箱验证码", 0xFFFF9500);
+            return;
+        }
+        btnSubmit.setEnabled(false);
+        btnSubmit.setText("重置中...");
+        showStatus("正在连接...", 0xFF8E9AB5);
+        performResetPassword(email, verifyCode, password);
+        return;
+    }
+    if (formMode == MODE_REGISTER) {
         if (nickname.length() < 2 || nickname.length() > 20) {
             showStatus("昵称需要2-20个字符", 0xFFFF9500);
             return;
@@ -261,10 +401,67 @@ private void switchToRegister() {
     }
 
     btnSubmit.setEnabled(false);
-    btnSubmit.setText(registerMode ? "注册中..." : "登录中...");
+    btnSubmit.setText(formMode == MODE_REGISTER ? "注册中..." : "登录中...");
     showStatus("正在连接...", 0xFF8E9AB5);
 
     performAuth(email, password, nickname, verifyCode);
+}
+
+/**
+ * 提交密码重置。
+ *
+ * 用 POST + JSON body：新密码不能出现在 query string 里，
+ * 否则会被服务器访问日志与中间代理原文记录下来。
+ */
+private void performResetPassword(String email, String code, String newPassword) {
+    new Thread(() -> {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("email", email);
+            body.put("code", code);
+            body.put("password", newPassword);
+            postJson(AUTH_BASE_URL + "/auth/reset_password", body);
+
+            runOnUiThread(() -> {
+                Toast.makeText(this, "密码已重置，请用新密码登录", Toast.LENGTH_SHORT).show();
+                btnSubmit.setEnabled(true);
+                // 回到登录页并保留邮箱，用户直接输新密码即可
+                switchToLogin();
+                etPassword.setText("");
+                etConfirmPassword.setText("");
+                etVerifyCode.setText("");
+                showStatus("密码已重置，请用新密码登录", 0xFF34D158);
+            });
+        } catch (Throwable t) {
+            Log.w("YukiHub", "Reset password failed", t);
+            runOnUiThread(() -> {
+                btnSubmit.setEnabled(true);
+                btnSubmit.setText("重置密码");
+                showStatus(extractServerError(t), 0xFFFF3B30);
+            });
+        }
+    }).start();
+}
+
+/**
+ * 从异常里提取服务端返回的错误文案。
+ *
+ * 三处网络请求原本各自内联了一份相同的 "HTTP xxx: {json}" 解析逻辑，
+ * 这里统一收拢，新增的重置流程直接复用。
+ */
+private String extractServerError(Throwable t) {
+    String msg = t != null && t.getMessage() != null ? t.getMessage() : "请检查网络";
+    if (msg.startsWith("HTTP ")) {
+        int colonIdx = msg.indexOf(": ");
+        if (colonIdx > 0) {
+            String jsonPart = msg.substring(colonIdx + 2);
+            try {
+                JSONObject errJson = new JSONObject(jsonPart);
+                msg = errJson.optString("error", jsonPart);
+            } catch (Exception ignored) { }
+        }
+    }
+    return msg;
 }
 
 private void startKungalQuickLogin() {
@@ -394,6 +591,7 @@ private void testApiConnection() {
 }
 
     private void performAuth(String email, String password, String nickname, String verifyCode) {
+    final boolean registerMode = formMode == MODE_REGISTER;
     new Thread(() -> {
         try {
             JSONObject resp;
@@ -424,81 +622,110 @@ private void testApiConnection() {
             runOnUiThread(() -> {
                 btnSubmit.setEnabled(true);
                 btnSubmit.setText(registerMode ? "创建账户" : "登录");
-                // 尝试从异常消息中提取服务器错误
-                String msg = t.getMessage() != null ? t.getMessage() : "请检查网络";
-                if (msg.startsWith("HTTP ")) {
-                    // 尝试解析 JSON 错误
-                    int colonIdx = msg.indexOf(": ");
-                    if (colonIdx > 0) {
-                        String jsonPart = msg.substring(colonIdx + 2);
-                        try {
-                            JSONObject errJson = new JSONObject(jsonPart);
-                            String errMsg = errJson.optString("error", jsonPart);
-                            msg = errMsg;
-                        } catch (Exception ignored) { }
-                    }
-                }
-                showStatus(msg, 0xFFFF3B30);
+                showStatus(extractServerError(t), 0xFFFF3B30);
             });
         }
     }).start();
 }
 
 /**
- * 发送邮箱验证码
+ * 发送邮箱验证码。
+ *
+ * 按当前模式选接口：找回密码走 /auth/send_reset_code（只给已注册邮箱发信），
+ * 注册走 /auth/send_code。两个接口共用 email_codes 表，
+ * 因此 60 秒冷却与每日次数上限跨接口共享，换接口刷不出额外额度。
+ *
+ * 反馈设计（都是为了避免用户重复点击导致重复发码）：
+ * - 点击瞬间：Toast + 按钮文案改「发送中…」+ 就近提示，三处同时可见
+ * - 成功：Toast + 倒计时占用按钮文案
+ * - 读取超时：服务端极可能已发信成功（SMTP 同步发送较慢），按已发送处理并启动倒计时
  */
 private void onSendCode() {
-    String email = etEmail.getText() == null ? "" : etEmail.getText().toString().trim();
-
-    if (!isValidEmail(email)) {
-        showStatus("请先输入有效的邮箱地址", 0xFFFF9500);
+    // 重复点击的兜底：按钮 disabled 后外观无变化，用户仍可能连点，
+    // 这里显式拦掉并复述当前状态，而不是静默丢弃。
+    if (sendCodeInFlight) {
+        Toast.makeText(this, "正在发送验证码，请稍候…", Toast.LENGTH_SHORT).show();
+        return;
+    }
+    if (!btnSendCode.isEnabled()) {
+        Toast.makeText(this, "验证码已发送，请等待倒计时结束后重试", Toast.LENGTH_SHORT).show();
         return;
     }
 
+    String email = etEmail.getText() == null ? "" : etEmail.getText().toString().trim();
+
+    if (!isValidEmail(email)) {
+        showCodeStatus("请先输入有效的邮箱地址", 0xFFFF9500);
+        showStatus("请先输入有效的邮箱地址", 0xFFFF9500);
+        Toast.makeText(this, "请先输入有效的邮箱地址", Toast.LENGTH_SHORT).show();
+        return;
+    }
+
+    final boolean resetMode = formMode == MODE_RESET;
+    sendCodeInFlight = true;
     btnSendCode.setEnabled(false);
+    btnSendCode.setText("发送中…");
+    showCodeStatus("正在发送验证码，最长可能需要 20 秒，请勿重复点击…", 0xFF8E9AB5);
     showStatus("正在发送邮箱验证码...", 0xFF8E9AB5);
+    Toast.makeText(this, "正在发送验证码，请稍候…", Toast.LENGTH_SHORT).show();
 
     new Thread(() -> {
         try {
-            String url = AUTH_BASE_URL + "/auth/send_code?email="
+            String path = resetMode ? "/auth/send_reset_code" : "/auth/send_code";
+            String url = AUTH_BASE_URL + path + "?email="
                     + java.net.URLEncoder.encode(email, "UTF-8");
-            JSONObject resp = getJson(url);
+            getJson(url);
 
             runOnUiThread(() -> {
-                showStatus("验证码已发送至邮箱，请查收", 0xFF34D158);
+                sendCodeInFlight = false;
+                // 找回密码时服务端对未注册邮箱也返回成功（防邮箱枚举），
+                // 所以这里的文案不能断言「已发送」。
+                String msg = resetMode
+                        ? "若该邮箱已注册，验证码已发送，请查收"
+                        : "验证码已发送至邮箱，请查收";
+                showCodeStatus(msg, 0xFF34D158);
+                showStatus(msg, 0xFF34D158);
+                Toast.makeText(AuthActivity.this, msg, Toast.LENGTH_LONG).show();
                 startSendCodeCountdown();
             });
         } catch (Throwable t) {
             Log.w("YukiHub", "Send code failed", t);
+            final boolean timedOut = t instanceof java.net.SocketTimeoutException;
             runOnUiThread(() -> {
+                sendCodeInFlight = false;
+                if (timedOut) {
+                    // 服务端用 fsockopen 同步走 SMTP，慢于客户端读超时是常态。
+                    // 此时验证码通常已入库并发出，若放开按钮让用户重试，
+                    // 只会白白消耗每日额度、并让用户收到多封邮件。
+                    // 因此按「已发送」处理，同样启动倒计时。
+                    String msg = "服务器响应较慢，验证码可能已发出，请先查收邮箱";
+                    showCodeStatus(msg, 0xFFFF9500);
+                    showStatus(msg, 0xFFFF9500);
+                    Toast.makeText(AuthActivity.this, msg, Toast.LENGTH_LONG).show();
+                    startSendCodeCountdown();
+                    return;
+                }
                 btnSendCode.setEnabled(true);
                 btnSendCode.setText("发送验证码");
-                String msg = t.getMessage() != null ? t.getMessage() : "请检查网络";
-                if (msg.startsWith("HTTP ")) {
-                    int colonIdx = msg.indexOf(": ");
-                    if (colonIdx > 0) {
-                        String jsonPart = msg.substring(colonIdx + 2);
-                        try {
-                            JSONObject errJson = new JSONObject(jsonPart);
-                            msg = errJson.optString("error", jsonPart);
-                        } catch (Exception ignored) { }
-                    }
-                }
+                String msg = extractServerError(t);
+                showCodeStatus(msg, 0xFFFF3B30);
                 showStatus(msg, 0xFFFF3B30);
+                Toast.makeText(AuthActivity.this, msg, Toast.LENGTH_LONG).show();
             });
         }
     }).start();
 }
 
 /**
- * 发送验证码按钮倒计时（60秒）
+ * 发送验证码按钮倒计时（60秒），与服务端 SEND_CODE_COOLDOWN 对齐。
  */
 private void startSendCodeCountdown() {
     if (sendCodeTimer != null) sendCodeTimer.cancel();
+    btnSendCode.setEnabled(false);
     sendCodeTimer = new android.os.CountDownTimer(60000, 1000) {
         @Override
         public void onTick(long millisUntilFinished) {
-            btnSendCode.setText((millisUntilFinished / 1000) + "s");
+            btnSendCode.setText("重发 " + (millisUntilFinished / 1000) + "s");
         }
         @Override
         public void onFinish() {
@@ -506,6 +733,19 @@ private void startSendCodeCountdown() {
             btnSendCode.setText("发送验证码");
         }
     }.start();
+}
+
+/**
+ * 验证码行下方的就近提示。
+ *
+ * 底部的 tvAuthStatus 在注册/找回这类长表单里常被挤出可视区，
+ * 用户点了发送看不到任何反馈就会反复点击，因此这里再给一处贴近按钮的提示。
+ */
+private void showCodeStatus(String msg, int color) {
+    if (tvCodeStatus == null) return;
+    tvCodeStatus.setVisibility(View.VISIBLE);
+    tvCodeStatus.setText(msg);
+    tvCodeStatus.setTextColor(color);
 }
 
     private JSONObject getJson(String urlStr) throws Exception {
@@ -564,11 +804,18 @@ private void startSendCodeCountdown() {
         c.setDoOutput(true);
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        c.setRequestProperty("User-Agent", BROWSER_UA);
+        c.setRequestProperty("Referer", "https://yukihub.zh.kg/");
         byte[] data = body != null ? body.toString().getBytes(StandardCharsets.UTF_8) : new byte[0];
         c.setFixedLengthStreamingMode(data.length);
         try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) { os.write(data); }
         int code = c.getResponseCode();
         String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
+        // 与 getJson 保持一致：免费主机的防护页/缓存页会返回 HTML，
+        // 直接丢给 JSONObject 会抛出难以理解的解析异常。
+        if (text != null && text.trim().startsWith("<")) {
+            throw new RuntimeException("服务器返回了HTML页面，可能是免费主机防护页/缓存页，请稍后重试");
+        }
         if (code < 200 || code >= 300) throw new RuntimeException("HTTP " + code + ": " + text);
         return text != null && !text.trim().isEmpty() ? new JSONObject(text) : new JSONObject();
     }
@@ -595,6 +842,15 @@ private void startSendCodeCountdown() {
         tvAuthStatus.setVisibility(View.VISIBLE);
         tvAuthStatus.setText(msg);
         tvAuthStatus.setTextColor(color);
+        // 这条提示排在提交按钮之后，注册/找回这类长表单里很容易落在可视区之外。
+        // 主动滚到它的位置，避免用户以为「点了没反应」。
+        if (authScroll != null) {
+            authScroll.post(() -> {
+                try {
+                    authScroll.smoothScrollTo(0, Math.max(0, tvAuthStatus.getBottom() - authScroll.getHeight() + dp(12)));
+                } catch (Throwable ignored) { }
+            });
+        }
     }
 
     private void applyDynamicThemeToAuth() {
@@ -623,6 +879,16 @@ private void startSendCodeCountdown() {
         btnSubmit.setTextColor(0xFFFFFFFF);
         if (btnKungalLogin != null) btnKungalLogin.setBackground(tintAuthInput(colors));
         tvContinueLocal.setTextColor(mutedColor);
+        if (tvForgotPassword != null) tvForgotPassword.setTextColor(mutedColor);
+        if (btnAuthClose != null) {
+            btnAuthClose.setTextColor(mutedColor);
+            btnAuthClose.setBackground(tintAuthInput(colors));
+        }
+        // tvCodeStatus 的颜色由 showCodeStatus 按状态动态设置，
+        // 这里不覆盖，只处理它还没有内容时的默认色。
+        if (tvCodeStatus != null && tvCodeStatus.getVisibility() != View.VISIBLE) {
+            tvCodeStatus.setTextColor(mutedColor);
+        }
         // Tint backgrounds
         btnSubmit.setBackground(tintAuthButton(colors));
         etNickname.setBackground(tintAuthInput(colors));
