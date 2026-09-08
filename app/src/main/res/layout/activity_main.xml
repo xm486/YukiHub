@@ -92,7 +92,7 @@
                 android:orientation="vertical"
                 android:background="@drawable/bg_sidebar_item"
                 android:foreground="?android:attr/selectableItemBackgroundBorderless">
-                <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="⌂" android:textColor="#E8FFFFFF" android:textSize="14sp" android:textStyle="bold" />
+                <ImageView android:layout_width="18dp" android:layout_height="20dp" android:contentDescription="首页" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_home" android:scaleType="fitCenter" />
                 <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="首页" android:textColor="#E8FFFFFF" android:textSize="7sp" />
             </LinearLayout>
 
@@ -107,7 +107,7 @@
                 android:orientation="vertical"
                 android:background="@drawable/bg_home_nav_active"
                 android:foreground="?android:attr/selectableItemBackgroundBorderless">
-                <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="🎮" android:textColor="#FFFFFFFF" android:textSize="13sp" />
+                <ImageView android:layout_width="18dp" android:layout_height="20dp" android:contentDescription="游戏库" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_library" android:scaleType="fitCenter" />
                 <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="游戏库" android:textColor="#FFFFFFFF" android:textSize="7sp" android:textStyle="bold" />
             </LinearLayout>
 
@@ -122,7 +122,7 @@
                 android:orientation="vertical"
                 android:background="@drawable/bg_sidebar_item"
                 android:foreground="?android:attr/selectableItemBackgroundBorderless">
-                <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="▣" android:textColor="#E8FFFFFF" android:textSize="13sp" />
+                <ImageView android:layout_width="18dp" android:layout_height="20dp" android:contentDescription="大屏" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_bigscreen" android:scaleType="fitCenter" />
                 <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="大屏" android:textColor="#E8FFFFFF" android:textSize="7sp" />
             </LinearLayout>
 
@@ -140,7 +140,7 @@
                     android:layout_height="match_parent"
                     android:gravity="center"
                     android:orientation="vertical">
-                    <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="💬" android:textColor="#E8FFFFFF" android:textSize="12sp" />
+                    <ImageView android:layout_width="18dp" android:layout_height="20dp" android:contentDescription="好友/聊天" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_chat" android:scaleType="fitCenter" />
                     <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="好友/聊天" android:textColor="#E8FFFFFF" android:textSize="7sp" />
                 </LinearLayout>
                 <TextView
@@ -169,7 +169,7 @@
                 android:orientation="vertical"
                 android:background="@drawable/bg_sidebar_item"
                 android:foreground="?android:attr/selectableItemBackgroundBorderless">
-                <TextView android:layout_width="match_parent" android:layout_height="20dp" android:gravity="bottom|center_horizontal" android:text="🌐" android:textColor="#E8FFFFFF" android:textSize="13sp" />
+                <ImageView android:layout_width="18dp" android:layout_height="20dp" android:contentDescription="翻译" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_translate" android:scaleType="fitCenter" />
                 <TextView android:layout_width="match_parent" android:layout_height="14dp" android:gravity="top|center_horizontal" android:text="翻译" android:textColor="#E8FFFFFF" android:textSize="7sp" />
             </LinearLayout>
         </LinearLayout>
@@ -204,12 +204,12 @@
                 android:orientation="horizontal"
                 android:gravity="center"
                 android:background="@drawable/bg_stat_pill_games">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🎮"
-                    android:textSize="8sp"
-                    android:includeFontPadding="false" />
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:contentDescription="游戏数"
+                    android:src="@drawable/ic_nav_library"
+                    android:tint="#EAF6FF" />
                 <TextView
                     android:id="@+id/tvStatsGames"
                     android:layout_width="wrap_content"
@@ -231,12 +231,12 @@
                 android:gravity="center"
                 android:layout_marginTop="4dp"
                 android:background="@drawable/bg_stat_pill_time">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🕐"
-                    android:textSize="8sp"
-                    android:includeFontPadding="false" />
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:contentDescription="游玩时长"
+                    android:src="@drawable/ic_nav_clock"
+                    android:tint="#FFEAF7" />
                 <TextView
                     android:id="@+id/tvStatsTime"
                     android:layout_width="wrap_content"
@@ -313,7 +313,7 @@
                 android:gravity="center"
                 android:background="@drawable/bg_yuki_button"
                 android:foreground="?android:attr/selectableItemBackgroundBorderless"
-                android:text="⚙ 设置"
+                android:text="设置"
                 android:textColor="#000000"
                 android:textSize="9sp"
                 android:textStyle="bold" />
@@ -506,8 +506,8 @@
                         <TextView android:id="@+id/sideDetailOriginalTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:maxLines="1" android:ellipsize="end" android:text="" android:textColor="@color/yh_text_muted" android:textSize="8sp" />
 
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:orientation="horizontal">
-                            <TextView android:id="@+id/sideBtnLaunch" android:layout_width="0dp" android:layout_height="28dp" android:layout_weight="1" android:gravity="center" android:background="@drawable/bg_yuki_button" android:text="▶ 开始" android:textColor="#071221" android:textSize="8sp" android:textStyle="bold" android:singleLine="true" />
-                            <TextView android:id="@+id/sideBtnOptions" android:layout_width="0dp" android:layout_height="28dp" android:layout_marginStart="4dp" android:layout_weight="1" android:gravity="center" android:background="@drawable/bg_input" android:text="⚙ 选项" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:singleLine="true" />
+                            <TextView android:id="@+id/sideBtnLaunch" android:layout_width="0dp" android:layout_height="28dp" android:layout_weight="1" android:gravity="center" android:background="@drawable/bg_yuki_button" android:text="开始" android:textColor="#071221" android:textSize="8sp" android:textStyle="bold" android:singleLine="true" />
+                            <TextView android:id="@+id/sideBtnOptions" android:layout_width="0dp" android:layout_height="28dp" android:layout_marginStart="4dp" android:layout_weight="1" android:gravity="center" android:background="@drawable/bg_input" android:text="选项" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:singleLine="true" />
                         </LinearLayout>
 
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical">

@@ -1919,6 +1919,9 @@ sideBtnLaunch = findViewById(R.id.sideBtnLaunch);
         prepareManualClickFeedback(sideBtnOptions);
         prepareManualClickFeedback(sideDescToggle);
         prepareManualClickFeedback(sideTranslateToggle);
+        // 用 ImageSpan 把开始/选项图标紧贴文字并垂直居中（不走 drawableStart，避免图标与文字分离）
+        setIconedText(sideBtnLaunch, R.drawable.ic_btn_play, " 开始", 0xFF071221);
+        setIconedText(sideBtnOptions, R.drawable.ic_btn_settings, " 选项", -1);
         sideBtnLaunch.setOnClickListener(v -> { clickFeedback(v); if (selectedGame != null) launchGame(selectedGame); });
         sideBtnOptions.setOnClickListener(v -> { clickFeedback(v); if (selectedGame != null) showSideOptions(selectedGame); });
         sideDescToggle.setOnClickListener(v -> { clickFeedback(v); sideDescExpanded = !sideDescExpanded; renderSideDescription(); });
@@ -1954,6 +1957,10 @@ View settingsButton = findViewById(R.id.btnSettings);
 if (settingsButton != null) {
     applyTopActionFeedback(settingsButton);
     prepareManualClickFeedback(settingsButton);
+    // 用 ImageSpan 将小图标紧贴文字并垂直居中（不走 drawableStart，避免图标与文字分离）
+    if (settingsButton instanceof android.widget.TextView) {
+        setIconedText((android.widget.TextView) settingsButton, R.drawable.ic_btn_settings, " 设置", 0xFF071221);
+    }
     settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
 }
 // 通知按钮
@@ -5326,6 +5333,27 @@ private String extractImageUrlFromHtml(String html, String baseUrl) {
 
 private int dp(int value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    /** 在 TextView 文字前用 ImageSpan 内联一个小图标（紧贴文字、垂直居中）。
+     * 不依赖 drawableStart，避免工具链/布局导致的图标与文字分离问题。
+     * textWithLeadingSpace 形如 " 开始"，首字符（空格）用来承载图标。
+     * tintColor：>0 时对图标着色（如浅色按钮上需深色图标）；<=0 保持矢量原色。 */
+    private void setIconedText(android.widget.TextView tv, int drawableRes, String textWithLeadingSpace, int tintColor) {
+        if (tv == null) return;
+        Drawable icon = ContextCompat.getDrawable(this, drawableRes);
+        if (icon == null) { tv.setText(textWithLeadingSpace == null ? "" : textWithLeadingSpace.trim()); return; }
+        int px = dp(9);
+        icon.setBounds(0, 0, px, px);
+        if (tintColor > 0) {
+            icon = icon.mutate();
+            if (android.os.Build.VERSION.SDK_INT >= 21) icon.setTint(tintColor);
+            else icon.setColorFilter(tintColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        }
+        String s = (textWithLeadingSpace == null || textWithLeadingSpace.isEmpty()) ? " " : textWithLeadingSpace;
+        android.text.SpannableString ss = new android.text.SpannableString(s);
+        ss.setSpan(new android.text.style.ImageSpan(icon, android.text.style.ImageSpan.ALIGN_CENTER), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tv.setText(ss);
     }
 
 private String safeCacheName(String input) {

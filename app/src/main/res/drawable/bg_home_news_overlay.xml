@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 资讯题图遮罩：渐变色与 bg_home_hero_overlay 相同，但不带圆角——
+     遮罩自带 18dp 圆角会在图片裁切角(12dp)处留下一小瓣未遮亮的月牙，
+     直角版罩满整个裁切区，亮度均匀；圆角统一由容器 clipToOutline 裁 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:angle="270" android:startColor="#10000000" android:centerColor="#25000000" android:endColor="#C735286D" />
+</shape>

@@ -70,7 +70,7 @@
                     android:focusable="true"
                     android:gravity="center"
                     android:orientation="vertical">
-                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="⌂" android:textColor="#FFFFFFFF" android:textSize="19sp" android:textStyle="bold" />
+                    <ImageView android:layout_width="22dp" android:layout_height="27dp" android:contentDescription="首页" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_home" android:scaleType="fitCenter" />
                     <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="首页" android:textColor="#FFFFFFFF" android:textSize="9sp" android:textStyle="bold" />
                 </LinearLayout>
 
@@ -83,7 +83,7 @@
                     android:focusable="true"
                     android:gravity="center"
                     android:orientation="vertical">
-                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="🎮" android:textColor="#E8FFFFFF" android:textSize="17sp" />
+                    <ImageView android:layout_width="22dp" android:layout_height="27dp" android:contentDescription="游戏库" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_library" android:scaleType="fitCenter" />
                     <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="游戏库" android:textColor="#E8FFFFFF" android:textSize="9sp" />
                 </LinearLayout>
 
@@ -96,7 +96,7 @@
                     android:focusable="true"
                     android:gravity="center"
                     android:orientation="vertical">
-                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="▣" android:textColor="#E8FFFFFF" android:textSize="18sp" />
+                    <ImageView android:layout_width="22dp" android:layout_height="27dp" android:contentDescription="大屏模式" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_bigscreen" android:scaleType="fitCenter" />
                     <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="大屏模式" android:textColor="#E8FFFFFF" android:textSize="9sp" />
                 </LinearLayout>
 
@@ -114,7 +114,7 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical">
-                        <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="💬" android:textColor="#E8FFFFFF" android:textSize="16sp" />
+                        <ImageView android:layout_width="22dp" android:layout_height="27dp" android:contentDescription="好友/聊天" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_chat" android:scaleType="fitCenter" />
                         <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="好友/聊天" android:textColor="#E8FFFFFF" android:textSize="8sp" />
                     </LinearLayout>
                     <TextView
@@ -141,7 +141,7 @@
                     android:focusable="true"
                     android:gravity="center"
                     android:orientation="vertical">
-                    <TextView android:layout_width="match_parent" android:layout_height="27dp" android:gravity="bottom|center_horizontal" android:text="🌐" android:textColor="#E8FFFFFF" android:textSize="16sp" />
+                    <ImageView android:layout_width="22dp" android:layout_height="27dp" android:contentDescription="翻译" android:gravity="bottom|center_horizontal" android:src="@drawable/ic_nav_translate" android:scaleType="fitCenter" />
                     <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="top|center_horizontal" android:text="翻译" android:textColor="#E8FFFFFF" android:textSize="9sp" />
                 </LinearLayout>
             </LinearLayout>
@@ -182,18 +182,16 @@
                     <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:contentDescription="社区" android:src="@drawable/ic_home_community" />
                 </FrameLayout>
 
-                <TextView
+                <FrameLayout
                     android:id="@+id/homeNavSettings"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
                     android:layout_marginStart="7dp"
                     android:background="@drawable/bg_home_glass"
                     android:clickable="true"
-                    android:focusable="true"
-                    android:gravity="center"
-                    android:text="⚙"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="18sp" />
+                    android:focusable="true">
+                    <ImageView android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="center" android:contentDescription="设置" android:src="@drawable/ic_nav_settings" />
+                </FrameLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -266,9 +264,20 @@
                         </LinearLayout>
                     </LinearLayout>
 
-                    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:orientation="vertical" android:padding="8dp">
-                        <TextView android:layout_width="match_parent" android:layout_height="16dp" android:gravity="center_vertical" android:text="▣ 最新动态" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
-                        <TextView android:id="@+id/homeRecentActivity" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="4dp" android:layout_weight="1" android:gravity="center_vertical" android:lineSpacingExtra="2dp" android:maxLines="4" android:text="欢迎来到 YukiHub\n从游戏库开始整理你的游戏收藏吧。" android:textColor="#E8FFFFFF" android:textSize="9sp" />
+                    <LinearLayout android:id="@+id/homeNewsCard" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:orientation="vertical" android:padding="8dp">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="16dp" android:gravity="center_vertical" android:orientation="horizontal">
+                            <TextView android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center_vertical" android:text="◉ Galgame 资讯" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homeNewsRefresh" android:layout_width="32dp" android:layout_height="match_parent" android:clickable="true" android:focusable="true" android:contentDescription="刷新资讯" android:gravity="center" android:text="↻" android:textColor="#B3FFFFFF" android:textSize="12sp" />
+                        </LinearLayout>
+                        <FrameLayout android:id="@+id/homeNewsMedia" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="4dp" android:layout_weight="1">
+                            <ImageView android:id="@+id/homeNewsBanner" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="资讯题图" android:scaleType="centerCrop" android:visibility="gone" />
+                            <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_home_news_overlay" />
+                            <TextView android:id="@+id/homeNewsLoading" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="正在获取资讯…" android:textColor="#B3FFFFFF" android:textSize="9sp" />
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom" android:orientation="vertical" android:paddingLeft="10dp" android:paddingRight="10dp" android:paddingBottom="6dp">
+                                <TextView android:id="@+id/homeNewsTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="2" android:text="" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                                <LinearLayout android:id="@+id/homeNewsDots" android:layout_width="match_parent" android:layout_height="8dp" android:layout_marginTop="2dp" android:gravity="center" android:orientation="horizontal" />
+                            </LinearLayout>
+                        </FrameLayout>
                     </LinearLayout>
                 </LinearLayout>
             </LinearLayout>

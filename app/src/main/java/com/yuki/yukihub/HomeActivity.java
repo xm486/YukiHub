@@ -81,7 +81,11 @@ public class HomeActivity extends AppCompatActivity {
     private TextView gameCount;
     private TextView completedCount;
     private TextView playingCount;
-    private TextView recentActivity;
+    private ImageView homeNewsBanner;
+    private TextView homeNewsTitle;
+    private TextView homeNewsLoading;
+    private LinearLayout homeNewsDots;
+    private TextView homeNewsRefresh;
     private final List<Game> carouselGames = new ArrayList<>();
     private final Handler carouselHandler = new Handler(Looper.getMainLooper());
     private int carouselIndex = 0;
@@ -183,6 +187,7 @@ public class HomeActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         carouselHandler.removeCallbacks(carouselRunnable);
+        newsCarouselHandler.removeCallbacks(newsCarouselRunnable);
         // 释放本页心跳持有；前台服务若在跑会继续保活
         if (presenceManager != null && homeHeartbeatHeld) {
             presenceManager.releaseHeartbeat();
@@ -194,6 +199,7 @@ public class HomeActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         carouselHandler.removeCallbacksAndMessages(null);
+        newsCarouselHandler.removeCallbacksAndMessages(null);
         if (presenceManager != null && homeHeartbeatHeld) {
             presenceManager.releaseHeartbeat();
             homeHeartbeatHeld = false;
@@ -215,7 +221,23 @@ public class HomeActivity extends AppCompatActivity {
         gameCount = findViewById(R.id.homeGameCount);
         completedCount = findViewById(R.id.homeCompletedCount);
         playingCount = findViewById(R.id.homePlayingCount);
-        recentActivity = findViewById(R.id.homeRecentActivity);
+        homeNewsBanner = findViewById(R.id.homeNewsBanner);
+        homeNewsTitle = findViewById(R.id.homeNewsTitle);
+        homeNewsLoading = findViewById(R.id.homeNewsLoading);
+        homeNewsDots = findViewById(R.id.homeNewsDots);
+        homeNewsRefresh = findViewById(R.id.homeNewsRefresh);
+
+        // 题图区四角圆角裁切（画框式）。遮罩用无圆角版 bg_home_news_overlay：
+        // 自带圆角的遮罩会在图片裁切角留下一小瓣未遮亮的月牙，直角版罩满裁切区
+        android.view.View newsMedia = findViewById(R.id.homeNewsMedia);
+        newsMedia.setClipToOutline(true);
+        newsMedia.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(android.view.View view, android.graphics.Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(12));
+            }
+        });
+        setupNewsSwipe(newsMedia);
 
         refreshProfileHeader();
     }
@@ -783,6 +805,59 @@ public class HomeActivity extends AppCompatActivity {
         showCarouselGame(carouselIndex, true);
     }
 
+    /** 资讯轮播手势：与 setupHeroSwipe 同一套手感（视差/慢滑/触觉反馈/按下暂停），单击改为打开详情。 */
+    private void setupNewsSwipe(View newsCard) {
+        if (newsCard == null) return;
+        newsCard.setClickable(true);
+        newsCard.setOnClickListener(view -> {
+            touch(view);
+            if (newsIndex >= 0 && newsIndex < newsItems.size()) openNewsItem(newsItems.get(newsIndex));
+        });
+        final float[] downX = {0f};
+        final float[] downY = {0f};
+        final boolean[] moved = {false};
+        newsCard.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX[0] = event.getX();
+                    downY[0] = event.getY();
+                    moved[0] = false;
+                    newsCarouselHandler.removeCallbacks(newsCarouselRunnable);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float moveX = event.getX() - downX[0];
+                    float moveY = event.getY() - downY[0];
+                    if (Math.abs(moveX) > dp(8) || Math.abs(moveY) > dp(8)) moved[0] = true;
+                    if (Math.abs(moveX) > Math.abs(moveY)) {
+                        view.setTranslationX(Math.max(-dp(24), Math.min(dp(24), moveX * 0.12f)));
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    float deltaX = event.getX() - downX[0];
+                    float deltaY = event.getY() - downY[0];
+                    view.animate().translationX(0f).setDuration(140).start();
+                    boolean horizontalSwipe = newsItems.size() > 1
+                            && Math.abs(deltaX) >= dp(42)
+                            && Math.abs(deltaX) > Math.abs(deltaY) * 1.2f;
+                    if (horizontalSwipe) {
+                        int direction = deltaX < 0 ? 1 : -1;
+                        showNewsItem((newsIndex + direction + newsItems.size()) % newsItems.size(), true);
+                        try { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); } catch (Throwable ignored) { }
+                    } else if (!moved[0] && Math.abs(deltaX) < dp(12) && Math.abs(deltaY) < dp(12)) {
+                        view.performClick();
+                    }
+                    startNewsCarousel();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    view.animate().translationX(0f).setDuration(140).start();
+                    startNewsCarousel();
+                    return true;
+                default:
+                    return true;
+            }
+        });
+    }
+
     private void restartCarouselTimer() {
         carouselHandler.removeCallbacks(carouselRunnable);
         if (carouselGames.size() > 1) carouselHandler.postDelayed(carouselRunnable, 5000L);
@@ -953,6 +1028,7 @@ public class HomeActivity extends AppCompatActivity {
         setupCarousel(games);
         bindQuickGames(games);
         bindRecentActivity();
+        loadGalgameNews();
     }
 
     private static final long MIN_PLAY_SESSION_MS = 0L;
@@ -1397,23 +1473,351 @@ public class HomeActivity extends AppCompatActivity {
         return add;
     }
 
+    // ======================== Galgame 资讯（NextMoe /v2/news，免密钥，客户端直连） ========================
+
+    private static final String NEWS_API_URL = "https://api.nextmoe.dev/v2/news";
+    private static final String NEWS_CACHE_FILE = "home_news_cache.json";
+    private static final long NEWS_CACHE_TTL_MS = 2L * 60L * 60L * 1000L; // 2 小时
+    private static final int NEWS_ITEM_COUNT = 6;
+    private static final long NEWS_CAROUSEL_INTERVAL_MS = 5000L;
+    private boolean newsLoadInFlight = false;
+    private final List<NewsItem> newsItems = new ArrayList<>();
+    private int newsIndex = 0;
+    private String newsImageRequest = "";
+    private final Handler newsCarouselHandler = new Handler(Looper.getMainLooper());
+    private final Runnable newsCarouselRunnable = new Runnable() {
+        @Override public void run() {
+            if (newsItems.size() > 1) {
+                showNewsItem((newsIndex + 1) % newsItems.size(), true);
+                newsCarouselHandler.postDelayed(this, NEWS_CAROUSEL_INTERVAL_MS);
+            }
+        }
+    };
+
+    /** 一条首页资讯。banner 为题图（当前源覆盖率 100%，仍做空值兜底）。 */
+    private static class NewsItem {
+        String title = "";
+        String summary = "";
+        String bannerUrl = "";
+        String sourceUrl = "";
+        String attribution = "";
+        String publishedAt = "";
+    }
+
     private void bindRecentActivity() {
+        homeNewsRefresh.setOnClickListener(v -> {
+            touch(v);
+            loadGalgameNews();
+        });
+        // 图/标题的点击统一走容器 GestureDetector（见 bindViews），此处不再单独绑定
+        // 冷启动优先用新鲜缓存（2h TTL）：不发请求，省匿名配额；过期/缺失才联网刷新
+        List<NewsItem> cached = readNewsCache(true);
+        if (cached != null && !cached.isEmpty()) {
+            renderNews(cached);
+            return;
+        }
+        homeNewsLoading.setVisibility(View.VISIBLE);
+        loadGalgameNews();
+    }
+
+    private void startNewsCarousel() {
+        newsCarouselHandler.removeCallbacks(newsCarouselRunnable);
+        if (newsItems.size() > 1) newsCarouselHandler.postDelayed(newsCarouselRunnable, NEWS_CAROUSEL_INTERVAL_MS);
+    }
+
+    private void loadGalgameNews() {
+        if (newsLoadInFlight) return;
+        newsLoadInFlight = true;
+        homeNewsRefresh.setText("…");
+        new Thread(() -> {
+            List<NewsItem> items = null;
+            String error = null;
+            try {
+                items = fetchNewsFromApi();
+            } catch (Throwable t) {
+                error = t.getMessage() == null ? "网络异常" : t.getMessage();
+            }
+            final List<NewsItem> fetched = items;
+            final boolean timedOut = "TIMED_OUT".equals(error);
+            runOnUiThread(() -> {
+                newsLoadInFlight = false;
+                homeNewsRefresh.setText("↻");
+                if (fetched != null && !fetched.isEmpty()) {
+                    writeNewsCache(fetched);
+                    renderNews(fetched);
+                } else {
+                    List<NewsItem> stale = readNewsCache(false);
+                    if (stale != null && !stale.isEmpty()) {
+                        renderNews(stale);
+                    } else {
+                        homeNewsLoading.setVisibility(View.VISIBLE);
+                        homeNewsLoading.setText(timedOut ? "资讯加载较慢，稍后再试" : "资讯获取失败，点 ↻ 重试");
+                        homeNewsBanner.setVisibility(View.GONE);
+                        homeNewsTitle.setText("");
+                        buildNewsDots();
+                    }
+                }
+            });
+        }, "yukihub-news").start();
+    }
+
+    /** 匿名直连 NextMoe。任何错误（429/限流/断网）都不该打爆首页，超时单独识别。 */
+    private List<NewsItem> fetchNewsFromApi() throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(
+                NEWS_API_URL + "?limit=" + NEWS_ITEM_COUNT + "&nsfw=true").openConnection();
         try {
-            List<GameRepository.PlayActivity> activities = repository.getRecentPlayActivities(3);
-            if (activities == null || activities.isEmpty()) {
-                recentActivity.setText("欢迎来到 YukiHub\n从游戏库开始整理你的游戏收藏吧。");
-                return;
+            conn.setConnectTimeout(6000);
+            conn.setReadTimeout(9000);
+            conn.setRequestProperty("Accept", "application/json");
+            int code = conn.getResponseCode();
+            if (code != 200) throw new RuntimeException("HTTP " + code);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            try (InputStream in = conn.getInputStream()) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
             }
-            StringBuilder text = new StringBuilder();
-            for (int i = 0; i < activities.size(); i++) {
-                GameRepository.PlayActivity item = activities.get(i);
-                if (i > 0) text.append('\n');
-                text.append("▶ 《").append(empty(item.gameTitle, "未命名游戏")).append("》 ")
-                        .append(formatDuration(item.duration));
+            return parseNewsJson(bos.toString("UTF-8"));
+        } catch (java.net.SocketTimeoutException e) {
+            throw new RuntimeException("TIMED_OUT");
+        } finally {
+            try { conn.disconnect(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** 无信封集合：{ object:"list", items:[{ id, title, summary, source:{attribution}, source_url, published_at }] }。 */
+    private List<NewsItem> parseNewsJson(String json) throws Exception {
+        List<NewsItem> out = new ArrayList<>();
+        org.json.JSONObject root = new org.json.JSONObject(json);
+        org.json.JSONArray items = root.optJSONArray("items");
+        if (items == null) return out;
+        for (int i = 0; i < items.length() && out.size() < NEWS_ITEM_COUNT; i++) {
+            org.json.JSONObject o = items.optJSONObject(i);
+            if (o == null) continue;
+            NewsItem item = new NewsItem();
+            item.title = o.optString("title", "").trim();
+            if (item.title.isEmpty()) continue; // 没标题的没法点，跳过
+            item.summary = o.optString("summary", "").trim();
+            org.json.JSONObject banner = o.optJSONObject("banner");
+            if (banner != null) item.bannerUrl = banner.optString("url", "").trim();
+            item.sourceUrl = o.optString("source_url", "").trim();
+            org.json.JSONObject source = o.optJSONObject("source");
+            if (source != null) item.attribution = source.optString("attribution", "").trim();
+            item.publishedAt = o.optString("published_at", "").trim();
+            out.add(item);
+        }
+        return out;
+    }
+
+    private void renderNews(List<NewsItem> items) {
+        newsItems.clear();
+        for (int i = 0; i < items.size() && i < NEWS_ITEM_COUNT; i++) newsItems.add(items.get(i));
+        homeNewsLoading.setVisibility(View.GONE);
+        newsIndex = 0;
+        showNewsItem(0, false);
+        startNewsCarousel();
+    }
+
+    private void showNewsItem(int index, boolean animate) {
+        if (index < 0 || index >= newsItems.size()) return;
+        NewsItem item = newsItems.get(index);
+        newsIndex = index;
+        buildNewsDots();
+        if (animate) {
+            homeNewsBanner.animate().alpha(0.25f).setDuration(120).withEndAction(() -> {
+                bindNewsContent(item);
+                homeNewsBanner.animate().alpha(1f).setDuration(220).start();
+            }).start();
+        } else {
+            bindNewsContent(item);
+            homeNewsBanner.setAlpha(1f);
+        }
+    }
+
+    private void bindNewsContent(NewsItem item) {
+        homeNewsTitle.setText(item.title);
+        if (item.bannerUrl == null || item.bannerUrl.isEmpty()) {
+            // 无题图兜底：隐藏图片层，遮罩下的深色底仍在，标题照常可读
+            newsImageRequest = "";
+            homeNewsBanner.setVisibility(View.GONE);
+            return;
+        }
+        loadNewsBanner(item.bannerUrl);
+    }
+
+    private void buildNewsDots() {
+        homeNewsDots.removeAllViews();
+        for (int i = 0; i < newsItems.size(); i++) {
+            final int index = i;
+            View dot = new View(this);
+            dot.setBackground(dotDrawable(i == newsIndex));
+            dot.setOnClickListener(v -> {
+                touch(v);
+                showNewsItem(index, true);
+                startNewsCarousel();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(i == newsIndex ? 12 : 5), dp(4));
+            lp.setMargins(dp(2), 0, dp(2), 0);
+            homeNewsDots.addView(dot, lp);
+        }
+    }
+
+    /** 复用 hero 轮播的磁盘缓存模式（同目录，news_ 前缀区分）。 */
+    private void loadNewsBanner(String url) {
+        final String request = url;
+        newsImageRequest = request;
+        homeNewsBanner.setVisibility(View.VISIBLE);
+        new Thread(() -> {
+            Bitmap bitmap = null;
+            try {
+                File dir = new File(getCacheDir(), "home_carousel");
+                if (!dir.exists()) dir.mkdirs();
+                File file = new File(dir, "news_" + Integer.toHexString(url.hashCode()));
+                if (file.exists() && file.length() > 0) bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+                if (bitmap == null) {
+                    HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+                    connection.setConnectTimeout(6000);
+                    connection.setReadTimeout(9000);
+                    connection.setInstanceFollowRedirects(true);
+                    connection.setRequestProperty("User-Agent", "YukiHub/1.0");
+                    try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(file)) {
+                        byte[] buffer = new byte[8192];
+                        int count;
+                        while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                    } finally {
+                        connection.disconnect();
+                    }
+                    bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+                }
+            } catch (Throwable ignored) { }
+            final Bitmap result = bitmap;
+            runOnUiThread(() -> {
+                if (!request.equals(newsImageRequest)) return;
+                if (result != null) {
+                    homeNewsBanner.setImageBitmap(result);
+                    homeNewsBanner.setVisibility(View.VISIBLE);
+                    // 揭示动画：106% 缩放 + 全透明起步，减速曲线落定（缓存命中同样播放，节奏一致）
+                    homeNewsBanner.setAlpha(0f);
+                    homeNewsBanner.setScaleX(1.06f);
+                    homeNewsBanner.setScaleY(1.06f);
+                    homeNewsBanner.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                            .setDuration(320L)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
+                            .start();
+                } else {
+                    homeNewsBanner.setVisibility(View.GONE);
+                }
+            });
+        }, "yukihub-news-banner").start();
+    }
+
+    /** 详情弹窗：标题 + 摘要 + 日期/署名（NextMoe 要求引用资讯须标注来源）+ 阅读原文。 */
+    private void openNewsItem(NewsItem item) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(18);
+        box.setPadding(pad, dp(4), pad, dp(2));
+
+        TextView summary = new TextView(this);
+        summary.setText(item.summary.isEmpty() ? "暂无摘要。" : item.summary);
+        summary.setTextSize(13f);
+        summary.setTextColor(0xE8FFFFFF);
+        summary.setLineSpacing(dp(2), 1.0f);
+        box.addView(summary);
+
+        StringBuilder metaText = new StringBuilder();
+        if (item.publishedAt != null && item.publishedAt.length() >= 10) {
+            metaText.append("发布于 ").append(item.publishedAt.substring(0, 10));
+        }
+        if (item.attribution != null && !item.attribution.isEmpty()) {
+            if (metaText.length() > 0) metaText.append('\n');
+            metaText.append(item.attribution);
+        }
+        if (metaText.length() == 0) metaText.append("via NextMoe·未萌");
+        TextView meta = new TextView(this);
+        meta.setText(metaText.toString());
+        meta.setTextSize(10f);
+        meta.setTextColor(0x8CFFFFFF);
+        meta.setPadding(0, dp(12), 0, 0);
+        box.addView(meta, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        androidx.appcompat.app.AlertDialog.Builder builder = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(item.title)
+                .setView(box)
+                .setPositiveButton("关闭", null);
+        if (item.sourceUrl != null && !item.sourceUrl.isEmpty()) {
+            builder.setNegativeButton("阅读原文", (d, w) -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(item.sourceUrl)));
+                } catch (Throwable t) {
+                    Toast.makeText(this, "无法打开资讯原文，请检查网络", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+        styleDialogDark(builder.show());
+    }
+
+    private File newsCacheFile() {
+        return new File(getCacheDir(), NEWS_CACHE_FILE);
+    }
+
+    private void writeNewsCache(List<NewsItem> items) {
+        try {
+            org.json.JSONObject root = new org.json.JSONObject();
+            root.put("fetched_at", System.currentTimeMillis());
+            org.json.JSONArray arr = new org.json.JSONArray();
+            for (NewsItem item : items) {
+                org.json.JSONObject o = new org.json.JSONObject();
+                o.put("title", item.title);
+                o.put("summary", item.summary);
+                o.put("bannerUrl", item.bannerUrl);
+                o.put("source_url", item.sourceUrl);
+                o.put("attribution", item.attribution);
+                o.put("published_at", item.publishedAt);
+                arr.put(o);
             }
-            recentActivity.setText(text.toString());
+            root.put("items", arr);
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(newsCacheFile())) {
+                fos.write(root.toString().getBytes("UTF-8"));
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    /** freshOnly=true 时过期返回 null；false 时过期缓存也回（离线兜底）。 */
+    private List<NewsItem> readNewsCache(boolean freshOnly) {
+        try {
+            File file = newsCacheFile();
+            if (!file.exists()) return null;
+            byte[] data = new byte[(int) file.length()];
+            try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+                int off = 0;
+                while (off < data.length) {
+                    int n = fis.read(data, off, data.length - off);
+                    if (n < 0) break;
+                    off += n;
+                }
+            }
+            org.json.JSONObject root = new org.json.JSONObject(new String(data, "UTF-8"));
+            if (freshOnly && System.currentTimeMillis() - root.optLong("fetched_at", 0) > NEWS_CACHE_TTL_MS) return null;
+            org.json.JSONArray arr = root.optJSONArray("items");
+            if (arr == null) return null;
+            List<NewsItem> out = new ArrayList<>();
+            for (int i = 0; i < arr.length() && out.size() < NEWS_ITEM_COUNT; i++) {
+                org.json.JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                NewsItem item = new NewsItem();
+                item.title = o.optString("title", "");
+                item.summary = o.optString("summary", "");
+                item.bannerUrl = o.optString("bannerUrl", "");
+                item.sourceUrl = o.optString("source_url", "");
+                item.attribution = o.optString("attribution", "");
+                item.publishedAt = o.optString("published_at", "");
+                if (!item.title.isEmpty()) out.add(item);
+            }
+            return out;
         } catch (Throwable ignored) {
-            recentActivity.setText("游戏记录已准备就绪\n进入游戏库查看完整动态。");
+            return null;
         }
     }
 
