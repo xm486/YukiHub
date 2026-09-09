@@ -283,10 +283,10 @@
                 android:background="@drawable/bg_input" />
 
             <FrameLayout android:id="@+id/btnScan" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="8dp" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless">
-                <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="⌕ 扫描" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tvScanLabel" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="扫描" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
                 <ImageView android:id="@+id/ivScanLoading" android:layout_width="11dp" android:layout_height="11dp" android:layout_gravity="center_vertical|end" android:layout_marginEnd="4dp" android:src="@android:drawable/ic_popup_sync" android:tint="#EAF7FF" android:visibility="gone" />
             </FrameLayout>
-            <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="＋ 添加" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
+            <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="添加" android:textColor="#000000" android:textSize="9sp" android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvTitleTop"
@@ -343,7 +343,7 @@
                     android:gravity="center_vertical">
 
                     <TextView android:id="@+id/filterAll" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="全部" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:clickable="true" android:focusable="true" />
-                    <TextView android:id="@+id/filterFavorite" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="♡ 收藏" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
+                    <TextView android:id="@+id/filterFavorite" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="收藏" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/filterRecent" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="本地游戏" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/filterStatus" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="▸ 游玩状态" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
                     <TextView android:id="@+id/filterDeveloper" android:layout_width="wrap_content" android:minWidth="56dp" android:layout_height="28dp" android:gravity="center" android:text="▸ 开发商" android:textColor="@color/yh_text" android:textSize="8sp" android:textStyle="bold" android:background="@drawable/bg_input" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:paddingStart="10dp" android:paddingEnd="10dp" android:layout_marginStart="4dp" android:clickable="true" android:focusable="true" />
@@ -364,7 +364,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="28dp"
                     android:gravity="center_vertical"
-                    android:text="🕐 00:00"
+                    android:text="00:00"
                     android:textColor="@color/yh_text"
                     android:textSize="9sp"
                     android:fontFamily="sans-serif-medium"
@@ -378,7 +378,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="28dp"
                     android:gravity="center_vertical"
-                    android:text="🔋100%"
+                    android:text="100%"
                     android:textColor="@color/yh_text"
                     android:textSize="9sp"
                     android:textStyle="bold"

@@ -85,7 +85,7 @@ public class HomeActivity extends AppCompatActivity {
     private TextView homeNewsTitle;
     private TextView homeNewsLoading;
     private LinearLayout homeNewsDots;
-    private TextView homeNewsRefresh;
+    private ImageView homeNewsRefresh;
     private final List<Game> carouselGames = new ArrayList<>();
     private final Handler carouselHandler = new Handler(Looper.getMainLooper());
     private int carouselIndex = 0;
@@ -226,6 +226,12 @@ public class HomeActivity extends AppCompatActivity {
         homeNewsLoading = findViewById(R.id.homeNewsLoading);
         homeNewsDots = findViewById(R.id.homeNewsDots);
         homeNewsRefresh = findViewById(R.id.homeNewsRefresh);
+        // hero 主按钮的播放图标（布局里只留文字，图标在此内联，保证与文字紧贴居中）
+        View heroActionView = findViewById(R.id.homeHeroAction);
+        if (heroActionView instanceof TextView) {
+            com.yuki.yukihub.util.IconedText.set((TextView) heroActionView,
+                    R.drawable.ic_btn_play, " 继续游戏", 10f, 0xFFFFFFFF);
+        }
 
         // 题图区四角圆角裁切（画框式）。遮罩用无圆角版 bg_home_news_overlay：
         // 自带圆角的遮罩会在图片裁切角留下一小瓣未遮亮的月牙，直角版罩满裁切区
@@ -488,7 +494,7 @@ public class HomeActivity extends AppCompatActivity {
 
         String savedStartup = prefs == null ? "home" : prefs.getString("startup_page", "home");
         final String[] startupOptions = {"home", "library", "bigscreen"};
-        String[] startupLabels = {"🏠 首页（默认）", "🎮 游戏库", "🖥 大屏模式（敬请期待）"};
+        String[] startupLabels = {"首页（默认）", "游戏库", "大屏模式（敬请期待）"};
         final int[] startupChoice = {0};
         for (int i = 0; i < startupOptions.length; i++) {
             if (startupOptions[i].equals(savedStartup)) { startupChoice[0] = i; break; }
@@ -1021,9 +1027,9 @@ public class HomeActivity extends AppCompatActivity {
             else if ("playing".equals(game.playStatus)) playing++;
         }
         bindTodayPlayTime();
-        gameCount.setText("🎮 游戏库\n" + games.size() + " 款");
-        completedCount.setText("🏆 已玩过\n" + completed + " 个");
-        playingCount.setText("♡ 正在玩\n" + playing + " 个");
+        com.yuki.yukihub.util.IconedText.set(gameCount, R.drawable.ic_nav_library, " 游戏库\n" + games.size() + " 款", 10f, 0xFFFFFFFF);
+        com.yuki.yukihub.util.IconedText.set(completedCount, R.drawable.ic_st_trophy, " 已玩过\n" + completed + " 个", 10f, 0xFFFFFFFF);
+        com.yuki.yukihub.util.IconedText.set(playingCount, R.drawable.ic_st_heart, " 正在玩\n" + playing + " 个", 10f, 0xFFFFFFFF);
 
         setupCarousel(games);
         bindQuickGames(games);
@@ -1213,28 +1219,30 @@ public class HomeActivity extends AppCompatActivity {
             // 昨天 0:00 ~ 昨天 24:00（整天）
             long yesterday = sumDurations(repository.getPlayDurationsBetween(
                     yesterdayStart.getTimeInMillis(), todayStart.getTimeInMillis() + 1L));
-            long difference = today - yesterday;
-
-            SpannableString styled;
+long difference = today - yesterday;
+            // 图标 + 文字用 SpannableStringBuilder 拼，保留趋势着色
+            CharSequence head = com.yuki.yukihub.util.IconedText.build(
+                    this, R.drawable.ic_nav_clock, " 今日游玩\n", 10f, 0xFFFFFFFF);
+            android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder(head);
             if (today <= 0L && yesterday <= 0L) {
-                styled = new SpannableString("◷ 今日游玩\n0m\n今天还没开始玩哦");
+                sb.append("0m\n今天还没开始玩哦");
             } else if (yesterday <= 0L) {
-                styled = new SpannableString("◷ 今日游玩\n" + formatDuration(today) + "\n昨日 0m · 开始积累吧");
+                sb.append(formatDuration(today)).append("\n昨日 0m · 开始积累吧");
             } else {
                 String icon = difference > 0 ? "▲" : difference < 0 ? "▼" : "—";
                 String trend = icon + " " + formatCompactDuration(Math.abs(difference)) + " 较昨日";
-                String content = "◷ 今日游玩\n" + formatDuration(today) + "\n" + trend;
-                styled = new SpannableString(content);
-                int start = content.lastIndexOf(trend);
+                sb.append(formatDuration(today)).append("\n");
+                int start = sb.length();
+                sb.append(trend);
                 int color = difference > 0 ? 0xFF44FF66 : difference < 0 ? 0xFFFF4444 : 0xFFAAAAAA;
-                if (start >= 0) styled.setSpan(new ForegroundColorSpan(color), start, content.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.setSpan(new ForegroundColorSpan(color), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            playTime.setText(styled);
+            playTime.setText(sb);
         } catch (Throwable ignored) {
-            playTime.setText("◷ 今日游玩\n0m\n— 暂无对比");
+            com.yuki.yukihub.util.IconedText.set(playTime, R.drawable.ic_nav_clock,
+                    " 今日游玩\n0m\n— 暂无对比", 10f, 0xFFFFFFFF);
         }
-    }
-
+}
     private long sumDurations(java.util.Map<String, Long> durations) {
         long total = 0L;
         if (durations == null) return total;
@@ -1434,7 +1442,7 @@ public class HomeActivity extends AppCompatActivity {
         card.addView(title, new LinearLayout.LayoutParams(dp(62), dp(14)));
 
         TextView button = new TextView(this);
-        button.setText("▶ 启动");
+        com.yuki.yukihub.util.IconedText.set(button, R.drawable.ic_btn_play, " 启动", 7f, Color.WHITE);
         button.setGravity(android.view.Gravity.CENTER);
         button.setTextColor(Color.WHITE);
         button.setTextSize(7);
@@ -1528,7 +1536,9 @@ public class HomeActivity extends AppCompatActivity {
     private void loadGalgameNews() {
         if (newsLoadInFlight) return;
         newsLoadInFlight = true;
-        homeNewsRefresh.setText("…");
+        // 刷新中：图标不变，用透明度表示进行中（避免 setText 抖动）
+        homeNewsRefresh.setAlpha(0.45f);
+        homeNewsRefresh.setEnabled(false);
         new Thread(() -> {
             List<NewsItem> items = null;
             String error = null;
@@ -1541,7 +1551,8 @@ public class HomeActivity extends AppCompatActivity {
             final boolean timedOut = "TIMED_OUT".equals(error);
             runOnUiThread(() -> {
                 newsLoadInFlight = false;
-                homeNewsRefresh.setText("↻");
+                homeNewsRefresh.setAlpha(1f);
+                homeNewsRefresh.setEnabled(true);
                 if (fetched != null && !fetched.isEmpty()) {
                     writeNewsCache(fetched);
                     renderNews(fetched);
@@ -1551,7 +1562,7 @@ public class HomeActivity extends AppCompatActivity {
                         renderNews(stale);
                     } else {
                         homeNewsLoading.setVisibility(View.VISIBLE);
-                        homeNewsLoading.setText(timedOut ? "资讯加载较慢，稍后再试" : "资讯获取失败，点 ↻ 重试");
+                        homeNewsLoading.setText(timedOut ? "资讯加载较慢，稍后再试" : "资讯获取失败，点右上角刷新重试");
                         homeNewsBanner.setVisibility(View.GONE);
                         homeNewsTitle.setText("");
                         buildNewsDots();

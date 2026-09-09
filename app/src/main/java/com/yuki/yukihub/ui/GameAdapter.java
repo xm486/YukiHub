@@ -422,35 +422,34 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         if (badge == null) return;
         String s = status == null ? "unplayed" : status;
         badge.setVisibility(View.VISIBLE);
-        if (themeActive) badge.setTextColor(0xFFE8EDF5);
-        else badge.setTextColor(badge.getContext().getResources().getColor(R.color.yh_text));
+        int badgeColor = themeActive ? 0xFFE8EDF5 : badge.getContext().getResources().getColor(R.color.yh_text);
+        badge.setTextColor(badgeColor);
 
-        String text;
         int themeBase;   // 主题模式下的底色来源
         int themeAlpha;  // 主题模式下的底色透明度
         int bgRes;       // 非主题模式下的背景资源
         if ("completed".equals(s)) {
-            text = "🏆玩过";
             themeBase = themeSecondaryColor; themeAlpha = 0x5A;
             bgRes = R.drawable.bg_status_completed;
         } else if ("playing".equals(s)) {
-            text = "🎮在玩";
             themeBase = themePrimaryColor; themeAlpha = 0x5A;
             bgRes = R.drawable.bg_status_playing;
         } else if ("onhold".equals(s)) {
-            text = "⏸搁置";
             themeBase = themePrimaryColor; themeAlpha = 0x38;
             bgRes = R.drawable.bg_status_onhold;
         } else if ("dropped".equals(s)) {
-            text = "🗑抛弃";
             themeBase = themeCard2Color; themeAlpha = 0x7A;
             bgRes = R.drawable.bg_status_dropped;
         } else {
-            text = "☆未玩";
             themeBase = themeCard2Color; themeAlpha = 0x5A;
             bgRes = R.drawable.bg_status_unplayed;
         }
-        badge.setText(text);
+        // 图标与文字同色，避免彩色 emoji 压在彩色药丸底上互相打架
+        com.yuki.yukihub.util.IconedText.set(badge,
+                com.yuki.yukihub.util.IconedText.drawableForStatus(s),
+                com.yuki.yukihub.util.IconedText.labelForStatus(s),
+                com.yuki.yukihub.util.IconedText.SIZE_BADGE,
+                badgeColor);
         if (themeActive) {
             GradientDrawable bg = new GradientDrawable();
             bg.setColor((themeAlpha << 24) | (themeBase & 0x00FFFFFF));

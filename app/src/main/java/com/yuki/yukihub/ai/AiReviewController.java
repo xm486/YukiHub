@@ -108,6 +108,7 @@ public class AiReviewController {
         VnMetadata anyCachedMetadata(long gameId);
         boolean usingYmgal();
         boolean usingHikarinagi();
+        boolean usingNextMoe();
         boolean usingBangumi();
         boolean usingBangumiMirror();
         String bangumiToken();
@@ -795,6 +796,12 @@ private VnMetadata lookupAiReviewMetadataOnline(Game game) {
             VnMetadata chosen = chooseAiMetadataCandidate(game.title, list);
             if (chosen != null) chosen = HikarinagiClient.getGalgame(chosen.id, chosen);
             if (chosen != null) delegate.metadataRepository().saveHikarinagi(game.id, chosen);
+            return chosen;
+        } else if (delegate.usingNextMoe()) {
+            List<VnMetadata> list = com.yuki.yukihub.nextmoe.NextMoeClient.searchCandidates(keyword, 3);
+            VnMetadata chosen = chooseAiMetadataCandidate(game.title, list);
+            if (chosen != null) chosen = com.yuki.yukihub.nextmoe.NextMoeClient.getWork(chosen.id, chosen);
+            if (chosen != null) delegate.metadataRepository().saveNextMoe(game.id, chosen);
             return chosen;
         } else if (delegate.usingBangumi()) {
             String token = delegate.bangumiToken();

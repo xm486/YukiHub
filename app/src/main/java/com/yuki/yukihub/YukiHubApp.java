@@ -24,6 +24,8 @@ public class YukiHubApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        // NextMoe 令牌存储：注入 ApplicationContext（Keystore 加密存储，主进程即可，无进程竞争）
+        com.yuki.yukihub.nextmoe.NextMoeAuthStore.init(this);
         // 跨进程点击桥：只在主进程注册接收端。
         // Artemis 游戏在 :artemis 进程，无障碍服务在主进程，
         // 游戏进程发广播、主进程执行手势。

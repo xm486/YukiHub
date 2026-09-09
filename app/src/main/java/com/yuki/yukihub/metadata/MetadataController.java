@@ -40,6 +40,7 @@ public class MetadataController {
     public static final String SOURCE_BANGUMI_MIRROR = "bangumi_mirror";
     public static final String SOURCE_YMGAL = "ymgal";
     public static final String SOURCE_HIKARINAGI = "hikarinagi";
+    public static final String SOURCE_NEXTMOE = "nextmoe";
 
     public static final String KEY_METADATA_SOURCE = "metadata_source";
     public static final String KEY_VISIBLE_METADATA_SOURCE_PREFIX = "visible_metadata_source_";
@@ -155,16 +156,17 @@ public class MetadataController {
         if (SOURCE_BANGUMI_MIRROR.equals(source)) return "Bangumi镜像";
         if (SOURCE_YMGAL.equals(source)) return "月幕Gal";
         if (SOURCE_HIKARINAGI.equals(source)) return "Hikarinagi";
+        if (SOURCE_NEXTMOE.equals(source)) return "NextMoe";
         return "VNDB";
     }
 
     public String normalizeMetadataSource(String source) {
-        if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source)) return source;
+        if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source)) return source;
         return SOURCE_VNDB;
     }
 
     public boolean isValidMetadataSource(String source) {
-        return SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source);
+        return SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source);
     }
 
     public String visibleMetadataSource(long gameId) {
@@ -188,6 +190,7 @@ public class MetadataController {
         String s = normalizeMetadataSource(source);
         if (SOURCE_YMGAL.equals(s)) return delegate.metadataRepository().getYmgal(gameId);
         if (SOURCE_HIKARINAGI.equals(s)) return delegate.metadataRepository().getHikarinagi(gameId);
+        if (SOURCE_NEXTMOE.equals(s)) return delegate.metadataRepository().getNextMoe(gameId);
         if (SOURCE_BANGUMI.equals(s) || SOURCE_BANGUMI_MIRROR.equals(s)) return delegate.metadataRepository().getBangumi(gameId);
         return delegate.metadataRepository().getVndb(gameId);
     }
@@ -208,6 +211,8 @@ public class MetadataController {
             if (y != null && sameMetadataIdentity(y, meta)) return SOURCE_YMGAL;
             VnMetadata h = delegate.metadataRepository().getHikarinagi(gameId);
             if (h != null && sameMetadataIdentity(h, meta)) return SOURCE_HIKARINAGI;
+            VnMetadata n = delegate.metadataRepository().getNextMoe(gameId);
+            if (n != null && sameMetadataIdentity(n, meta)) return SOURCE_NEXTMOE;
         } catch (Throwable ignored) { }
         return "";
     }
@@ -251,6 +256,10 @@ public class MetadataController {
         return SOURCE_HIKARINAGI.equals(metadataSource());
     }
 
+    public boolean usingNextMoe() {
+        return SOURCE_NEXTMOE.equals(metadataSource());
+    }
+
     public String bangumiToken() {
         return delegate.prefs() == null ? "" : delegate.prefs().getString(KEY_BANGUMI_TOKEN, "");
     }
@@ -286,6 +295,7 @@ public class MetadataController {
     public void fetchCurrentSourceMetadata(Game game, boolean forceRefresh) {
         if (usingYmgal()) fetchYmgalMetadata(game, forceRefresh);
         else if (usingHikarinagi()) fetchHikarinagiMetadata(game, forceRefresh);
+        else if (usingNextMoe()) fetchNextMoeMetadata(game, forceRefresh);
         else if (usingBangumi()) fetchBangumiMetadata(game, forceRefresh);
         else fetchVndbMetadata(game, forceRefresh);
     }
@@ -303,6 +313,8 @@ public class MetadataController {
         meta = delegate.metadataRepository().getYmgal(gameId);
         if (meta != null) return meta;
         meta = delegate.metadataRepository().getHikarinagi(gameId);
+        if (meta != null) return meta;
+        meta = delegate.metadataRepository().getNextMoe(gameId);
         if (meta != null) return meta;
         return null;
     }
@@ -327,6 +339,10 @@ public class MetadataController {
             meta = delegate.metadataRepository().getHikarinagi(gameId);
             if (meta != null) return meta;
         }
+        if (!SOURCE_NEXTMOE.equals(current)) {
+            meta = delegate.metadataRepository().getNextMoe(gameId);
+            if (meta != null) return meta;
+        }
         return null;
     }
 
@@ -337,6 +353,7 @@ public class MetadataController {
         String source = metadataSource();
         if (SOURCE_YMGAL.equals(source)) delegate.metadataRepository().saveYmgal(gameId, meta);
         else if (SOURCE_HIKARINAGI.equals(source)) delegate.metadataRepository().saveHikarinagi(gameId, meta);
+        else if (SOURCE_NEXTMOE.equals(source)) delegate.metadataRepository().saveNextMoe(gameId, meta);
         else if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) delegate.metadataRepository().saveBangumi(gameId, meta);
         else delegate.metadataRepository().saveVndb(gameId, meta);
         setVisibleMetadataSource(gameId, source);
@@ -365,6 +382,7 @@ public class MetadataController {
         String s = normalizeMetadataSource(source);
         if (SOURCE_YMGAL.equals(s)) delegate.metadataRepository().saveYmgal(gameId, meta);
         else if (SOURCE_HIKARINAGI.equals(s)) delegate.metadataRepository().saveHikarinagi(gameId, meta);
+        else if (SOURCE_NEXTMOE.equals(s)) delegate.metadataRepository().saveNextMoe(gameId, meta);
         else if (SOURCE_BANGUMI.equals(s) || SOURCE_BANGUMI_MIRROR.equals(s)) delegate.metadataRepository().saveBangumi(gameId, meta);
         else delegate.metadataRepository().saveVndb(gameId, meta);
     }
@@ -383,6 +401,7 @@ public class MetadataController {
         if (delegate.metadataRepository() == null || gameId <= 0) return;
         if (usingYmgal()) delegate.metadataRepository().clearYmgal(gameId);
         else if (usingHikarinagi()) delegate.metadataRepository().clearHikarinagi(gameId);
+        else if (usingNextMoe()) delegate.metadataRepository().clearNextMoe(gameId);
         else if (usingBangumi()) delegate.metadataRepository().clearBangumi(gameId);
         else delegate.metadataRepository().clearVndb(gameId);
         clearVisibleMetadataSource(gameId);
@@ -392,6 +411,7 @@ public class MetadataController {
         if (delegate.metadataRepository() == null || gameId <= 0) return null;
         if (usingYmgal()) return delegate.metadataRepository().getYmgal(gameId);
         if (usingHikarinagi()) return delegate.metadataRepository().getHikarinagi(gameId);
+        if (usingNextMoe()) return delegate.metadataRepository().getNextMoe(gameId);
         if (usingBangumi()) return delegate.metadataRepository().getBangumi(gameId);
         return delegate.metadataRepository().getVndb(gameId);
     }
@@ -620,11 +640,145 @@ public class MetadataController {
         });
     }
 
+    // ======================== NextMoe ========================
+
+    public void fetchNextMoeMetadata(Game game, boolean forceRefresh) {
+        if (game == null || game.title == null || game.title.trim().isEmpty()) return;
+        final long id = game.id;
+        final String keyword = buildMetadataSearchKeyword(game.title);
+        VnMetadata cached = delegate.metadataRepository() == null || forceRefresh ? null : delegate.metadataRepository().getNextMoe(id);
+        if (cached != null) {
+            setVisibleMetadataSource(id, SOURCE_NEXTMOE);
+            applyVndbMetadata(cached, game);
+            return;
+        }
+        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
+            delegate.setSideDescription("NextMoe 尚未连接。\n\n请在「设置 → 右侧资料源」下方点击「连接 NextMoe 账号」，\n用鲲站账号授权后即可使用本源（按你的账号计配额）。");
+            return;
+        }
+        delegate.setSideDescription("正在从 NextMoe 获取资料…");
+        AppExecutors.runOnIo(() -> {
+            try {
+                List<VnMetadata> data = com.yuki.yukihub.nextmoe.NextMoeClient.searchCandidates(keyword, 5);
+                if (!isActivityAlive()) return;
+
+                delegate.runOnUiThread(() -> {
+                    if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
+                    if (data == null || data.isEmpty()) {
+                        applyVndbMetadata(null, game);
+                    } else if (data.size() == 1 || isConfidentMatch(game.title, data.get(0))) {
+                        fetchAndApplyNextMoeDetail(game, data.get(0));
+                    } else {
+                        showVndbCandidateDialog(game, data);
+                    }
+                });
+            } catch (Throwable t) {
+                Log.w("YukiHub", "NextMoe metadata failed", t);
+                if (!isActivityAlive()) return;
+
+                delegate.runOnUiThread(() -> {
+                    if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
+                    String msg = t.getMessage() == null ? "" : t.getMessage();
+                    String hint = msg.contains("尚未连接") ? "NextMoe 尚未连接，请在设置中授权。" : "NextMoe 获取失败。请检查网络或稍后重试。\n\n" + msg;
+                    delegate.setSideDescription(hint);
+                });
+            }
+        });
+    }
+
+    public void fetchAndApplyNextMoeDetail(Game game, VnMetadata candidate) {
+        if (game == null || candidate == null) return;
+        final long id = game.id;
+        delegate.setSideDescription("正在从 NextMoe 获取详情…");
+        AppExecutors.runOnIo(() -> {
+            try {
+                VnMetadata full = com.yuki.yukihub.nextmoe.NextMoeClient.getWork(candidate.id, candidate);
+                if (!isActivityAlive()) return;
+
+                delegate.runOnUiThread(() -> {
+                    if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
+                    // 详情拉取失败时：已有完整缓存则保留（避免好数据被搜索摘要降级覆盖），否则才存摘要兜底
+                    if (delegate.metadataRepository() != null) saveCurrentSourceMetadata(id, full == null ? candidate : full);
+                    applyVndbMetadata(full == null ? candidate : full, game);
+                });
+            } catch (Throwable t) {
+                Log.w("YukiHub", "NextMoe detail failed", t);
+                if (!isActivityAlive()) return;
+
+                delegate.runOnUiThread(() -> {
+                    if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
+                    VnMetadata existing = delegate.metadataRepository() == null ? null : currentSourceMetadata(id);
+                    if (existing != null && isMetadataComplete(existing)) {
+                        applyVndbMetadata(existing, game);
+                        delegate.showToast("NextMoe 详情获取失败，已保留原有资料", Toast.LENGTH_SHORT);
+                    } else {
+                        if (delegate.metadataRepository() != null) saveCurrentSourceMetadata(id, candidate);
+                        applyVndbMetadata(candidate, game);
+                        delegate.showToast("NextMoe 详情获取失败，已使用搜索结果", Toast.LENGTH_SHORT);
+                    }
+                });
+            }
+        });
+    }
+
+    public void showCustomNextMoeSearchDialog(Game game) {
+        if (game == null) return;
+        android.app.Activity ctx = delegate.activity();
+        EditText input = new EditText(ctx);
+        input.setSingleLine(true);
+        input.setText(delegate.emptyText(game.title, ""));
+        input.setSelectAllOnFocus(true);
+        input.setHint("输入 NextMoe 搜索关键词");
+        input.setTextColor(ctx.getResources().getColor(R.color.yh_text));
+        input.setHintTextColor(ctx.getResources().getColor(R.color.yh_text_muted));
+        input.setBackgroundResource(R.drawable.bg_input);
+        input.setPadding(delegate.dp(12), 0, delegate.dp(12), 0);
+        new AlertDialog.Builder(ctx)
+                .setTitle("自定义搜索 NextMoe")
+                .setView(input)
+                .setPositiveButton("搜索", (d, w) -> {
+                    String keyword = input.getText() == null ? "" : input.getText().toString().trim();
+                    if (keyword.isEmpty()) { delegate.showToast("请输入搜索关键词", Toast.LENGTH_SHORT); return; }
+                    searchNextMoeWithKeyword(game, keyword);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    public void searchNextMoeWithKeyword(Game game, String keyword) {
+        if (game == null || keyword == null || keyword.trim().isEmpty()) return;
+        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
+            delegate.showToast("NextMoe 尚未连接，请在设置中授权", Toast.LENGTH_SHORT);
+            return;
+        }
+        delegate.setSideDescription("正在按自定义关键词搜索 NextMoe…");
+        AppExecutors.runOnIo(() -> {
+            try {
+                List<VnMetadata> data = com.yuki.yukihub.nextmoe.NextMoeClient.searchCandidates(keyword, 8);
+                if (!isActivityAlive()) return;
+
+                delegate.runOnUiThread(() -> {
+                    if (delegate.selectedGame() == null || delegate.selectedGame().id != game.id) return;
+                    if (data == null || data.isEmpty()) {
+                        delegate.showToast("没有匹配到 NextMoe 结果", Toast.LENGTH_SHORT);
+                        delegate.setSideDescription(delegate.emptyText(game.description, "NextMoe 暂未匹配到资料。"));
+                    } else {
+                        showVndbCandidateDialog(game, data);
+                    }
+                });
+            } catch (Throwable t) {
+                if (!isActivityAlive()) return;
+                delegate.runOnUiThread(() -> delegate.showToast("NextMoe 搜索失败：" + t.getMessage(), Toast.LENGTH_SHORT));
+            }
+        });
+    }
+
     // ======================== search & candidate dialogs ========================
 
     public void showCurrentSourceCustomSearchDialog(Game game) {
         if (usingYmgal()) showCustomYmgalSearchDialog(game);
         else if (usingHikarinagi()) showCustomHikarinagiSearchDialog(game);
+        else if (usingNextMoe()) showCustomNextMoeSearchDialog(game);
         else if (usingBangumi()) showCustomBangumiSearchDialog(game);
         else showCustomVndbSearchDialog(game);
     }
@@ -632,6 +786,7 @@ public class MetadataController {
     public void searchCurrentSourceWithKeyword(Game game, String keyword) {
         if (usingYmgal()) searchYmgalWithKeyword(game, keyword);
         else if (usingHikarinagi()) searchHikarinagiWithKeyword(game, keyword);
+        else if (usingNextMoe()) searchNextMoeWithKeyword(game, keyword);
         else if (usingBangumi()) searchBangumiWithKeyword(game, keyword);
         else searchVndbWithKeyword(game, keyword);
     }
@@ -892,6 +1047,9 @@ public class MetadataController {
                         } else if (usingHikarinagi()) {
                             // Hikarinagi 搜索摘要缺少简介/标签/截图，必须再拉详情
                             fetchAndApplyHikarinagiDetail(game, chosen);
+                        } else if (usingNextMoe()) {
+                            // NextMoe 同理：搜索命中行只有标题/封面，详情块（intros/tags/ratings…）要再取
+                            fetchAndApplyNextMoeDetail(game, chosen);
                         } else {
                             saveCurrentSourceMetadata(game.id, chosen);
                             applyVndbMetadata(chosen, game);

@@ -231,12 +231,12 @@
                                 <TextView android:id="@+id/homeHeroSubtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="从游戏库添加或选择一个游戏" android:textColor="#E8FFFFFF" android:textSize="9sp" />
                             </LinearLayout>
 
-                            <TextView android:id="@+id/homeHeroAction" android:layout_width="108dp" android:layout_height="40dp" android:background="@drawable/bg_home_primary_pill" android:clickable="true" android:focusable="true" android:gravity="center" android:text="▶ 继续游戏" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homeHeroAction" android:layout_width="108dp" android:layout_height="40dp" android:background="@drawable/bg_home_primary_pill" android:clickable="true" android:focusable="true" android:gravity="center" android:text="继续游戏" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
                         </LinearLayout>
                     </FrameLayout>
 
                     <LinearLayout android:id="@+id/homeHeroDots" android:layout_width="match_parent" android:layout_height="12dp" android:gravity="center" android:orientation="horizontal" />
-                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="center_vertical" android:text="🚀 快速启动" android:textColor="#FFFFFFFF" android:textSize="12sp" android:textStyle="bold" />
+                    <TextView android:layout_width="match_parent" android:layout_height="18dp" android:gravity="center_vertical" android:text="快速启动" android:textColor="#FFFFFFFF" android:textSize="12sp" android:textStyle="bold" />
 
                     <HorizontalScrollView android:layout_width="match_parent" android:layout_height="84dp" android:layout_marginTop="3dp" android:fillViewport="false" android:overScrollMode="never" android:scrollbars="none">
                         <LinearLayout android:id="@+id/homeQuickGames" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal" />
@@ -251,23 +251,29 @@
                     android:orientation="vertical">
 
                     <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:orientation="vertical" android:padding="8dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="16dp" android:gravity="center_vertical" android:text="▥ 今日数据" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
-
-                        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:orientation="horizontal">
-                            <TextView android:id="@+id/homePlayTime" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="◷ 游玩时长\n0h 0m" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
-                            <TextView android:id="@+id/homeGameCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="🎮 游戏库\n0 款" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                        <LinearLayout android:layout_width="wrap_content" android:layout_height="16dp" android:orientation="horizontal" android:gravity="center_vertical">
+                            <ImageView android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/ic_st_chart" android:tint="#FFFFFFFF" android:contentDescription="今日数据" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="今日数据" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
                         </LinearLayout>
 
                         <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:orientation="horizontal">
-                            <TextView android:id="@+id/homeCompletedCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="🏆 已玩过\n0 个" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
-                            <TextView android:id="@+id/homePlayingCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="♡ 正在玩\n0 个" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homePlayTime" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="今日游玩\n0h 0m" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homeGameCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="游戏库\n0 款" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:orientation="horizontal">
+                            <TextView android:id="@+id/homeCompletedCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="已玩过\n0 个" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homePlayingCount" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:gravity="center" android:text="正在玩\n0 个" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
                         </LinearLayout>
                     </LinearLayout>
 
                     <LinearLayout android:id="@+id/homeNewsCard" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="6dp" android:layout_weight="1" android:background="@drawable/bg_home_glass" android:orientation="vertical" android:padding="8dp">
                         <LinearLayout android:layout_width="match_parent" android:layout_height="16dp" android:gravity="center_vertical" android:orientation="horizontal">
-                            <TextView android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center_vertical" android:text="◉ Galgame 资讯" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
-                            <TextView android:id="@+id/homeNewsRefresh" android:layout_width="32dp" android:layout_height="match_parent" android:clickable="true" android:focusable="true" android:contentDescription="刷新资讯" android:gravity="center" android:text="↻" android:textColor="#B3FFFFFF" android:textSize="12sp" />
+                            <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="horizontal" android:gravity="center_vertical">
+                                <ImageView android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/ic_st_news" android:tint="#FFFFFFFF" android:contentDescription="Galgame 资讯" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:text="Galgame 资讯" android:textColor="#FFFFFFFF" android:textSize="11sp" android:textStyle="bold" />
+                            </LinearLayout>
+                            <ImageView android:id="@+id/homeNewsRefresh" android:layout_width="32dp" android:layout_height="match_parent" android:clickable="true" android:focusable="true" android:contentDescription="刷新资讯" android:padding="2dp" android:scaleType="fitCenter" android:src="@drawable/ic_st_refresh" android:tint="#B3FFFFFF" />
                         </LinearLayout>
                         <FrameLayout android:id="@+id/homeNewsMedia" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="4dp" android:layout_weight="1">
                             <ImageView android:id="@+id/homeNewsBanner" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="资讯题图" android:scaleType="centerCrop" android:visibility="gone" />

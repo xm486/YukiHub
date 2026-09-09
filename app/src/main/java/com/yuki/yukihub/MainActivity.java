@@ -412,6 +412,7 @@ prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             @Override public VnMetadata anyCachedMetadata(long gameId) { return MainActivity.this.anyCachedMetadata(gameId); }
             @Override public boolean usingYmgal() { return MainActivity.this.usingYmgal(); }
             @Override public boolean usingHikarinagi() { return MainActivity.this.usingHikarinagi(); }
+            @Override public boolean usingNextMoe() { return metadataController.usingNextMoe(); }
             @Override public boolean usingBangumi() { return MainActivity.this.usingBangumi(); }
             @Override public boolean usingBangumiMirror() { return MainActivity.this.usingBangumiMirror(); }
             @Override public String bangumiToken() { return MainActivity.this.bangumiToken(); }
@@ -1944,6 +1945,16 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
         ensureMultiSelectBar();
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
+        // 顶栏按钮的内联图标（深色文字底，图标同色）
+        if (addButton instanceof TextView) {
+            com.yuki.yukihub.util.IconedText.set((TextView) addButton,
+                    R.drawable.ic_st_plus, " 添加", 9f, 0xFF000000);
+        }
+        TextView scanLabel = findViewById(R.id.tvScanLabel);
+        if (scanLabel != null) {
+            com.yuki.yukihub.util.IconedText.set(scanLabel,
+                    R.drawable.ic_st_search, " 扫描", 9f, 0xFF000000);
+        }
         ivScanLoading = findViewById(R.id.ivScanLoading);
         applyTopActionFeedback(addButton);
 applyTopActionFeedback(scanButton);
@@ -2721,7 +2732,7 @@ private void updateClock() {
     int minute = cal.get(java.util.Calendar.MINUTE);
     int second = cal.get(java.util.Calendar.SECOND);
     String timeStr = String.format(java.util.Locale.getDefault(), "%02d:%02d:%02d", hour, minute, second);
-    tvClock.setText("🕐 " + timeStr);
+    tvClock.setText(com.yuki.yukihub.util.IconedText.build(this, R.drawable.ic_nav_clock, timeStr, 9f, 0));
 }
 
 private void updateBatteryLevel() {
@@ -2732,19 +2743,20 @@ private void updateBatteryLevel() {
         int status = bm.isCharging() ? 1 : 0;
         TextView tvBattery = findViewById(R.id.tvBatteryLevel);
         if (tvBattery == null) return;
-        String icon;
+        String label = level + "%";
         int color;
+        int iconRes;
         if (status == 1) {
-            icon = "⚡";
+            iconRes = R.drawable.ic_st_battery_charging;
             color = getColorCompat(R.color.yh_success);
         } else if (level <= 20) {
-            icon = "🪫";
+            iconRes = R.drawable.ic_st_battery;
             color = getColorCompat(R.color.yh_secondary);
         } else {
-            icon = "🔋";
+            iconRes = R.drawable.ic_st_battery;
             color = getColorCompat(R.color.yh_text);
         }
-        tvBattery.setText(icon + level + "%");
+        tvBattery.setText(com.yuki.yukihub.util.IconedText.build(this, iconRes, label, 9f, color));
         tvBattery.setTextColor(color);
     } catch (Throwable ignored) { }
 }
@@ -4098,14 +4110,11 @@ if (g.playedTimeMap != null) sessionCount += g.playedTimeMap.size();
          } else {
              info.append("新增");
          }
-         // 游玩状态标签
+         // 游玩状态标签（此处是拼接进 StringBuilder 的长句，用纯文字，不挂图标）
          if (g.playStatus != null && !g.playStatus.isEmpty() && !"unplayed".equals(g.playStatus)) {
-             if ("completed".equals(g.playStatus)) info.append("  · 🏆已完成");
-             else if ("playing".equals(g.playStatus)) info.append("  · 🎮在玩");
-             else if ("onhold".equals(g.playStatus)) info.append("  · ⏸搁置");
-             else if ("dropped".equals(g.playStatus)) info.append("  · 🗑抛弃");
+             info.append("  · ").append(com.yuki.yukihub.util.IconedText.labelForStatus(g.playStatus));
          }
-         if (g.nsfw) info.append("  · 🔞NSFW");
+if (g.nsfw) info.append("  · NSFW");
 if (g.playedTimeMap != null && !g.playedTimeMap.isEmpty()) info.append("  · 游玩记录 ").append(g.playedTimeMap.size()).append(" 天");
           if (g.vniteTimers != null && !g.vniteTimers.isEmpty()) info.append("  · 游玩记录 ").append(g.vniteTimers.size()).append(" 条");
           if (g.lunaBoxSessions != null && !g.lunaBoxSessions.isEmpty()) info.append("  · 游玩记录 ").append(g.lunaBoxSessions.size()).append(" 条");
@@ -4463,11 +4472,11 @@ private void setupDeveloperToggle() {
 /** 游玩状态二级分类：{筛选值, 显示文案}，顺序即展示顺序。 */
 private static final String[][] STATUS_FILTERS = {
         {"", "全部"},
-        {"PLAYING", "🎮 在玩"},
-        {"COMPLETED", "🏆 玩过"},
-        {"UNPLAYED", "☆ 未玩"},
-        {"ONHOLD", "⏸ 搁置"},
-        {"DROPPED", "🗑 抛弃"},
+        {"PLAYING", "在玩"},
+        {"COMPLETED", "玩过"},
+        {"UNPLAYED", "未玩"},
+        {"ONHOLD", "搁置"},
+        {"DROPPED", "抛弃"},
 };
 
 /** 当前选中的游玩状态筛选值，空串表示不按状态过滤。 */
@@ -4530,7 +4539,10 @@ private void rebuildStatusFilters() {
 
 private TextView statusFilterItem(String text, String value) {
     TextView v = new TextView(this);
-    v.setText(text);
+    // 图标 + 文字；「全部」（value 空）无图标，退化为纯文字
+    v.setText(com.yuki.yukihub.util.IconedText.build(this,
+            com.yuki.yukihub.util.IconedText.drawableForFilterValue(value),
+            text, 8f, getColorCompat(R.color.yh_text)));
     v.setTag(value == null ? "" : value);
     v.setGravity(android.view.Gravity.CENTER);
     v.setTextSize(8);
@@ -4600,12 +4612,20 @@ private void updateStatusFilterSelection() {
         boolean selected = (statusFilter == null ? "" : statusFilter).equals(value);
         TextView tv = (TextView) child;
         child.setAlpha(selected ? 1f : 0.82f);
+        // 文字色变化时图标 tint 必须一起重建：ImageSpan 持有的是已着色的 Drawable，
+        // 只改 setTextColor 不会传导到图标，选中态（浅蓝底深字）下图标会看不见。
+        int fg = selected ? 0xFF071221 : getColorCompat(R.color.yh_text);
+        String label = value.isEmpty() ? "全部"
+                : com.yuki.yukihub.util.IconedText.labelForStatus(
+                        value.toLowerCase(java.util.Locale.ROOT));
+        tv.setText(com.yuki.yukihub.util.IconedText.build(this,
+                com.yuki.yukihub.util.IconedText.drawableForFilterValue(value),
+                label, 8f, fg));
+        tv.setTextColor(fg);
         if (selected) {
             child.setBackgroundResource(R.drawable.bg_yuki_button);
-            tv.setTextColor(0xFF071221);
         } else {
             child.setBackgroundResource(R.drawable.bg_input);
-            tv.setTextColor(getColorCompat(R.color.yh_text));
         }
         tv.setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
     }
@@ -4734,14 +4754,15 @@ private void bindFilter(int id, String value) {
         boolean selected = value.equals(filter);
         view.setAlpha(selected ? 1f : 0.82f);
         if (view instanceof TextView) {
-            if (selected) {
-                view.setBackgroundResource(R.drawable.bg_yuki_button);
-                ((TextView) view).setTextColor(0xFF071221);
-            } else {
-                view.setBackgroundResource(R.drawable.bg_input);
-                ((TextView) view).setTextColor(getColorCompat(R.color.yh_text));
+            TextView tv = (TextView) view;
+            int fg = selected ? 0xFF071221 : getColorCompat(R.color.yh_text);
+            // 收藏项带心形图标；文字色随选中态变化，图标 tint 必须同步重建
+            if (id == R.id.filterFavorite) {
+                com.yuki.yukihub.util.IconedText.set(tv, R.drawable.ic_st_heart, " 收藏", 8f, fg);
             }
-            ((TextView) view).setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+            tv.setTextColor(fg);
+            view.setBackgroundResource(selected ? R.drawable.bg_yuki_button : R.drawable.bg_input);
+            tv.setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         }
     }
 private void loadGames() {
@@ -6475,15 +6496,67 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(sourceTitle);
 
         Spinner sourceSpinner = new Spinner(this);
-        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
+        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）", "NextMoe（鲲站授权）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
         if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(1);
 else if (MetadataController.SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(2);
 else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
 else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(4);
+else if (MetadataController.SOURCE_NEXTMOE.equals(currentSource)) sourceSpinner.setSelection(5);
 else sourceSpinner.setSelection(0);
         root.addView(sourceSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+
+        // NextMoe 连接状态与授权入口（环回回调 + PKCE，令牌走 Android Keystore 加密存储）
+        TextView nextmoeStatus = new TextView(this);
+        boolean nextmoeConnected = com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected();
+        nextmoeStatus.setText("NextMoe 账号：" + (nextmoeConnected
+                ? "已连接" + (com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel().isEmpty() ? "" : "（" + com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel() + "）")
+                : "未连接（选择 NextMoe 源时需要）"));
+        nextmoeStatus.setTextColor(getColorCompat(R.color.yh_text_muted));
+        nextmoeStatus.setTextSize(11);
+        nextmoeStatus.setPadding(0, dp(8), 0, dp(2));
+        root.addView(nextmoeStatus);
+
+        Button nextmoeButton = krButton(nextmoeConnected ? "断开 NextMoe 账号" : "连接 NextMoe 账号");
+        nextmoeButton.setTextColor(primaryTextColor());
+        nextmoeButton.setOnClickListener(v -> {
+            if (com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
+                com.yuki.yukihub.nextmoe.NextMoeAuthStore.clear();
+                nextmoeStatus.setText("NextMoe 账号：未连接（选择 NextMoe 源时需要）");
+                nextmoeButton.setText("连接 NextMoe 账号");
+                Toast.makeText(this, "已断开 NextMoe 账号", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            nextmoeButton.setEnabled(false);
+            nextmoeButton.setText("等待授权…");
+            new Thread(() -> {
+                String err = null;
+                try {
+                    err = com.yuki.yukihub.nextmoe.NextMoeConnectFlow.connectAndWait();
+                } catch (Throwable t) {
+                    err = t.getMessage() == null ? "授权流程异常" : t.getMessage();
+                }
+                final String error = err;
+                runOnUiThread(() -> {
+                    nextmoeButton.setEnabled(true);
+                    boolean ok = error == null && com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected();
+                    nextmoeButton.setText(ok ? "断开 NextMoe 账号" : "连接 NextMoe 账号");
+                    nextmoeStatus.setText(ok
+                            ? "NextMoe 账号：已连接" + (com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel().isEmpty() ? "" : "（" + com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel() + "）")
+                            : "NextMoe 账号：未连接（" + (error == null ? "未完成授权" : error) + "）");
+                    if (ok) Toast.makeText(this, "NextMoe 连接成功", Toast.LENGTH_SHORT).show();
+                });
+            }, "yukihub-nextmoe-auth").start();
+        });
+        root.addView(nextmoeButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+
+        TextView nextmoeHint = new TextView(this);
+        nextmoeHint.setText("NextMoe 会打开系统浏览器跳转鲲站授权，完成后自动回到本页。\n令牌加密存储在设备内，断开即全部清除。");
+        nextmoeHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+        nextmoeHint.setTextSize(10);
+        nextmoeHint.setPadding(0, dp(4), 0, dp(4));
+        root.addView(nextmoeHint);
 
         TextView tokenLabel = new TextView(this);
         tokenLabel.setText("Bangumi Access Token");
@@ -6783,7 +6856,8 @@ else sourceSpinner.setSelection(0);
             boolean bangumiMirror = sourceSelection == 2;
             boolean ymgal = sourceSelection == 3;
             boolean hikarinagi = sourceSelection == 4;
-            String selectedMetadataSource = hikarinagi ? MetadataController.SOURCE_HIKARINAGI : (ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB)));
+            boolean nextmoe = sourceSelection == 5;
+            String selectedMetadataSource = nextmoe ? MetadataController.SOURCE_NEXTMOE : (hikarinagi ? MetadataController.SOURCE_HIKARINAGI : (ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB))));
             String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
             if ((bangumi || bangumiMirror) && token.isEmpty()) {
                 Toast.makeText(MainActivity.this, "选择 Bangumi 时需要填写 Token", Toast.LENGTH_SHORT).show();
@@ -6828,7 +6902,7 @@ else sourceSpinner.setSelection(0);
                 dt.setCustomColorEnabled(customColorEnabled.isChecked());
                 dt.saveCustomColorSettings(this);
             applyCustomBackground();
-            Toast.makeText(MainActivity.this, "已保存资料源：" + (hikarinagi ? "Hikarinagi" : (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB")))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已保存资料源：" + (nextmoe ? "NextMoe" : (hikarinagi ? "Hikarinagi" : (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
 recreate();
         });
@@ -7751,12 +7825,7 @@ private void checkUpdateOnStartupIfEnabled() {
     return "unplayed";
 }
 private String playStatusLabel(String status) {
-    String s = normalizePlayStatus(status);
-    if ("completed".equals(s)) return "🏆 玩过";
-    if ("playing".equals(s)) return "🎮 在玩";
-    if ("onhold".equals(s)) return "⏸ 搁置";
-    if ("dropped".equals(s)) return "🗑 抛弃";
-    return "☆ 未玩";
+    return com.yuki.yukihub.util.IconedText.labelForStatus(normalizePlayStatus(status));
 }
 private int playStatusIndex(String status) {
     String s = normalizePlayStatus(status);
@@ -7775,7 +7844,8 @@ private String playStatusFromIndex(int index) {
 }
 private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     if (game == null) return;
-    String[] labels = new String[]{"☆ 未玩", "🎮 在玩", "🏆 玩过", "⏸ 搁置", "🗑 抛弃"};
+    String[] labels = new String[]{"未玩", "在玩", "玩过", "搁置", "抛弃"};
+    String[] statusKeys = new String[]{"unplayed", "playing", "completed", "onhold", "dropped"};
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundResource(R.drawable.bg_dialog);
@@ -7786,8 +7856,12 @@ private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     for (int i = 0; i < labels.length; i++) {
         final int index = i;
         TextView row = new TextView(this);
-        row.setText((index == selected ? "●  " : "○  ") + labels[index]);
-        row.setTextColor(index == selected ? primaryTextColor() : getColorCompat(R.color.yh_text));
+        int rowColor = index == selected ? primaryTextColor() : getColorCompat(R.color.yh_text);
+        row.setText(com.yuki.yukihub.util.IconedText.buildWithPrefix(this,
+                index == selected ? "●  " : "○  ",
+                com.yuki.yukihub.util.IconedText.drawableForStatus(statusKeys[index]),
+                " " + labels[index], 14f, rowColor));
+        row.setTextColor(rowColor);
         row.setTextSize(18);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
         row.setBackgroundResource(R.drawable.bg_input);
