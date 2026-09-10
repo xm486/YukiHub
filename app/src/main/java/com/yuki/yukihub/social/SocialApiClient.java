@@ -58,6 +58,11 @@ public class SocialApiClient {
     // ==================== 请求方法 ====================
 
     private String doGet(String path, String queryParams) throws Exception {
+        return doGetWithTimeout(path, queryParams, READ_TIMEOUT);
+    }
+
+    /** 指定读超时的 GET（给需要服务端现查上游的代理端点用） */
+    private String doGetWithTimeout(String path, String queryParams, int readTimeoutMillis) throws Exception {
         String token = getToken();
         if (token == null) throw new IllegalStateException("未登录");
 
@@ -69,7 +74,7 @@ public class SocialApiClient {
             conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(CONNECT_TIMEOUT);
-            conn.setReadTimeout(READ_TIMEOUT);
+            conn.setReadTimeout(readTimeoutMillis);
             conn.setRequestProperty("Authorization", "Bearer " + token);
 
             int code = conn.getResponseCode();
@@ -290,6 +295,62 @@ public class SocialApiClient {
             }
         }
         return list;
+    }
+
+    // ==================== NextMoe 贴纸（服务端代理，密钥在服务端） ====================
+
+    /** 贴纸包（列表车道项） */
+    public static class StickerPack {
+        public String id = "";
+        public String title = "";
+        public String cover = "";
+        public int stickerCount = 0;
+        public boolean official = false;
+    }
+
+    /**
+     * 贴纸功能开关与包列表。返回 null = 服务未启用（不显示贴纸入口）。
+     * 服务端对 NextMoe 做缓存代理；这里只拿瘦身后的 {id,title,cover,sticker_count}。
+     * 首次访问（缓存冷）服务端要现查上游，放宽读超时到 40s。
+     */
+    public java.util.List<StickerPack> getNextMoeStickerPacks(int page) throws Exception {
+        String resp = doGetWithTimeout("/chat/nextmoe_stickers.php", "action=packs&page=" + page, 40_000);
+        JSONObject root = new JSONObject(resp);
+        if (!root.optBoolean("enabled", false)) return null;
+        JSONArray arr = root.optJSONArray("packs");
+        java.util.List<StickerPack> list = new java.util.ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject p = arr.optJSONObject(i);
+                if (p == null) continue;
+                StickerPack sp = new StickerPack();
+                sp.id = p.optString("id", "");
+                sp.title = p.optString("title", "");
+                sp.cover = p.optString("cover", "");
+                sp.stickerCount = p.optInt("sticker_count", 0);
+                sp.official = p.optBoolean("official", false);
+                if (!sp.id.isEmpty() && !sp.cover.isEmpty()) list.add(sp);
+            }
+        }
+        return list;
+    }
+
+    /** 某个贴纸包里的全部表情（thumb_url，320px webp，直接作为消息 URL）。返回 null = 服务未启用。读超时 40s（缓存冷时服务端要现查上游）。 */
+    public java.util.List<String> getNextMoeStickerUrls(String packId) throws Exception {
+        String resp = doGetWithTimeout("/chat/nextmoe_stickers.php", "action=pack&pack_id=" + URLEncoder.encode(packId, "UTF-8"), 40_000);
+        JSONObject root = new JSONObject(resp);
+        if (!root.optBoolean("enabled", false)) return null;
+        JSONArray arr = root.optJSONArray("stickers");
+        java.util.List<String> urls = new java.util.ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                // 服务端返回 [{id,url},...] 对象数组；容忍纯字符串数组（防御式）
+                JSONObject s = arr.optJSONObject(i);
+                String u = s != null ? s.optString("url", "") : arr.optString(i, "");
+                if (!u.isEmpty()) urls.add(u);
+            }
+        }
+        return urls;
     }
 
     /** 发送消息 */

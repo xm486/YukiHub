@@ -4359,122 +4359,356 @@ public class FriendsChatDialog {
         }, "YukiHub-Emoji-Load").start();
     }
 
-    /** 构建表情图片 View（服务端 URL 加载） */
+    /** 构建表情图片 View（本站表情按名字映射 URL；NextMoe 贴纸的 content 是完整 URL，直接加载） */
     private View buildEmojiContentView(String emojiName) {
         ImageView emojiView = new ImageView(activity);
         int emojiSize = dp(96);
         emojiView.setLayoutParams(new LinearLayout.LayoutParams(emojiSize, emojiSize));
-        // 尝试从 URL 映射获取，否则构造默认 URL
-        String url = emojiUrlMap != null ? emojiUrlMap.get(emojiName) : null;
-        if (url == null) {
-            url = "https://yukihub.zh.kg/uploads/emojis/" + emojiName + ".webp";
+        String url = emojiName;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            // 本站表情：名字 → URL 映射，查不到构造默认 URL
+            url = emojiUrlMap != null ? emojiUrlMap.get(emojiName) : null;
+            if (url == null) {
+                url = "https://yukihub.zh.kg/uploads/emojis/" + emojiName + ".webp";
+            }
         }
         loadEmojiInto(url, emojiView, emojiSize);
         return emojiView;
     }
 
-    /** 表情包选择弹窗（从服务器拉取列表） */
-    private void showEmojiPicker(boolean isGroupChat) {
-        // 先显示加载中
-        Toast.makeText(activity, "加载表情包中...", Toast.LENGTH_SHORT).show();
 
-        // 后台拉取
+    /** 表情选择弹窗状态：0=本站表情 1=未萌包列表 2=未萌包内表情 */
+    private int pickerTab = 0;
+    private LinearLayout pickerTabRow;
+    private LinearLayout pickerSubRow;
+    private TextView pickerSubTitle;
+    private android.widget.GridView pickerGrid;
+    private java.util.List<SocialApiClient.EmojiInfo> pickerLocal;
+    private java.util.List<SocialApiClient.StickerPack> pickerPacks;
+    private SocialApiClient.StickerPack pickerPack;
+    private java.util.List<String> pickerStickers;
+    private boolean pickerNmEnabled = false;
+    private boolean pickerNmLoaded = false;
+    private boolean pickerIsGroupChat = false;
+
+    /**
+     * 表情包选择弹窗（本站表情 + 未萌贴纸双 tab）。
+     * tab 是顶级导航（随时可切回），包内表情用二级返回行回包列表——
+     * 修复旧版「只能返回一次」的嵌套监听器互相覆盖问题。
+     */
+    private void showEmojiPicker(boolean isGroupChat) {
+        pickerIsGroupChat = isGroupChat;
+        pickerTab = 0;
+        pickerLocal = null;
+        pickerPacks = null;
+        pickerPack = null;
+        pickerStickers = null;
+        pickerNmEnabled = false;
+        pickerNmLoaded = false;
+
+        LinearLayout rootBox = new LinearLayout(activity);
+        rootBox.setOrientation(LinearLayout.VERTICAL);
+        rootBox.setBackgroundResource(R.drawable.bg_social_panel);
+        rootBox.setPadding(dp(10), dp(8), dp(10), dp(10));
+
+        // ===== 顶部双 tab：整行等宽大按钮，入口显眼 =====
+        pickerTabRow = new LinearLayout(activity);
+        pickerTabRow.setOrientation(LinearLayout.HORIZONTAL);
+        TextView tabLocal = buildPickerTabBtn("表情包");
+        tabLocal.setOnClickListener(v -> switchPickerTab(0));
+        TextView tabNm = buildPickerTabBtn("未萌贴纸");
+        tabNm.setOnClickListener(v -> {
+            if (!pickerNmEnabled) {
+                Toast.makeText(activity, pickerNmLoaded ? "未萌贴纸未启用" : "贴纸加载中，请稍候", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            switchPickerTab(1);
+        });
+        LinearLayout.LayoutParams tl1 = new LinearLayout.LayoutParams(0, dp(34), 1f);
+        LinearLayout.LayoutParams tl2 = new LinearLayout.LayoutParams(0, dp(34), 1f);
+        tl2.leftMargin = dp(8);
+        pickerTabRow.addView(tabLocal, tl1);
+        pickerTabRow.addView(tabNm, tl2);
+        // 常驻退出按钮：弹窗宽 92% 点外部不好按，右上角 ✕ 必须始终可见可点（两个 tab 通用）
+        TextView xClose = new TextView(activity);
+        xClose.setText("✕");
+        xClose.setTextSize(14);
+        xClose.setTextColor(0xFFFF8A8A);
+        xClose.setGravity(Gravity.CENTER);
+        xClose.setBackgroundResource(R.drawable.bg_input);
+        xClose.setOnClickListener(v -> {
+            if (emojiDialog != null) emojiDialog.dismiss();
+        });
+        LinearLayout.LayoutParams xl = new LinearLayout.LayoutParams(dp(44), dp(34));
+        xl.leftMargin = dp(8);
+        pickerTabRow.addView(xClose, xl);
+        LinearLayout.LayoutParams trlp = new LinearLayout.LayoutParams(-1, -2);
+        trlp.bottomMargin = dp(8);
+        rootBox.addView(pickerTabRow, trlp);
+
+        // ===== 二级导航行（包内表情时显示：返回 + 包名） =====
+        pickerSubRow = new LinearLayout(activity);
+        pickerSubRow.setOrientation(LinearLayout.HORIZONTAL);
+        pickerSubRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView backBtn = new TextView(activity);
+        backBtn.setText("‹ 返回");
+        backBtn.setTextColor(0xFF8AB4FF);
+        backBtn.setTextSize(13);
+        backBtn.setPadding(dp(2), dp(6), dp(10), dp(6));
+        backBtn.setOnClickListener(v -> switchPickerTab(1));
+        pickerSubRow.addView(backBtn);
+        pickerSubTitle = new TextView(activity);
+        pickerSubTitle.setTextColor(0xFF8AB4FF);
+        pickerSubTitle.setTextSize(13);
+        pickerSubTitle.setSingleLine(true);
+        pickerSubTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        pickerSubRow.addView(pickerSubTitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        pickerSubRow.setVisibility(View.GONE);
+        LinearLayout.LayoutParams srlp = new LinearLayout.LayoutParams(-1, -2);
+        srlp.bottomMargin = dp(6);
+        rootBox.addView(pickerSubRow, srlp);
+
+        // ===== 内容网格（三视图复用） =====
+        pickerGrid = new android.widget.GridView(activity);
+        pickerGrid.setStretchMode(android.widget.GridView.STRETCH_COLUMN_WIDTH);
+        pickerGrid.setHorizontalSpacing(dp(4));
+        pickerGrid.setVerticalSpacing(dp(4));
+        pickerGrid.setBackgroundColor(0xFF101522);
+        // 本应用只有横屏：屏幕高度有限（通常约 360~400dp），窗口高度必须按屏幕现算。
+        // 固定 400dp 网格必然超出屏幕、被系统裁掉——底部的行永远滚不出来。
+        // 网格高度 = 屏幕高 - 弹窗装饰(tab行 34 + 边距/内边距 ~32) - 顶部留白(~38)
+        int screenH = activity.getResources().getDisplayMetrics().heightPixels;
+        int gridH = Math.max(dp(160), screenH - dp(104));
+        rootBox.addView(pickerGrid, new LinearLayout.LayoutParams(-1, gridH));
+
+        emojiDialog = new Dialog(activity);
+        emojiDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        emojiDialog.setContentView(rootBox);
+        emojiDialog.setCancelable(true);
+        emojiDialog.setCanceledOnTouchOutside(true); // 显式声明：点弹窗外（上方暗区）也可关闭
+        if (emojiDialog.getWindow() != null) {
+            emojiDialog.getWindow().setLayout(
+                    (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.92f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            emojiDialog.getWindow().setGravity(Gravity.BOTTOM);
+            emojiDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+        }
+        emojiDialog.show();
+
+        refreshPickerTabs();
+        updatePickerContent();
+
+        // ===== 数据加载（并行：本站表情 + 未萌包列表） =====
         AppExecutors.runOnIo(() -> {
             try {
-                java.util.List<SocialApiClient.EmojiInfo> serverEmojis = apiClient.getEmojiList();
-                if (serverEmojis == null || serverEmojis.isEmpty()) {
-                    uiHandler.post(() -> Toast.makeText(activity, "暂无表情包", Toast.LENGTH_SHORT).show());
-                    return;
-                }
-
-                // 构建 name→URL 映射
-                final java.util.Map<String, String> map = new java.util.HashMap<>();
-                final java.util.List<String> names = new java.util.ArrayList<>();
-                for (SocialApiClient.EmojiInfo e : serverEmojis) {
-                    map.put(e.name, e.url);
-                    names.add(e.name);
-                }
-                // 保存到全局映射（供气泡加载用）
-                emojiUrlMap = map;
-
-                // 回到 UI 线程构建弹窗
-                activity.runOnUiThread(() -> {
-                    LinearLayout rootBox = new LinearLayout(activity);
-                    rootBox.setOrientation(LinearLayout.VERTICAL);
-                    rootBox.setBackgroundResource(R.drawable.bg_social_panel);
-                    rootBox.setPadding(dp(10), dp(8), dp(10), dp(10));
-
-                    // 标题行
-                    TextView titleBar = new TextView(activity);
-                    titleBar.setText("表情包  (点空白处关闭)");
-                    titleBar.setTextColor(0xFF8AB4FF);
-                    titleBar.setTextSize(13);
-                    titleBar.setPadding(0, 0, 0, dp(6));
-                    rootBox.addView(titleBar);
-
-                    // 表情网格
-                    int cols = 5;
-                    android.widget.GridView grid = new android.widget.GridView(activity);
-                    grid.setNumColumns(cols);
-                    grid.setStretchMode(android.widget.GridView.STRETCH_COLUMN_WIDTH);
-                    grid.setHorizontalSpacing(dp(4));
-                    grid.setVerticalSpacing(dp(4));
-                    grid.setPadding(0, 0, 0, 0);
-                    grid.setBackgroundColor(0xFF101522);
-
-                    android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
-                        @Override public int getCount() { return names.size(); }
-                        @Override public Object getItem(int position) { return names.get(position); }
-                        @Override public long getItemId(int position) { return position; }
-                        @Override public View getView(int position, View convertView, ViewGroup parent) {
-                            String name = names.get(position);
-                            ImageView iv = (convertView instanceof ImageView) ? (ImageView) convertView : new ImageView(activity);
-                            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                            iv.setLayoutParams(new android.widget.AbsListView.LayoutParams(dp(56), dp(56)));
-                            String url = map.get(name);
-                            if (url != null) loadEmojiInto(url, iv, dp(48));
-                            return iv;
-                        }
-                    };
-                    grid.setAdapter(adapter);
-
-                    grid.setOnItemClickListener((parent, view, position, id) -> {
-                        String emojiName = names.get(position);
-                        if (emojiDialog != null) emojiDialog.dismiss();
-                        if (isGroupChat) sendEmojiGroupMessage(emojiName);
-                        else sendEmojiMessage(emojiName);
-                    });
-
-                    rootBox.addView(grid, new LinearLayout.LayoutParams(-1, dp(280)));
-
-                    // 关闭按钮
-                    TextView closeBtn = new TextView(activity);
-                    closeBtn.setText("关闭");
-                    closeBtn.setTextColor(0xFFF5F7FF);
-                    closeBtn.setTextSize(13);
-                    closeBtn.setGravity(Gravity.CENTER);
-                    closeBtn.setBackgroundResource(R.drawable.bg_input);
-                    closeBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
-                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
-                    clp.topMargin = dp(8);
-                    rootBox.addView(closeBtn, clp);
-
-                    emojiDialog = new Dialog(activity);
-                    emojiDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-                    emojiDialog.setContentView(rootBox);
-                    emojiDialog.setCancelable(true);
-                    closeBtn.setOnClickListener(v -> emojiDialog.dismiss());
-                    if (emojiDialog.getWindow() != null) {
-                        emojiDialog.getWindow().setLayout(
-                                (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.92f),
-                                ViewGroup.LayoutParams.WRAP_CONTENT);
-                        emojiDialog.getWindow().setGravity(Gravity.BOTTOM);
-                        emojiDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
-                    }
-                    emojiDialog.show();
+                java.util.List<SocialApiClient.EmojiInfo> local = apiClient.getEmojiList();
+                uiHandler.post(() -> {
+                    pickerLocal = local == null ? new java.util.ArrayList<>() : local;
+                    // 供气泡渲染用的 name→URL 映射（旧逻辑在旧版选择器里，新流程在这里补上）
+                    java.util.Map<String, String> map = new java.util.HashMap<>();
+                    for (SocialApiClient.EmojiInfo e : pickerLocal) map.put(e.name, e.url);
+                    emojiUrlMap = map;
+                    if (pickerTab == 0) updatePickerContent();
                 });
             } catch (Throwable t) {
-                uiHandler.post(() -> Toast.makeText(activity, "表情包加载失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
+                uiHandler.post(() -> {
+                    pickerLocal = new java.util.ArrayList<>();
+                    if (pickerTab == 0) updatePickerContent();
+                });
+            }
+        });
+        AppExecutors.runOnIo(() -> {
+            try {
+                java.util.List<SocialApiClient.StickerPack> packs = apiClient.getNextMoeStickerPacks(1);
+                uiHandler.post(() -> {
+                    pickerNmLoaded = true;
+                    pickerNmEnabled = packs != null;
+                    pickerPacks = packs == null ? new java.util.ArrayList<>() : packs;
+                    refreshPickerTabs();
+                    if (pickerTab == 1) updatePickerContent();
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() -> {
+                    pickerNmLoaded = true;
+                    pickerNmEnabled = false;
+                    refreshPickerTabs();
+                });
+            }
+        });
+    }
+
+    private TextView buildPickerTabBtn(String text) {
+        TextView b = new TextView(activity);
+        b.setText(text);
+        b.setTextSize(13);
+        b.setGravity(Gravity.CENTER);
+        b.setBackgroundResource(R.drawable.bg_input);
+        return b;
+    }
+
+    private void switchPickerTab(int tab) {
+        pickerTab = tab;
+        refreshPickerTabs();
+        updatePickerContent();
+    }
+
+    /** tab 选中态：亮蓝底深字 vs 深底灰字；未萌 tab 文案反映加载/启用状态 */
+    private void refreshPickerTabs() {
+        if (pickerTabRow == null || pickerTabRow.getChildCount() < 2) return;
+        TextView tabLocal = (TextView) pickerTabRow.getChildAt(0);
+        TextView tabNm = (TextView) pickerTabRow.getChildAt(1);
+        boolean localSel = pickerTab == 0;
+        android.graphics.drawable.GradientDrawable bgL = new android.graphics.drawable.GradientDrawable();
+        bgL.setColor(localSel ? 0xFF2A3A63 : 0xFF141A2E);
+        bgL.setCornerRadius(dp(8));
+        tabLocal.setBackground(bgL);
+        tabLocal.setTextColor(localSel ? 0xFFEAF2FF : 0xFF7E8CAB);
+        android.graphics.drawable.GradientDrawable bgN = new android.graphics.drawable.GradientDrawable();
+        bgN.setColor(!localSel ? 0xFF2A3A63 : 0xFF141A2E);
+        bgN.setCornerRadius(dp(8));
+        tabNm.setBackground(bgN);
+        tabNm.setTextColor(!localSel ? 0xFFEAF2FF : 0xFF7E8CAB);
+        if (!pickerNmLoaded) {
+            tabNm.setText("未萌贴纸…");
+            tabNm.setAlpha(0.6f);
+        } else if (!pickerNmEnabled) {
+            tabNm.setText("未萌贴纸（未启用）");
+            tabNm.setAlpha(0.45f);
+        } else {
+            tabNm.setText("未萌贴纸");
+            tabNm.setAlpha(1f);
+        }
+    }
+/**
+     * 按弹窗实际宽度反推列数：目标格子尺寸（如 72dp）+ 4dp 间距，一行能塞几个塞几个。
+     * GridView 的 STRETCH_COLUMN_WIDTH 会把列宽拉满弹窗——列数固定时宽屏下格子周围全是空隙；
+     * 列数动态算出来后，格子跟随列宽填满，任何屏宽下都零大缝、行内塞满。
+     */
+    private int pickerCellSize(int cols, int spacingDp) {
+        int dialogW = (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.92f);
+        int contentW = dialogW - dp(20); // rootBox 左右 padding 各 10dp
+        int spacing = dp(spacingDp);
+        return Math.max(dp(48), (contentW - spacing * (cols - 1)) / cols);
+    }
+
+    /** 目标格子宽度反推列数（贴纸/表情 72dp、包封面 150dp） */
+    private int pickerColumns(int targetCellDp, int spacingDp) {
+        int dialogW = (int)(activity.getResources().getDisplayMetrics().widthPixels * 0.92f);
+        int contentW = dialogW - dp(20);
+        int step = dp(targetCellDp) + dp(spacingDp);
+        return Math.max(2, contentW / step);
+    }
+    /** 按 tab 填充内容网格（三视图复用一个 GridView） */
+    private void updatePickerContent() {
+        if (pickerGrid == null || emojiDialog == null) return;
+        if (pickerTab == 0) {
+            pickerSubRow.setVisibility(View.GONE);
+            // 列数按弹窗宽度动态算（目标 72dp/格），一行塞满、零大缝
+            final int cols = pickerColumns(72, 4);
+            pickerGrid.setNumColumns(cols);
+            final int cell = pickerCellSize(cols, 4);
+            final java.util.List<SocialApiClient.EmojiInfo> items = pickerLocal;
+            pickerGrid.setAdapter(new android.widget.BaseAdapter() {
+                @Override public int getCount() { return items == null ? 0 : items.size(); }
+                @Override public Object getItem(int position) { return items.get(position); }
+                @Override public long getItemId(int position) { return position; }
+                @Override public View getView(int position, View convertView, ViewGroup parent) {
+                    ImageView iv = (convertView instanceof ImageView) ? (ImageView) convertView : new ImageView(activity);
+                    iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    iv.setLayoutParams(new android.widget.AbsListView.LayoutParams(cell, cell));
+                    loadEmojiInto(items.get(position).url, iv, cell);
+                    return iv;
+                }
+            });
+            pickerGrid.setOnItemClickListener((parent, view, position, id) -> {
+                String name = items.get(position).name;
+                if (emojiDialog != null) emojiDialog.dismiss();
+                if (pickerIsGroupChat) sendEmojiGroupMessage(name);
+                else sendEmojiMessage(name);
+            });
+            return;
+        }
+        if (pickerTab == 1) {
+            pickerSubRow.setVisibility(View.GONE);
+            final int packCols = pickerColumns(150, 6);
+            pickerGrid.setNumColumns(packCols);
+            final int packCell = pickerCellSize(packCols, 6);
+            final java.util.List<SocialApiClient.StickerPack> packs = pickerPacks;
+            pickerGrid.setAdapter(new android.widget.BaseAdapter() {
+                @Override public int getCount() { return packs == null ? 0 : packs.size(); }
+                @Override public Object getItem(int position) { return packs.get(position); }
+                @Override public long getItemId(int position) { return position; }
+                @Override public View getView(int position, View convertView, ViewGroup parent) {
+                    // 封面（正方形填满列宽）+ 包名，明确告诉用户「这是包」
+                    SocialApiClient.StickerPack p = packs.get(position);
+                    LinearLayout cell = new LinearLayout(activity);
+                    cell.setOrientation(LinearLayout.VERTICAL);
+                    cell.setLayoutParams(new android.widget.AbsListView.LayoutParams(-1, packCell + dp(26)));
+                    ImageView iv = new ImageView(activity);
+                    iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    iv.setLayoutParams(new LinearLayout.LayoutParams(-1, packCell));
+                    loadEmojiInto(p.cover, iv, packCell);
+                    TextView tv = new TextView(activity);
+                    String n = p.title == null || p.title.isEmpty() ? "贴纸包" : p.title;
+                    tv.setText(n + "（" + p.stickerCount + "张）");
+                    tv.setTextColor(0xFFDDE6FF);
+                    tv.setTextSize(10);
+                    tv.setGravity(Gravity.CENTER);
+                    tv.setSingleLine(true);
+                    tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                    tv.setPadding(dp(2), dp(4), dp(2), 0);
+                    cell.addView(iv);
+                    cell.addView(tv);
+                    return cell;
+                }
+            });
+            pickerGrid.setOnItemClickListener((parent, view, position, id) -> openNmStickerPack(packs.get(position)));
+            return;
+        }
+        // 包内表情
+        pickerSubRow.setVisibility(View.VISIBLE);
+        pickerSubTitle.setText((pickerPack == null ? "" : pickerPack.title) + " · 来自 NextMoe·未萌");
+        final int stickerCols = pickerColumns(72, 4);
+        pickerGrid.setNumColumns(stickerCols);
+        final int stickerCell = pickerCellSize(stickerCols, 4);
+        final java.util.List<String> urls = pickerStickers;
+        pickerGrid.setAdapter(new android.widget.BaseAdapter() {
+            @Override public int getCount() { return urls == null ? 0 : urls.size(); }
+            @Override public Object getItem(int position) { return urls.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                ImageView iv = (convertView instanceof ImageView) ? (ImageView) convertView : new ImageView(activity);
+                iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                iv.setLayoutParams(new android.widget.AbsListView.LayoutParams(stickerCell, stickerCell));
+                loadEmojiInto(urls.get(position), iv, stickerCell);
+                return iv;
+            }
+        });
+        pickerGrid.setOnItemClickListener((parent, view, position, id) -> {
+            String url = urls.get(position);
+            if (emojiDialog != null) emojiDialog.dismiss();
+            if (pickerIsGroupChat) sendEmojiGroupMessage(url);
+            else sendEmojiMessage(url);
+        });
+    }
+
+    /** 打开某个未萌贴纸包：拉包内表情，成功切到包内视图 */
+    private void openNmStickerPack(SocialApiClient.StickerPack p) {
+        Toast.makeText(activity, "加载「" + (p.title == null || p.title.isEmpty() ? "贴纸包" : p.title) + "」...", Toast.LENGTH_SHORT).show();
+        AppExecutors.runOnIo(() -> {
+            try {
+                java.util.List<String> urls = apiClient.getNextMoeStickerUrls(p.id);
+                uiHandler.post(() -> {
+                    if (urls == null || urls.isEmpty()) {
+                        Toast.makeText(activity, "该包暂无可发表情", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    pickerPack = p;
+                    pickerStickers = urls;
+                    switchPickerTab(2);
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() -> Toast.makeText(activity, "加载失败: " + t.getMessage(), Toast.LENGTH_SHORT).show());
             }
         });
     }
@@ -4995,7 +5229,6 @@ public class FriendsChatDialog {
         // 所以要判断长按点是否真的落在图片上，否则长按黑边也会触发保存。
         final float[] downPoint = new float[]{-1f, -1f};
         big.setOnTouchListener((v, ev) -> {
-            // 记录按下位置，供 onLongClick 判断是否在图片内
             if (ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                 downPoint[0] = ev.getX();
                 downPoint[1] = ev.getY();
