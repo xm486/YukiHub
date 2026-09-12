@@ -1,0 +1,377 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大屏模式主界面（M1 + M1b + M2 接入点）—— 对应 bigscreen_spec.md §2.3
+  结构：双背景层（交叉淡入 + Ken Burns） + 顶栏 + [图标侧栏 | shelf 行]
+        + 选中信息层（操作按钮排） + 底栏 + 浮层容器（详情层 / 菜单）
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bs_bg">
+
+    <!-- ===== 背景层：两张图交替实现交叉淡入（Ken Burns 在代码里驱动）===== -->
+    <ImageView
+        android:id="@+id/bsBgA"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:alpha="0.95"
+        android:contentDescription="@null" />
+
+    <ImageView
+        android:id="@+id/bsBgB"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:alpha="0"
+        android:contentDescription="@null" />
+
+    <!-- 左侧渐变遮罩：只有标题那一块有阴影，右侧保持清晰（对齐实机目标图）-->
+    <View
+        android:id="@+id/bsScrimLeft"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bs_scrim_left" />
+
+    <!-- 底部渐变：给卡片排一个落点 -->
+    <View
+        android:id="@+id/bsScrimBottom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:minHeight="140dp"
+        android:background="@drawable/bs_scrim_bottom_full" />
+
+    <!--
+      雪花/极光氛围层（M3-4）：复用项目既有 DynamicSnowBackgroundView。
+      只有 high 性能档才显示（medium/low 直接 GONE，省 CPU/GPU）。
+    -->
+    <com.yuki.yukihub.ui.DynamicSnowBackgroundView
+        android:id="@+id/bsSnow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0.5"
+        android:visibility="gone" />
+
+    <!--
+      预告视频层（spec §S10.4）：位于压暗层之上、内容之下，默认完全透明。
+      只有 onPrepared 之后才由 TrailerPlayer 淡入，避免黑帧。
+    -->
+    <TextureView
+        android:id="@+id/bsBgVideo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0" />
+
+    <!-- PV 遮罩（M11）：播放时可开关 + 调强度，强度 0 就是完全不放遮罩 -->
+    <View
+        android:id="@+id/bsVideoScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:visibility="gone"
+        android:background="#000000" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:id="@+id/bsContentRoot"
+        android:orientation="vertical">
+
+        <!-- ===== 顶栏（高度由 BigScreenSizes 按屏幕高度算，代码里覆盖）===== -->
+        <LinearLayout
+            android:id="@+id/bsTopBar"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="22dp"
+            android:paddingEnd="14dp">
+
+            <TextView
+                android:id="@+id/bsClock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="--:--"
+                android:textColor="@color/bs_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/bsNet"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:text="WLAN"
+                android:textColor="@color/bs_text_muted"
+                android:textSize="12sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/bsGamepadState"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="14dp"
+                android:gravity="center_vertical"
+                android:text="手柄：检测中"
+                android:textColor="@color/bs_text_muted"
+                android:textSize="12sp" />
+
+            <!-- 手机电量（M14-3）：之前是裸 "86%"，用户看不出这是手机电量 ——
+                 现在加电池图标（drawableStart）+ 按电量染色（代码里设色） -->
+            <TextView
+                android:id="@+id/bsBattery"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:drawableStart="@drawable/bs_ic_battery"
+                android:drawablePadding="5dp"
+                android:gravity="center_vertical"
+                android:contentDescription="手机电量"
+                android:text="—"
+                android:textColor="@color/bs_text_muted"
+                android:textSize="13sp" />
+
+            <!-- 触摸用户的菜单入口（手柄也可以点）-->
+            <TextView
+                android:id="@+id/bsMenuBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:background="@drawable/bg_bs_chip"
+                android:text="菜单"
+                android:textColor="@color/bs_text"
+                android:textSize="13sp"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
+        <!-- ===== 主区：图标侧栏 + shelf 行 ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:clipChildren="false"
+            android:clipToPadding="false">
+
+            <com.yuki.yukihub.bigscreen.BigScreenRailView
+                android:id="@+id/bsRail"
+                android:layout_width="72dp"
+                android:layout_height="match_parent"
+                android:elevation="10dp" />
+
+            <!--
+              clipChildren=true（M8）：之前是 false，卡片在 1.06 放大/滚动时能画到侧栏上面
+              （用户反馈："游戏封面能滚到分类那边去"）。
+            -->
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:clipChildren="true"
+                android:clipToPadding="true">
+
+                <ScrollView
+                    android:id="@+id/bsShelfScroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="6dp"
+                    android:fillViewport="true"
+                    android:scrollbars="none"
+                    android:clipChildren="false"
+                    android:clipToPadding="false">
+
+                    <LinearLayout
+                        android:id="@+id/bsShelfContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:gravity="bottom"
+                        android:clipChildren="false"
+                        android:clipToPadding="false" />
+                </ScrollView>
+
+                <!-- 空态 -->
+                <LinearLayout
+                    android:id="@+id/bsEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="这个分类下还没有游戏"
+                        android:textColor="@color/bs_text"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="先用「扫描 / 添加」把游戏加进来，或按 Ⓑ 返回"
+                        android:textColor="@color/bs_text_muted"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- 加载态（读取游戏库时短暂显示）-->
+                <LinearLayout
+                    android:id="@+id/bsLoading"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="正在读取游戏库…"
+                        android:textColor="@color/bs_text_muted"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- ===== 选中信息层已移到背景图上方的浮层（见文件末尾），此处只留底栏 ===== -->
+
+        <!-- ===== 底栏：按键 / 触摸提示（高度由代码按屏幕覆盖）=====
+             M14：提示居中（原来 gravity 只有 center_vertical，文字缩在左下角很难读） -->
+        <LinearLayout
+            android:id="@+id/bsBottomBar"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="22dp">
+
+            <TextView
+                android:id="@+id/bsHints"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text="方向键 移动　Ⓐ 启动　Ⓑ 返回　Ⓧ 收藏　Ⓨ 详情　LB/RB 切分类　☰ 菜单"
+                android:textColor="@color/bs_text_muted"
+                android:textSize="12.5sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ===== 选中游戏信息浮层（spec §S2-4 / 图3：压在背景大图上）=====
+         图3 结构：大标题（或 LOGO）→ 开发商 · 年份 → 分类 chips，
+         位置在左侧中部；卡片排在最底部。 -->
+    <LinearLayout
+        android:id="@+id/bsInfoBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="96dp"
+        android:layout_marginEnd="48dp"
+        android:layout_marginBottom="86dp"
+        android:orientation="vertical"
+        android:clipChildren="false"
+        android:clipToPadding="false">
+
+        <!-- 自定义标题图（Steam 式 logo，M10）：设置后用图片替代下面的文字标题 -->
+        <ImageView
+            android:id="@+id/bsInfoLogo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxHeight="96dp"
+            android:adjustViewBounds="true"
+            android:scaleType="fitStart"
+            android:visibility="gone"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/bsInfoTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:letterSpacing="0.01"
+            android:textSize="30sp"
+            android:textStyle="bold"
+            android:shadowColor="#CC000000"
+            android:shadowDx="0"
+            android:shadowDy="2"
+            android:shadowRadius="7"
+            android:textColor="@color/bs_text" />
+
+        <LinearLayout
+            android:id="@+id/bsInfoChips"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal" />
+
+        <TextView
+            android:id="@+id/bsInfoMeta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:textSize="14sp"
+            android:shadowColor="#CC000000"
+            android:shadowDx="0"
+            android:shadowDy="2"
+            android:shadowRadius="7"
+            android:textColor="#C9D2E8" />
+
+        <LinearLayout
+            android:id="@+id/bsInfoActions"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal" />
+    </LinearLayout>
+
+    <!-- ===== 浮层容器：详情层 / 菜单面板都挂在这里（保证在最上层）===== -->
+    <FrameLayout
+        android:id="@+id/bsOverlayLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- ===== 顶部提示条（spec §S7）：滑入 + 回弹，停留 2.2s（重要提示 4s）=====
+         M14-1：独立背景（玻璃渐变 + 粉描边 + 顶部高光），字号加大到 15sp，
+         内边距加宽，整体更"主机通知条"一些。 -->
+    <TextView
+        android:id="@+id/bsBanner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="14dp"
+        android:maxWidth="720dp"
+        android:paddingStart="26dp"
+        android:paddingEnd="26dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:background="@drawable/bg_bs_banner"
+        android:elevation="12dp"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.02"
+        android:textColor="@color/bs_text"
+        android:gravity="center"
+        android:alpha="0"
+        android:visibility="gone" />
+
+    <!-- ===== 入场动画层（spec §S1）：放最后 = 最上层 ===== -->
+    <include layout="@layout/view_bs_intro" />
+</FrameLayout>

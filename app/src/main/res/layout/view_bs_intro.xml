@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大屏入场层（spec §S1）—— 覆盖在全屏最上层：
+  深色底 + 中央 logo 字 + 一条横扫光带
+  动画序列由 BigScreenIntro 驱动；任意按键可跳过
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bsIntroRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bs_bg"
+    android:visibility="gone">
+
+    <!-- M18-2：入场视频（用户可选自己的视频当开场；默认隐藏，走内置动画） -->
+    <TextureView
+        android:id="@+id/bsIntroVideo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/bsIntroLogoBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <TextView
+            android:id="@+id/bsIntroTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="YukiHub"
+            android:letterSpacing="0.22"
+            android:textSize="46sp"
+            android:textStyle="bold"
+            android:textColor="@color/bs_text" />
+
+        <TextView
+            android:id="@+id/bsIntroSub"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="大　屏　模　式"
+            android:letterSpacing="0.30"
+            android:textSize="13sp"
+            android:textColor="@color/bs_focus" />
+    </LinearLayout>
+
+    <!-- 横扫光带 -->
+    <View
+        android:id="@+id/bsIntroBand"
+        android:layout_width="420dp"
+        android:layout_height="180dp"
+        android:layout_gravity="center_vertical"
+        android:alpha="0"
+        android:background="@drawable/bs_intro_band" />
+</FrameLayout>

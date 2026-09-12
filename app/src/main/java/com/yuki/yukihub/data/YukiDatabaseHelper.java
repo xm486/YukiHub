@@ -14,7 +14,7 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      * 历史：15 = 聊天回复引用 + 未读锚点；16 = 曾短暂加过群聊等级列（已废弃，等级改为不入缓存）
      *      18 = 清理 metadata_cache 孤儿行（历史存量）+ 压缩数据库
      */
-    public static final int DB_VERSION = 18;
+    public static final int DB_VERSION = 20;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -92,7 +92,8 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 "updated_at INTEGER NOT NULL," +
                 "hidden INTEGER DEFAULT 0," +
                 "favorite INTEGER DEFAULT 0," +
-                "nsfw INTEGER DEFAULT 0" +
+                "nsfw INTEGER DEFAULT 0," +
+                "trailer_path TEXT" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -117,6 +118,16 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        // v19：大屏模式的本地预告视频路径（spec §S10.2）
+        if (oldVersion < 19) {
+            safeAlter(db, "ALTER TABLE games ADD COLUMN trailer_path TEXT");
+        }
+        // v20：大屏模式的自定义标题图（Steam 式 logo）+ 自定义背景图（M10）
+        if (oldVersion < 20) {
+            safeAlter(db, "ALTER TABLE games ADD COLUMN logo_path TEXT");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN bg_path TEXT");
+        }
+
         if (oldVersion < 2) {
             safeAlter(db, "ALTER TABLE games ADD COLUMN cover_persist_uri TEXT");
             safeAlter(db, "ALTER TABLE games ADD COLUMN cover_source_type INTEGER DEFAULT 0");

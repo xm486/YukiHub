@@ -873,6 +873,9 @@ v.put("description", g.description);
         v.put("hidden", g.hidden ? 1 : 0);
         v.put("favorite", g.favorite ? 1 : 0);
         v.put("nsfw", g.nsfw ? 1 : 0);
+        v.put("trailer_path", g.trailerPath);
+        v.put("logo_path", g.logoPath);
+        v.put("bg_path", g.bgPath);
         return v;
     }
 
@@ -906,6 +909,9 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.favorite = favoriteIndex >= 0 && !c.isNull(favoriteIndex) && c.getInt(favoriteIndex) == 1;
         int nsfwIndex = c.getColumnIndex("nsfw");
         g.nsfw = nsfwIndex >= 0 && !c.isNull(nsfwIndex) && c.getInt(nsfwIndex) == 1;
+        g.trailerPath = getStringOrNull(c, "trailer_path");
+        g.logoPath = getStringOrNull(c, "logo_path");
+        g.bgPath = getStringOrNull(c, "bg_path");
         return g;
     }
 

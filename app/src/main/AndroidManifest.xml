@@ -90,6 +90,18 @@
                 android:resource="@xml/translate_accessibility_service_config" />
         </service>
 
+        <!--
+            大屏模式（Big Picture 风格）。
+            configChanges 必须含 navigation / keyboard —— 插拔手柄会触发这两类变更，
+            不声明会导致 Activity 被系统重建（焦点与入场动画会重来）。
+        -->
+        <activity
+            android:name=".bigscreen.BigScreenActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection" />
+
         <activity
             android:name=".HomeActivity"
             android:exported="false"

@@ -46,14 +46,29 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
     // 多选模式
     private boolean multiSelectMode = false;
     private final Set<Long> checkedIds = new HashSet<>();
-    // NSFW 封面模糊
+// NSFW 封面模糊
     private boolean nsfwBlurEnabled = true;
 
     public void setOnGameClickListener(OnGameClickListener listener) { this.listener = listener; }
     public void setOnUiFeedbackListener(OnUiFeedbackListener listener) { this.feedbackListener = listener; }
     public void setOnSelectionChangedListener(OnSelectionChangedListener listener) { this.selectionChangedListener = listener; }
     private void emitFeedback(int type) { if (feedbackListener != null) feedbackListener.onUiFeedback(type); }
-    public void setSelectedGameId(long id) { selectedGameId = id; notifyDataSetChanged(); }
+    /**
+     * 更新选中项（M15：**不再全量 notifyDataSetChanged()**）。
+     *
+     * <p>这条路径是"手柄点游戏后焦点跑到左上角头像"的真凶：
+     * {@code onGameClick → updateSideDetail → setSelectedGameId} 每次都全量刷新，
+     * RecyclerView 重建 item → 焦点被系统丢回第一个可聚焦控件（头像）。
+     * 现在只通知受影响的两格，焦点留在原地，"双击启动"才按得出来。
+     */
+    public void setSelectedGameId(long id) {
+        if (selectedGameId == id) { return; }
+        final int prev = indexOfGame(selectedGameId);
+        selectedGameId = id;
+        final int next = indexOfGame(id);
+        if (prev >= 0) { notifyItemChanged(prev); }
+        if (next >= 0 && next != prev) { notifyItemChanged(next); }
+    }
     public void setNsfwBlurEnabled(boolean enabled) { nsfwBlurEnabled = enabled; notifyDataSetChanged(); }
     public void submit(List<Game> newGames) {
         games.clear();
@@ -134,10 +149,42 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         return new Holder(LayoutInflater.from(parent.getContext()).inflate(R.layout.item_game_card, parent, false));
     }
 
+    /**
+     * 选中某款游戏，并且**把焦点留在它身上**（M15）。
+     *
+     * <p>问题背景：原来点击后调用 {@code notifyDataSetChanged()} 全量刷新，
+     * RecyclerView 会重建/重绑所有 item，**手柄焦点被系统丢回第一个可聚焦控件**
+     * （就是左上角那个头像）—— 于是"双击启动游戏"根本按不出来（第二次点击得重新移回去）。
+     *
+     * <p>修法：① 只通知受影响的两格（旧选中 / 新选中）；② 主动把焦点按回本卡片。
+     * 这样手柄连按两次（双击）就能直接启动。
+     */
+    private void selectAndKeepFocus(Holder h, int position, Game game) {
+        final long prevId = selectedGameId;
+        selectedGameId = game == null ? -1 : game.id;
+        final int prevIndex = indexOfGame(prevId);
+        if (prevIndex >= 0 && prevIndex != position) { notifyItemChanged(prevIndex); }
+        if (position != RecyclerView.NO_POSITION) { notifyItemChanged(position); }
+        // 焦点按回卡片（触摸模式下 requestFocus 会失败，这里静默即可，不影响触摸用户）
+        if (h != null && h.itemView != null) { h.itemView.requestFocus(); }
+    }
+
+    /** 按 id 找位置（-1 = 不在当前列表里） */
+    private int indexOfGame(long id) {
+        if (id <= 0L || games == null) { return -1; }
+        for (int i = 0; i < games.size(); i++) {
+            Game g = games.get(i);
+            if (g != null && g.id == id) { return i; }
+        }
+        return -1;
+    }
+
     @Override
     public void onBindViewHolder(@NonNull Holder h, int position) {
         Game g = games.get(position);
         h.itemView.setSelected(g != null && g.id == selectedGameId);
+        // M14：卡片要能被手柄聚焦（布局里已 focusable，这里关掉系统默认高亮避免和描边叠加）
+        com.yuki.yukihub.ui.GamepadFocus.makeFocusable(h.itemView);
 
         // Card background with dynamic colors
         if (themeActive) {
@@ -364,8 +411,7 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
             }
             emitFeedback(FEEDBACK_SWITCH);
             try { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); } catch (Throwable ignored) { }
-            selectedGameId = g.id;
-            notifyDataSetChanged();
+            selectAndKeepFocus(h, position, g);
             if (listener != null) listener.onStatusClick(g);
         });
         h.itemView.setOnClickListener(v -> {
@@ -381,8 +427,7 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
             emitFeedback(isDouble ? FEEDBACK_CONFIRM : FEEDBACK_CLICK);
             lastClickGameId = g.id;
             lastClickTime = now;
-            selectedGameId = g.id;
-            notifyDataSetChanged();
+            selectAndKeepFocus(h, position, g);
             if (listener != null) {
                 if (isDouble) listener.onGameDoubleClick(g);
                 else listener.onGameClick(g);

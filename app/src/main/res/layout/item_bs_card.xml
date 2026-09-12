@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大屏游戏卡（spec §S2-3）
+  尺寸 168×224（封面 3:4）；焦点态由代码换背景（bg_bs_cell_focused）+ 缩放
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="168dp"
+    android:layout_height="224dp"
+    android:background="@drawable/bg_bs_cell"
+    android:clipToOutline="true">
+
+    <ImageView
+        android:id="@+id/bsCardCover"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <!-- 无封面时的占位（首字） -->
+    <TextView
+        android:id="@+id/bsCardPlaceholder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:textSize="30sp"
+        android:textColor="#4E5A7A"
+        android:visibility="gone" />
+
+    <!-- 底部标题遮罩：只在开启"显示卡片标题"时用（默认关，封面就不该被压暗）-->
+    <View
+        android:id="@+id/bsCardScrim"
+        android:layout_width="match_parent"
+        android:layout_height="76dp"
+        android:layout_gravity="bottom"
+        android:visibility="gone"
+        android:background="@drawable/bs_scrim_bottom" />
+
+    <TextView
+        android:id="@+id/bsCardTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:paddingStart="7dp"
+        android:paddingEnd="7dp"
+        android:paddingBottom="6dp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:lineSpacingExtra="1dp"
+        android:textSize="12.5sp"
+        android:textColor="@color/bs_text" />
+
+    <!-- 状态点（颜色在代码里按状态设置） -->
+    <View
+        android:id="@+id/bsCardDot"
+        android:layout_width="7dp"
+        android:layout_height="7dp"
+        android:layout_gravity="top|start"
+        android:layout_margin="8dp"
+        android:background="@drawable/bs_dot" />
+
+    <!-- 收藏星 -->
+    <ImageView
+        android:id="@+id/bsCardFav"
+        android:layout_width="14dp"
+        android:layout_height="14dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:src="@drawable/bs_ic_star"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
+    <!-- R18 角标 -->
+    <TextView
+        android:id="@+id/bsCardNsfw"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="6dp"
+        android:paddingStart="5dp"
+        android:paddingEnd="5dp"
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp"
+        android:text="R18"
+        android:textSize="9sp"
+        android:textColor="@color/bs_warning"
+        android:background="@drawable/bg_bs_cell"
+        android:visibility="gone" />
+
+    <!--
+      焦点卡按键徽章（spec §1.7）：只有焦点卡才显示，提示这一张能做什么。
+      位置在标题上方，避免和标题/状态点打架。
+    -->
+    <TextView
+        android:id="@+id/bsCardBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="6dp"
+        android:layout_marginBottom="42dp"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:text="Ⓐ 启动"
+        android:textSize="9.5sp"
+        android:textColor="#E6ECFF"
+        android:background="@drawable/bg_bs_kbadge"
+        android:visibility="gone" />
+
+    <!-- 未选中卡片的压暗层（M9）：**不能**直接给 itemView 设 alpha，
+         那样整张卡片（含封面）都会半透明，能看到后面的背景 —— 看着像"封面穿了"。-->
+    <View
+        android:id="@+id/bsCardDim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:background="#0B1020" />
+
+    <!-- 焦点闪光（M3）：亮一下再退去，给"选中"一个瞬时反馈 -->
+    <View
+        android:id="@+id/bsCardFlash"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:background="#4DFFFFFF" />
+
+    <!-- 焦点描边环：从 0.94 缩放 + 透明"生长"到 1.0（AnimatedBorderBrush 的观感） -->
+    <View
+        android:id="@+id/bsCardRing"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:background="@drawable/bs_ring" />
+</FrameLayout>

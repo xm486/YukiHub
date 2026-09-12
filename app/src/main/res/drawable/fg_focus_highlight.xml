@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  全局「手柄焦点」高亮（M14）。
+
+  之前整个 app（不只是大屏）都只有系统默认焦点效果 —— 也就是"一点点变灰"，
+  手柄用户根本看不出焦点在哪。这里给出统一的焦点态：粉色描边 + 淡色底。
+
+  用法：android:foreground="@drawable/fg_focus_highlight"
+  （用 foreground 而不是 background，才不会覆盖控件原有的背景/圆角）
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 焦点 + 按下：描边更亮 -->
+    <item android:state_focused="true" android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#33FF8AB3" />
+            <stroke android:width="2.5dp" android:color="#FFFF8AB3" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <!-- 手柄/键盘焦点 -->
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#1FFF8AB3" />
+            <stroke android:width="2dp" android:color="#E6FF8AB3" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <!-- 触摸按下（保留一点反馈，但不抢戏） -->
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#22FFFFFF" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <item android:drawable="@android:color/transparent" />
+</selector>

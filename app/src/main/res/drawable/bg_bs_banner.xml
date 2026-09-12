@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  顶部提示条背景（M14-3）。
+
+  改回**最简**样式：深色圆角方块，不要渐变、不要描边、不要高光。
+  （M14-1 那版玻璃渐变 + 粉描边 + 顶部高光被用户否了："更难看，简单一点"。）
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#F00A0E1C" />
+    <corners android:radius="20dp" />
+</shape>

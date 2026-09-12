@@ -39,6 +39,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import com.yuki.yukihub.bigscreen.NsfwBlur;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -87,6 +88,8 @@ public class HomeActivity extends AppCompatActivity {
     private LinearLayout homeNewsDots;
     private ImageView homeNewsRefresh;
     private final List<Game> carouselGames = new ArrayList<>();
+    /** M18：首页当前这批游戏（NSFW 开关变化后重刷封面用） */
+    private List<Game> lastHomeGames;
     private final Handler carouselHandler = new Handler(Looper.getMainLooper());
     private int carouselIndex = 0;
     private String heroImageRequest = "";
@@ -119,9 +122,17 @@ public class HomeActivity extends AppCompatActivity {
                 finish();
                 return;
             }
+            if ("bigscreen".equals(startupPage)) {
+                // 开机直接进大屏模式（对应 spec §6.3 的 bigscreen_auto_enter）
+                startActivity(new Intent(this, com.yuki.yukihub.bigscreen.BigScreenActivity.class));
+                finish();
+                return;
+            }
         }
 
         setContentView(R.layout.activity_home);
+        // M14：全 app 手柄适配（同 MainActivity）
+        com.yuki.yukihub.ui.GamepadFocus.attach(this);
         // 聊天选图 launcher 必须在 STARTED 之前注册（供 FriendsChatDialog 借用）
         com.yuki.yukihub.social.ChatImagePicker.register(this);
         // 窗口背景铺成首页同款渐变，避免内容延伸/挖孔区域露出默认浅色背景（白边）
@@ -266,7 +277,7 @@ public class HomeActivity extends AppCompatActivity {
         });
         findViewById(R.id.homeNavBigScreen).setOnClickListener(v -> {
             touch(v);
-            Toast.makeText(this, "大屏模式正在开发中，入口已为欧尼酱预留。", Toast.LENGTH_SHORT).show();
+            startActivity(new Intent(this, com.yuki.yukihub.bigscreen.BigScreenActivity.class));
         });
         findViewById(R.id.homeNavChat).setOnClickListener(v -> {
             touch(v);
@@ -494,7 +505,7 @@ public class HomeActivity extends AppCompatActivity {
 
         String savedStartup = prefs == null ? "home" : prefs.getString("startup_page", "home");
         final String[] startupOptions = {"home", "library", "bigscreen"};
-        String[] startupLabels = {"首页（默认）", "游戏库", "大屏模式（敬请期待）"};
+        String[] startupLabels = {"首页（默认）", "游戏库", "大屏模式"};
         final int[] startupChoice = {0};
         for (int i = 0; i < startupOptions.length; i++) {
             if (startupOptions[i].equals(savedStartup)) { startupChoice[0] = i; break; }
@@ -599,12 +610,8 @@ public class HomeActivity extends AppCompatActivity {
         dialog.setOnDismissListener(d -> applyImmersive());
         dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             if (prefs != null) {
-                // 大屏模式预留：选中了也不存（仍用 home），保持预留状态
+                // 大屏模式已可进入（M0 脚手架 + 完整输入地基）
                 String selectedStartup = startupOptions[startupChoice[0]];
-                if ("bigscreen".equals(selectedStartup)) {
-                    Toast.makeText(this, "大屏模式正在开发中，敬请期待", Toast.LENGTH_SHORT).show();
-                    selectedStartup = "home";
-                }
                 prefs.edit()
                         .putFloat("ui_font_scale", fontScaleValue[0])
                         .putFloat("ui_scale", uiScaleValue[0])
@@ -614,6 +621,8 @@ public class HomeActivity extends AppCompatActivity {
                         .apply();
             }
             Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
+            // M18：NSFW 模糊开关变了要**立刻重刷**首页封面（不然要回主库再进来才生效）
+            refreshNsfwCovers();
             dialog.dismiss();
         });
     }
@@ -1262,6 +1271,8 @@ long difference = today - yesterday;
 
     private void setupCarousel(List<Game> games) {
         carouselHandler.removeCallbacks(carouselRunnable);
+        // M18：存一份，NSFW 开关变化时可以直接重刷（不用回主库再进来）
+        lastHomeGames = games == null ? null : new ArrayList<>(games);
         carouselGames.clear();
         if (games != null) {
             // repository.getAll() 已按最近游玩、创建时间排序。
@@ -1345,8 +1356,20 @@ long difference = today - yesterday;
         heroImageRequest = request;
         heroCover.setImageResource(R.drawable.ic_launcher_foreground);
         if (value.isEmpty()) return;
+        // M18：首页也要遵守 NSFW 模糊（与主库/大屏同一开关，默认开）
+        final boolean blur = needNsfwBlur(game);
+        final String blurKey = NsfwBlur.cacheKey("home_hero", game == null ? -1L : game.id, value);
         if (value.startsWith("http://") || value.startsWith("https://")) {
-            loadRemoteHeroCover(value, request);
+            loadRemoteHeroCover(value, request, blur, blurKey);
+            return;
+        }
+        if (blur) {
+            // 安全底线：模糊算不出来就保持占位图，绝不露原图
+            NsfwBlur.load(heroCover, value, blurKey, 2, 24f, bitmap -> {
+                if (!request.equals(heroImageRequest)) return;
+                if (bitmap != null) heroCover.setImageBitmap(bitmap);
+                else heroCover.setImageResource(R.drawable.ic_launcher_foreground);
+            });
             return;
         }
         try {
@@ -1358,7 +1381,29 @@ long difference = today - yesterday;
         }
     }
 
-    private void loadRemoteHeroCover(String url, String request) {
+    /** M18：这张卡的封面要不要模糊（NSFW 判定 + 设置开关，与主库一致） */
+    private boolean needNsfwBlur(Game game) {
+        return game != null && game.nsfw && NsfwBlur.enabled(this);
+    }
+
+    /**
+     * M18：NSFW 模糊开关变化后重刷首页封面。
+     *
+     * <p>只重刷"当前英雄位 + 快捷卡片"这两处会显示封面的地方：
+     * 英雄位回到当前下标重新渲染，卡片列表按存下来的 {@link #lastHomeGames} 重建
+     * （重建时就会走新的模糊判定）。
+     */
+    private void refreshNsfwCovers() {
+        try {
+            if (!carouselGames.isEmpty()) {
+                int index = Math.max(0, Math.min(carouselIndex, carouselGames.size() - 1));
+                showCarouselGame(index, false);
+            }
+            if (lastHomeGames != null) { bindQuickGames(lastHomeGames); }
+        } catch (Throwable ignored) { }
+    }
+
+    private void loadRemoteHeroCover(String url, String request, boolean blur, String blurKey) {
         new Thread(() -> {
             Bitmap bitmap = null;
             try {
@@ -1385,7 +1430,16 @@ long difference = today - yesterday;
             final Bitmap result = bitmap;
             runOnUiThread(() -> {
                 if (!request.equals(heroImageRequest)) return;
-                if (result != null) heroCover.setImageBitmap(result);
+                if (result == null) return;
+                if (blur) {
+                    // M18：远程封面也是 NSFW 的话，同样只显示模糊图（算不出来就留占位）
+                    NsfwBlur.blurAsync(heroCover, result, blurKey, 24f, blurred -> {
+                        if (blurred != null) heroCover.setImageBitmap(blurred);
+                        else heroCover.setImageResource(R.drawable.ic_launcher_foreground);
+                    });
+                } else {
+                    heroCover.setImageBitmap(result);
+                }
             });
         }).start();
     }
@@ -1429,7 +1483,19 @@ long difference = today - yesterday;
                 outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(12));
             }
         });
-        if (!loadLocalCover(cover, game)) cover.setImageResource(R.drawable.ic_launcher_foreground);
+        // M18：快捷卡片的封面也要遵守 NSFW 模糊（之前首页完全没判 NSFW）
+        final String cardCover = firstNonEmpty(game.coverPersistUri, game.coverUri);
+        final boolean cardBlur = needNsfwBlur(game) && !cardCover.isEmpty()
+                && !cardCover.startsWith("http://") && !cardCover.startsWith("https://");
+        if (cardBlur) {
+            cover.setImageResource(R.drawable.ic_launcher_foreground);   // 先占位，模糊算好再换
+            NsfwBlur.load(cover, cardCover, NsfwBlur.cacheKey("home_card", game.id, cardCover),
+                    4, 22f, blurred -> {
+                        if (blurred != null) cover.setImageBitmap(blurred);
+                    });
+        } else if (!loadLocalCover(cover, game)) {
+            cover.setImageResource(R.drawable.ic_launcher_foreground);
+        }
         card.addView(cover, new LinearLayout.LayoutParams(dp(62), dp(42)));
 
         TextView title = new TextView(this);

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  背景底部压暗（M6）：只占底部 38% 高度，给卡片排一个落点。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="90"
+        android:startColor="#00070B16"
+        android:centerColor="#3D070B16"
+        android:endColor="#B3070B16"
+        android:type="linear" />
+</shape>

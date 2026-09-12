@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 侧栏条目焦点/选中态（M6）：细描边 + 极淡底色，替代原来那种"大粉药丸" -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#1FFFFFFF" />
+    <corners android:radius="8dp" />
+    <stroke android:width="1.5dp" android:color="@color/bs_focus" />
+</shape>

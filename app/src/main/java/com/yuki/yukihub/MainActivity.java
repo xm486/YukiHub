@@ -396,6 +396,8 @@ private ActivityResultLauncher<String> backupCreateLauncher;
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        // M14：全 app 手柄适配 —— 给整个界面装上焦点高亮（之前只有系统默认的"一点点变灰"）
+        com.yuki.yukihub.ui.GamepadFocus.attach(this);
         // 聊天选图 launcher 必须在 STARTED 之前注册（供 FriendsChatDialog 借用）
         com.yuki.yukihub.social.ChatImagePicker.register(this);
         enterImmersiveMode();
@@ -1987,7 +1989,7 @@ View navHome = findViewById(R.id.navHome);
 View navChat = findViewById(R.id.navChat);
 if (navHome != null) { prepareManualClickFeedback(navHome); navHome.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, HomeActivity.class).putExtra("force_home", true)); finish(); }); }
 if (navTranslate != null) { prepareManualClickFeedback(navTranslate); navTranslate.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, com.yuki.yukihub.translate.TranslateControlActivity.class)); }); }
-if (navBigScreen != null) { prepareManualClickFeedback(navBigScreen); navBigScreen.setOnClickListener(v -> { clickFeedback(v); Toast.makeText(this, "大屏模式正在开发中，入口已为欧尼酱预留。", Toast.LENGTH_SHORT).show(); }); }
+if (navBigScreen != null) { prepareManualClickFeedback(navBigScreen); navBigScreen.setOnClickListener(v -> { clickFeedback(v); startActivity(new Intent(this, com.yuki.yukihub.bigscreen.BigScreenActivity.class)); }); }
 if (navChat != null) { prepareManualClickFeedback(navChat); navChat.setOnClickListener(v -> { clickFeedback(v); showFriendsChatPlaceholder(); }); }
 // 排序按钮
 View btnSort = findViewById(R.id.btnSort);

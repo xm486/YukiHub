@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  背景遮罩（M6）：只有**标题所在的一侧**需要压暗，其余保持清晰。
+  之前是全屏 #B305070E（70% 深色），把背景图整个压没了。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="0"
+        android:startColor="#C4070B16"
+        android:centerColor="#5A070B16"
+        android:centerX="0.42"
+        android:endColor="#00070B16"
+        android:type="linear" />
+</shape>

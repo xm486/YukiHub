@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通用浮层面板（游戏操作菜单 / 主菜单 / 选择器） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#F2090D1A" />
+    <corners android:radius="14dp" />
+    <stroke android:width="1dp" android:color="#3C4874" />
+</shape>

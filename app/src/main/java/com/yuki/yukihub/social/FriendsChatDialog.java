@@ -4309,18 +4309,15 @@ public class FriendsChatDialog {
     }
 
     // ==================== 表情包 ====================
-
     /** 从 URL 加载表情 Bitmap 到 ImageView（异步，带缓存） */
     private void loadEmojiInto(String url, ImageView imageView, int size) {
         if (url == null || url.isEmpty()) return;
-
         // 1. 内存缓存
         android.graphics.Bitmap cached = emojiCache.get(url);
         if (cached != null) {
             imageView.setImageBitmap(cached);
             return;
         }
-
         // 2. 磁盘缓存
         android.graphics.Bitmap diskBmp = bitmapFromDiskCache(url);
         if (diskBmp != null) {
@@ -4342,7 +4339,6 @@ public class FriendsChatDialog {
             });
             return;
         }
-
         // 3. 网络加载
         new Thread(() -> {
             try {
@@ -4358,6 +4354,7 @@ public class FriendsChatDialog {
             } catch (Throwable ignored) {}
         }, "YukiHub-Emoji-Load").start();
     }
+
 
     /** 构建表情图片 View（本站表情按名字映射 URL；NextMoe 贴纸的 content 是完整 URL，直接加载） */
     private View buildEmojiContentView(String emojiName) {
@@ -4477,8 +4474,10 @@ public class FriendsChatDialog {
         // 本应用只有横屏：屏幕高度有限（通常约 360~400dp），窗口高度必须按屏幕现算。
         // 固定 400dp 网格必然超出屏幕、被系统裁掉——底部的行永远滚不出来。
         // 网格高度 = 屏幕高 - 弹窗装饰(tab行 34 + 边距/内边距 ~32) - 顶部留白(~38)
+        // M18-4：**撤回**我 M18-2 用"窗口可见区域"算高度的改法 —— 我们是横屏，那套算法在横屏下不对。
+        // 回到原来那条确定性公式（按屏幕高算），只把扣除量从 104dp 减到 92dp（=比你原来更高）。
         int screenH = activity.getResources().getDisplayMetrics().heightPixels;
-        int gridH = Math.max(dp(160), screenH - dp(104));
+        int gridH = Math.max(dp(180), screenH - dp(92));
         rootBox.addView(pickerGrid, new LinearLayout.LayoutParams(-1, gridH));
 
         emojiDialog = new Dialog(activity);

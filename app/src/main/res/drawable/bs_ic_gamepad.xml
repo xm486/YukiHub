@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 手柄图标（M16）：顶栏"手柄已连接/未连接"前的图标，颜色由代码按连接状态染色 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 手柄主体 -->
+    <path
+        android:pathData="M7.2,6.5h9.6c2.6,0 4.6,2 5.1,4.6l0.9,5.1c0.4,2.1 -1.2,4.1 -3.4,4.1c-1.1,0 -2.1,-0.5 -2.8,-1.4l-0.9,-1.2c-0.4,-0.5 -1,-0.8 -1.6,-0.8h-2.2c-0.6,0 -1.2,0.3 -1.6,0.8l-0.9,1.2c-0.7,0.9 -1.7,1.4 -2.8,1.4c-2.2,0 -3.8,-2 -3.4,-4.1l0.9,-5.1C2.6,8.5 4.6,6.5 7.2,6.5z"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.7" />
+
+    <!-- 左：十字键 -->
+    <path
+        android:pathData="M6.2,11.4h1.6v1.6h1.6v1.6H7.8v1.6H6.2v-1.6H4.6v-1.6h1.6z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- 右：两个按键 -->
+    <path
+        android:pathData="M15.4,12.6m-1.1,0a1.1,1.1 0 1,0 2.2,0a1.1,1.1 0 1,0 -2.2,0"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:pathData="M18.4,15.2m-1.1,0a1.1,1.1 0 1,0 2.2,0a1.1,1.1 0 1,0 -2.2,0"
+        android:fillColor="#FFFFFF" />
+</vector>

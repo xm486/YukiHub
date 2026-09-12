@@ -25,6 +25,16 @@ public class Game {
     public boolean hidden;
     public boolean favorite;
     public boolean nsfw;
+    /**
+     * 本地预告视频路径（大屏模式用；spec §S10）
+     * 指向 getFilesDir()/trailers/ 下的内部文件，为空表示未绑定。
+     * 注意：这是**本机路径**，不参与跨设备同步（导出白名单不含它）。
+     */
+    public String trailerPath;
+    /** 自定义标题图（Steam 式 logo，M10）：设置后大屏用图片替代文字标题 */
+    public String logoPath;
+    /** 自定义背景图（M10）：设置后大屏背景优先用它，而不是封面 */
+    public String bgPath;
 
     public Game() {
         engine = EngineType.UNKNOWN;

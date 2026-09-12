@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 侧栏条目常态（M6）：**不画底板**，只留图标，视觉上是一条细栏（对齐实机目标图）-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+    <corners android:radius="8dp" />
+</shape>

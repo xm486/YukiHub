@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大屏模式专用色（与 bigscreen_spec.md §5.1 一致）
+  独立文件，避免改动现有 colors.xml
+-->
+<resources>
+    <color name="bs_bg">#0B1020</color>
+    <color name="bs_bg2">#111936</color>
+    <color name="bs_card">#171E33</color>
+    <color name="bs_card_focus">#222B49</color>
+    <color name="bs_primary">#8AB4FF</color>
+    <!-- 焦点色：取自实机截图（洋红描边），即品牌副强调色 -->
+    <color name="bs_focus">#FF8AB3</color>
+    <color name="bs_focus_glow">#59FF8AB3</color>
+    <color name="bs_line">#2D3658</color>
+    <color name="bs_text">#F5F7FF</color>
+    <color name="bs_text_muted">#9AA4BF</color>
+    <color name="bs_success">#34C759</color>
+    <color name="bs_warning">#FFCC00</color>
+</resources>

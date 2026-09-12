@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大屏卡片焦点态：洋红描边 + 外发光（对齐实机截图 §1.7）
+  3dp 描边写在 shape 内，保证四边等宽且不挤压布局
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/bs_card_focus" />
+    <corners android:radius="10dp" />
+    <stroke android:width="3dp" android:color="@color/bs_focus" />
+</shape>

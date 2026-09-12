@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 焦点描边环（透明填充 + 粉色描边）：用 scale/alpha 动画做出"描边生长"效果 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+    <corners android:radius="10dp" />
+    <stroke android:width="3dp" android:color="@color/bs_focus" />
+</shape>

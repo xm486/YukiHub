@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 卡片底部标题遮罩（自下而上渐隐，保证标题在亮封面上可读） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="90"
+        android:startColor="#E605070E"
+        android:centerColor="#8C05070E"
+        android:endColor="#0005070E"
+        android:type="linear" />
+</shape>

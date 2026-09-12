@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 侧栏图标：引擎（芯片） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M6.5,6.5h11v11h-11z"
+        android:strokeColor="#FFFFFF" android:strokeWidth="1.9"
+        android:strokeLineJoin="round" android:fillColor="#00000000" />
+    <path android:pathData="M10,3.4v3M14,3.4v3M10,17.6v3M14,17.6v3M3.4,10h3M3.4,14h3M17.6,10h3M17.6,14h3"
+        android:strokeColor="#FFFFFF" android:strokeWidth="1.9"
+        android:strokeLineCap="round" android:fillColor="#00000000" />
+</vector>

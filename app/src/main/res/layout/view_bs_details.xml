@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  详情层（spec §S3）—— 对齐实机截图：大标题 / 开发商行 / 分类 chips / 三栏统计 /
+  描述 / INTRODUCTION 截图画带 / 玻璃按钮组
+  数据来源：Game（本地库） + BigScreenMeta（NextMoe / VNDB / Bangumi / Ymgal 合并）
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bsDtRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F005070E"
+    android:visibility="gone">
+
+    <ImageView
+        android:id="@+id/bsDtBg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:alpha="0.30"
+        android:contentDescription="@null" />
+
+    <!-- 触摸用户的关闭入口（手柄按 Ⓑ）-->
+    <TextView
+        android:id="@+id/bsDtClose"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="18dp"
+        android:layout_marginEnd="26dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:background="@drawable/bg_bs_chip"
+        android:text="✕ 关闭"
+        android:textColor="@color/bs_text"
+        android:textSize="13sp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <!-- 详情层里的预告视频层（spec §S10.4「详情内播放」） -->
+    <TextureView
+        android:id="@+id/bsDtVideo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:paddingStart="56dp"
+        android:paddingEnd="48dp"
+        android:paddingTop="44dp"
+        android:paddingBottom="40dp">
+
+        <!-- 左列：文字信息（**整列可滚动** —— 横屏矮屏上内容必然超出，必须能滑） -->
+        <ScrollView
+            android:id="@+id/bsDtLeftScroll"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="none"
+            android:clipToPadding="false">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/bsDtTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:lineSpacingExtra="2dp"
+                android:textColor="@color/bs_text" />
+
+            <TextView
+                android:id="@+id/bsDtSub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textSize="13.5sp"
+                android:textColor="@color/bs_text_muted" />
+
+            <LinearLayout
+                android:id="@+id/bsDtChips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal" />
+
+            <LinearLayout
+                android:id="@+id/bsDtStats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:orientation="horizontal" />
+
+            <!-- 简介小节标题（对齐主题 GameDetails 的 INTRODUCTION 段落；简介为空时整块隐藏）-->
+            <TextView
+                android:id="@+id/bsDtIntroLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="5dp"
+                android:letterSpacing="0.14"
+                android:text="简　介"
+                android:textColor="@color/bs_text_muted"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
+
+            <ScrollView
+                android:id="@+id/bsDtDescScroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="16dp"
+                android:scrollbars="none">
+
+                <TextView
+                    android:id="@+id/bsDtDesc"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:lineSpacingExtra="5dp"
+                    android:textSize="14sp"
+                    android:textColor="#B7C1DC" />
+            </ScrollView>
+
+            <!-- INTRODUCTION：游戏截图带（无数据时整块隐藏） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="12dp">
+
+                <TextView
+                    android:id="@+id/bsDtShotsTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="INTRODUCTION"
+                    android:letterSpacing="0.16"
+                    android:textSize="11sp"
+                    android:textColor="#6E7BA0"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:id="@+id/bsDtShots"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- 玻璃按钮组 -->
+            <LinearLayout
+                android:id="@+id/bsDtActs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal" />
+        </LinearLayout>
+        </ScrollView>
+
+        <!-- 右列：封面（尺寸由代码按屏幕高度缩放，避免矮屏被裁）-->
+        <FrameLayout
+            android:id="@+id/bsDtCoverFrame"
+            android:layout_width="286dp"
+            android:layout_height="382dp"
+            android:layout_marginStart="36dp"
+            android:layout_gravity="center_vertical"
+            android:background="@drawable/bg_bs_cell"
+            android:clipToOutline="true">
+
+            <ImageView
+                android:id="@+id/bsDtCover"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:id="@+id/bsDtCoverPlaceholder"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:textSize="52sp"
+                android:textColor="#4E5A7A"
+                android:visibility="gone" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/bsDtHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="14dp"
+        android:text="← → 切换游戏　Ⓐ 启动　Ⓧ 收藏　Ⓨ 操作菜单　Ⓑ 关闭"
+        android:textSize="12sp"
+        android:textColor="#7C89AF" />
+</FrameLayout>
