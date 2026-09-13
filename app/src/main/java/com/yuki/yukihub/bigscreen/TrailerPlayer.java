@@ -63,8 +63,20 @@ public class TrailerPlayer {
      * 观感上就是"画面没断，只是换了个地方显示"。
      */
     private MediaPlayer handoffOld;
+
+    /** M18-11：M18-10 试过的"抓帧铺图"做法已整体撤回（用户实测观感更差，见 spec） */
     /** M17：交接后的首次显示不做淡入（避免又"黑一下"） */
     private boolean instantShow = false;
+
+    /**
+     * M18-9：**续播位置**（跨输出目标切换时用）。
+     *
+     * <p>老实现只有一个 {@code resumeMs}，而且在"检查 surface 是否就绪"**之前**就被清零了：
+     * 进详情页时详情层的 videoView 通常还没拿到 SurfaceTexture → 走等待分支 → 位置被吃掉，
+     * 等 surface 就绪再起播就变成 **从 0 重播**（用户："切到详情页 PV 会退回/重新放"）。
+     * 现在连"源"一起记，并且**只在真正 prepare 那一刻才消费**。
+     */
+    private String resumePath;
 
     public TrailerPlayer(Context context, Listener listener) {
         this.context = context.getApplicationContext();
@@ -86,6 +98,15 @@ public class TrailerPlayer {
         final String path = currentPath;
         final boolean wasPlaying = player != null && prepared && path != null;
         final int pos = wasPlaying ? currentPosition() : 0;
+        // M18-12：**旧目标上的最后一帧必须立刻清掉**。
+        // 因为切换时旧实例会继续播一会儿（M17 的交接设计），它写入旧目标的画面会留在那里；
+        // 用户从"游戏A的详情页"进"游戏B的详情页"时，前一个视频的最后一张画面就停在那儿
+        // —— 表现就是"前一个游戏 PV 卡住的图片"。
+        final TextureView oldTarget = target;
+        if (oldTarget != null && oldTarget != newTarget) {
+            oldTarget.animate().cancel();
+            oldTarget.animate().alpha(0f).setDuration(120L).start();
+        }
         target = newTarget;
         if (wasPlaying && newTarget != null) {
             // M17：无缝交接 —— 旧实例先留着（继续在原画面上播），新实例 prepare 成功后再释放
@@ -95,6 +116,8 @@ public class TrailerPlayer {
             prepared = false;
             currentPath = null;
             preparingPath = null;
+            // M18-9：续播位置连着"源"一起记（只在真正 prepare 时才消费）
+            resumePath = path;
             resumeMs = pos;
             instantShow = true;
             startInternal(path);
@@ -103,12 +126,28 @@ public class TrailerPlayer {
         }
     }
 
+    /** M18-11：M18-10 的快照接力已撤回（用户实测观感更差），这里保持"直接切" */
+
     /** 释放"交接中"的旧实例（正常路径下在新实例 prepared 之后） */
     private void releaseHandoff() {
         if (handoffOld == null) { return; }
         final MediaPlayer old = handoffOld;
         handoffOld = null;
         handler.postDelayed(() -> safeRelease(old), 60L);
+    }
+
+    /**
+     * M18-9：交接兜底 —— 新实例迟迟起不来（surface 一直没就绪 / prepare 卡住），
+     * 就把旧实例放掉。否则旧实例的输出目标已经不可见了，它会继续放音轨：
+     * 表现就是用户说的**"画面卡死、但还有声音"**，而且是每个会话攒一堆实例。
+     */
+    private void armHandoffGuard(final long myToken) {
+        if (handoffOld == null) { return; }
+        handler.postDelayed(() -> {
+            if (myToken == token && handoffOld != null && !prepared) {
+                releaseHandoff();
+            }
+        }, PREPARE_TIMEOUT_MS + 400L);
     }
 
     /** 当前播放位置（失败返回 0） */
@@ -163,6 +202,8 @@ public class TrailerPlayer {
         pendingPath = null;
         currentPath = null;   // M16：停了就不再"算正在播"
         preparingPath = null; // M16-1：取消后也不再有"准备中"的源
+        resumeMs = 0;          // M18-9：取消后续播位置也作废
+        resumePath = null;
         instantShow = false;
         releaseHandoff();     // M17：取消时交接中的旧实例也必须放掉（否则泄漏解码器）
         token++;
@@ -203,15 +244,16 @@ public class TrailerPlayer {
 
         final long myToken = ++token;
         preparingPath = path;   // M16-1：标记"这个源正在准备"，同源的 request 不会打断它
-        // M16-1：续播位置是"一次性"的 —— 在这里就取走并清零，
-        // 避免起播失败时残留下来，下次换游戏被误 seek 到别的位置。
-        final int seekMs = resumeMs;
-        resumeMs = 0;
         safeRelease(player);
         prepared = false;
-
         if (!target.isAvailable()) {
             // Surface 还没就绪：等它就绪再起播（只等一次，避免泄漏监听）
+            //
+            // M18-9：① 这里**不再提前消费 resumeMs** —— 位置留到真正 prepare 时再取，
+            //        否则"进详情页时 surface 还没就绪"会把续播位置吃掉 → 从 0 重播；
+            //        ② 等 surface 也要有兜底：超时就把交接中的旧实例放掉，
+            //        否则旧实例会一直"只剩声音、画面卡死"。
+            armHandoffGuard(myToken);
             target.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> applyFit());
             target.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
@@ -221,12 +263,29 @@ public class TrailerPlayer {
                 @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
                     if (myToken == token) { applyFit(); }
                 }
-                @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) { return true; }
+                @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+                    // M18-9：当前输出目标被销毁（画面没了）→ 不能让实例继续"只有声音"。
+                    // 下一帧再处理：这里可能正在 layout/detach 过程中。
+                    handler.post(() -> {
+                        if (myToken != token) { return; }
+                        if (target != null && target.isAvailable()) { return; }
+                        if (handoffOld != null) {
+                            releaseHandoff();
+                        } else if (player != null) {
+                            cancel();
+                        }
+                    });
+                    return true;
+                }
                 @Override public void onSurfaceTextureUpdated(SurfaceTexture surface) { }
             });
             return;
         }
-
+        // M18-9：真正要 prepare 了才消费"续播位置"，并且只对同一个源有效
+        //（避免起播失败时残留下来，下次换游戏被误 seek 到别的位置）
+        final int seekMs = (resumePath != null && resumePath.equals(path)) ? resumeMs : 0;
+        resumeMs = 0;
+        resumePath = null;
         try {
             MediaPlayer mp = new MediaPlayer();
             player = mp;

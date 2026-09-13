@@ -19,33 +19,39 @@
         android:alpha="0.30"
         android:contentDescription="@null" />
 
-    <!-- 触摸用户的关闭入口（手柄按 Ⓑ）-->
-    <TextView
-        android:id="@+id/bsDtClose"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="18dp"
-        android:layout_marginEnd="26dp"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="8dp"
-        android:background="@drawable/bg_bs_chip"
-        android:text="✕ 关闭"
-        android:textColor="@color/bs_text"
-        android:textSize="13sp"
-        android:clickable="true"
-        android:focusable="true" />
-
-    <!-- 详情层里的预告视频层（spec §S10.4「详情内播放」） -->
+    <!-- 触摸用户的关闭入口（手柄按 Ⓑ）
+         M18-10：**必须排在 bsDtVideo 之后** —— 否则视频层（match_parent）会把它整块盖住，
+         用户反馈"触屏模式右上角没有退出按钮"就是这个原因。 -->
     <TextureView
         android:id="@+id/bsDtVideo"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:alpha="0" />
 
+    <TextView
+        android:id="@+id/bsDtClose"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="14dp"
+        android:layout_marginEnd="20dp"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:background="@drawable/bg_bs_chip"
+        android:elevation="12dp"
+        android:text="✕ 退出"
+        android:textColor="@color/bs_text"
+        android:textSize="14sp"
+        android:clickable="true"
+        android:focusable="true" />
+<!-- 详情层里的预告视频层（spec §S10.4「详情内播放」） -->
+
+    <!-- M18-10：内容容器（正文 + 封面）—— 单独一个 id，PV 播放时整块淡出让位，
+         这样"主界面 PV → 详情页 PV"看起来才是同一个视频在继续，而不是换了个画面。 -->
     <LinearLayout
+        android:id="@+id/bsDtContent"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="horizontal"

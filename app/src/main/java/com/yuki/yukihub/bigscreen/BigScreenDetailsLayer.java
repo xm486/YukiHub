@@ -145,8 +145,16 @@ public class BigScreenDetailsLayer {
         coverFrame = root.findViewById(R.id.bsDtCoverFrame);
         hintText = root.findViewById(R.id.bsDtHint);
         // 触摸用户的关闭按钮（手柄按 Ⓑ）
-        View closeBtn = root.findViewById(R.id.bsDtClose);
-        if (closeBtn != null) { closeBtn.setOnClickListener(v -> { BigScreenSound.open(); hide(); }); }
+        closeBtn = root.findViewById(R.id.bsDtClose);
+        if (closeBtn != null) {
+            closeBtn.setOnClickListener(v -> { BigScreenSound.open(); hide(); });
+            closeBtn.setVisibility(View.GONE);   // M18-9：先藏起来，由 setTouchUi 决定显不显示
+        }
+        // M18-9：**详情层必须吃掉落在空白处的触摸**。
+        // 之前 root 只是"有背景色"，ViewGroup 不消费 → 触摸穿透到底下的卡片/侧栏/顶栏，
+        // 所以触屏能点到外面的按钮、能打开图片、甚至把右上角的设置点出来。
+        root.setClickable(true);
+        root.setOnTouchListener((v, e) -> true);
         setKeyStyle(BigScreenKeys.STYLE_XBOX);
     }
 
@@ -176,10 +184,22 @@ public class BigScreenDetailsLayer {
         if (list.isEmpty()) { return; }
         index = Math.max(0, Math.min(startIndex, list.size() - 1));
 
+        // M18-10：每次打开都先复位"内容层/背景图"的可见性 ——
+        // 上次是"PV 播放中"关掉的，内容层还是透明的，重开就只剩背景了
+        // M18-11：内容层的 alpha 动画已撤回（保留复位，防止历史残留）
+        if (contentView == null) { contentView = root.findViewById(R.id.bsDtContent); }
+        if (contentView != null) { contentView.animate().cancel(); contentView.setAlpha(1f); }
+        if (bgView != null) { bgView.animate().cancel(); bgView.setAlpha(bgBaseAlpha); }
+
+        // M18-11：入场淡入只作用于内容层（**视频层不参与淡入**，避免视频跟着"闪一下"）；
+        // 内容层不再被 PV 隐藏，只是每次打开时先透明再淡入。
         root.setVisibility(View.VISIBLE);
-        root.setAlpha(0f);
-        root.animate().alpha(1f).setDuration(200L)
-                .setInterpolator(new DecelerateInterpolator()).start();
+        root.setAlpha(1f);
+        if (contentView != null) {
+            contentView.setAlpha(0f);
+            contentView.animate().alpha(1f).setDuration(200L)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }
         // M16-1：每次打开都复位按钮排焦点（否则上次的描边会残留）
         actIndex = 0;
         // M18-5：触摸模式下**不预选**任何按钮（手柄模式保持"游玩"选中）
@@ -195,6 +215,9 @@ public class BigScreenDetailsLayer {
      * PV 播放中 → 详情层背景图让位（M8：否则视频层下面还压着一张封面，看着像视频半透明）。
      */
     public void setVideoPlaying(boolean playing) {
+        // M18-11：**撤回 M18-10 的"内容层整块让位"** —— 用户实测：播放 PV 时进详情页
+        // "就只剩个按钮了"（正文/封面/统计都被淡掉了，看着像坏了）。
+        // 回到原行为：只让背景图让位，内容照常显示。
         if (bgView == null) { return; }
         bgView.animate().alpha(playing ? 0f : bgBaseAlpha).setDuration(260L).start();
     }
@@ -220,10 +243,16 @@ public class BigScreenDetailsLayer {
     }
 
     public void hide() {
-        Game g = current();
+        // M18-9：**通知放到动画结束时**（root 已经 GONE）。
+        // 之前是立刻通知，那一刻 isVisible() 还是 true → 活动层会把 PV 又 attach 到详情层的
+        // 视频目标上；160ms 后这个 view 变 GONE、surface 被销毁 → PV 断在没人看的地方。
+        // 现在结束回调里再通知，活动层就会把 PV 正确地接回主界面背景层。
         root.animate().alpha(0f).setDuration(160L)
-                .withEndAction(() -> root.setVisibility(View.GONE)).start();
-        if (listener != null && g != null) { listener.onGameChanged(g); }
+                .withEndAction(() -> {
+                    root.setVisibility(View.GONE);
+                    Game g = current();
+                    if (listener != null && g != null) { listener.onGameChanged(g); }
+                }).start();
     }
 
     /** 设置变化（如开关 NSFW 模糊）后按当前游戏重画一次 */
@@ -300,6 +329,11 @@ public class BigScreenDetailsLayer {
     public void setTouchUi(boolean touch) {
         this.touchUi = touch;
         this.actsFocusVisible = !touch;
+        // M18-9：触摸模式显示"✕ 关闭"（触屏没有 Ⓑ 键），手柄模式隐藏
+        if (closeBtn != null) {
+            closeBtn.setVisibility(touch ? View.VISIBLE : View.GONE);
+        }
+        updateHintText();
         applyActsFocus();
     }
 
@@ -361,9 +395,17 @@ public class BigScreenDetailsLayer {
         }
     }
 
+    private View closeBtn;   // M18-9：触摸模式的"✕ 关闭"（手柄模式隐藏）
+    private View contentView;   // M18-10：正文 + 封面容器，PV 播放时整块让位
+
     /** 详情层底部提示（复用类里已有的 BigScreenKeys 风格） */
     private void updateHintText() {
         if (hintText == null) { return; }
+        // M18-9：触摸模式别显示按键提示（没有手柄），改成点按说明
+        if (touchUi) {
+            hintText.setText("点按按钮执行　↕ 滑动查看简介/截图　✕ 关闭（右上角）");
+            return;
+        }
         BigScreenKeys k = new BigScreenKeys(keyStyle);
         hintText.setText("← → 选择操作　" + k.confirm() + " 执行　↑↓ 滚动内容　"
                 + k.third() + " 收藏　" + k.back() + " 关闭");

@@ -96,10 +96,11 @@ public class BigScreenActivity extends AppCompatActivity
     /** 单排最多放多少张卡（RecyclerView 复用，几千张也不卡） */
     private static final int SHELF_MAX = 500;
     /**
-     * M18-7：信息层底边与卡片行顶部之间的间隙（dp）。
-     * 用户明确要求：**就一点点**，不要为了塞下"更大"档卡片而把底部撑成一大块。
+     * M18-16：信息层底边与卡片行（含行标题）顶部之间的间隙（dp）。
+     * 用户要求：**别贴死（0dp），留 2~4dp 就差不多** → 取 4dp（偏安全的一档）。
+     * 之前是 8dp，配合 M18-15 的"真实底栏高度"会看着略空。
      */
-    private static final int INFO_GAP_DP = 8;
+    private static final int INFO_GAP_DP = 4;
     private static final long HINT_FADE_DELAY_MS = 4000L;
 
     // ===== 核心 =====
@@ -482,6 +483,22 @@ public class BigScreenActivity extends AppCompatActivity
         }
         applyLayerMetrics();
         applyInfoMetrics();
+        // M18-12：**手柄模式刚进大屏那一下的轻微错位**（"动一下就正常了"）——
+        // 根因是滚动位置要在首帧之后才准（见 rebuildShelves 里的 post 对齐）。
+        // 这里再补一次"内容层快速淡入"：即使首帧真差了几像素，也在 220ms 内抹平，
+        // 不会留下"信息层压着卡片"的静态观感；触摸模式本来就没这问题，看到的效果一样。
+        if (shelfContainer != null) {
+            shelfContainer.setAlpha(0f);
+            shelfContainer.animate().alpha(1f).setDuration(220L).start();
+        }
+        if (shelfScroll != null) {
+            shelfScroll.post(() -> {
+                if (focusEngine != null) { scrollVerticalToRow(focusEngine.row()); }
+                // M18-15：行布局完成 + 底栏高度已定 → 用**实测值**重算信息层位置。
+                // 这是最终生效的一次（首帧之前那几次调用用的是估算值，会被这次覆盖）。
+                applyInfoMetrics();
+            });
+        }
     }
 
     /**
@@ -511,6 +528,15 @@ public class BigScreenActivity extends AppCompatActivity
      * 信息浮层的字号与位置（M6 整体缩放）。
      * 之前标题写死 30sp：在 360dp 高的横屏手机上等于"半屏都是字"，必须按屏幕短边算。
      */
+    /** M18-15：底栏的**真实**高度（dp）—— 触摸模式下底栏高度是 0（卡片行贴屏幕下沿），
+     *  之前锚点永远扣 `sizes.bottomBarH`，触摸模式就白让了一整条底栏 → "空隙有点大"。 */
+    private int bottomBarDp() {
+        if (bottomBar != null && bottomBar.getHeight() > 0) {
+            return Math.round(bottomBar.getHeight() / getResources().getDisplayMetrics().density);
+        }
+        return sizes != null ? sizes.bottomBarH : 0;
+    }
+
     private void applyInfoMetrics() {
         if (sizes == null || infoBar == null) { return; }
         infoTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizes.infoTitleSp);
@@ -520,8 +546,10 @@ public class BigScreenActivity extends AppCompatActivity
             ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
             // M18-7：**整行高度全部还给卡片行**，信息层只在其上方留一点点间隙。
             // （M18-6 我写了"只吸收一半溢出"，结果信息层被挤到顶上、按钮正好压住卡片行的标题 —— 已修）
-            final int rowBand = scaledRowHDp();
-            int below = rowBand + sizes.bottomBarH + INFO_GAP_DP;
+            // M18-15：底栏高度必须是**真实值**（触摸模式 = 0），否则会白留一条底栏的空隙。
+            // M18-16：实测行高的余量也收到 2dp —— 之前是 +4，和 INFO_GAP_DP 叠起来会显得空。
+            final int rowBand = Math.max(scaledRowHDp(), measuredRowBandDp() + 2);
+            int below = rowBand + bottomBarDp() + INFO_GAP_DP;
             mlp.topMargin = 0;
             mlp.bottomMargin = dp(below);
             if (lp instanceof FrameLayout.LayoutParams) {
@@ -551,7 +579,7 @@ public class BigScreenActivity extends AppCompatActivity
     private void applyInfoFitScale(int rowBandDp) {
         if (infoBar == null || sizes == null) { return; }
         int naturalPx = infoBar.getHeight() > 0 ? infoBar.getHeight() : dp(sizes.infoReserveH);
-        int availPx = dp(sizes.hDp - sizes.topBarH - sizes.bottomBarH - rowBandDp - INFO_GAP_DP - 6);
+        int availPx = dp(sizes.hDp - sizes.topBarH - bottomBarDp() - rowBandDp - INFO_GAP_DP - 6);
         float fit = Math.min(1f, availPx / (float) Math.max(1, naturalPx));
         fit = Math.max(0.65f, fit);   // 别缩到看不清
         infoBar.setPivotX(0f);
@@ -1604,6 +1632,16 @@ List<Shelf> defs = new ArrayList<>();
             focusEngine.setMemoryKey(filter);
         }
         applyContentFocus();
+        // M18-12：行是刚填进 ScrollView 的，**首帧之后滚动位置才准** ——
+        // 手柄模式刚进大屏时那点轻微错位（"动一下就正常"）就出在这里：
+        // 布局完成后按当前行再对齐一次即可。
+        if (shelfScroll != null) {
+            shelfScroll.post(() -> {
+                if (focusEngine != null) { scrollVerticalToRow(focusEngine.row()); }
+                // M18-13：行已布局完 → 用**实测行高**重算信息层位置（否则会压住行标题）
+                applyInfoMetrics();
+            });
+        }
     }
 
     private void applySort(List<Game> list) {
@@ -1640,6 +1678,22 @@ List<Shelf> defs = new ArrayList<>();
         } catch (Throwable t) {
             return base;
         }
+    }
+
+    // M18-13：**实测行高（含行标题 + 2dp 行下边距）** ——
+    // 公式算的"行带"比真实行矮（行标题实际高度 + 行容器下边距没算进去），
+    // 于是信息层的底边会压住行标题（用户截图："全部游戏 33"被操作按钮压住）。
+    // 这里直接量（子级高度 - 行容器下边距），去掉 2dp 避免把行容器的下边距重复计一遍。
+    private int measuredRowBandDp() {
+        if (shelfContainer == null || shelfContainer.getChildCount() == 0) { return 0; }
+        View last = shelfContainer.getChildAt(shelfContainer.getChildCount() - 1);
+        if (last == null || last.getHeight() <= 0) { return 0; }
+        int h = last.getHeight();
+        ViewGroup.LayoutParams lp = last.getLayoutParams();
+        if (lp instanceof ViewGroup.MarginLayoutParams) {
+            h -= ((ViewGroup.MarginLayoutParams) lp).bottomMargin;
+        }
+        return Math.round(h / getResources().getDisplayMetrics().density);
     }
 
     /** M18-6：整行高（dp）= 放大后的卡片高 + 行标题/间距那部分（其余原样保留） */
@@ -2648,6 +2702,10 @@ List<Shelf> defs = new ArrayList<>();
         if (bottomBar != null) {
             // 没手柄时底栏高度归零：卡片排直接贴到屏幕最下沿，不留空行
             setViewHeight(bottomBar, connected ? (sizes != null ? sizes.bottomBarH : 18) : 0);
+            // M18-14：**底栏高度会随手柄连接状态变化（触摸模式=0）**，而信息层的锚点要按它算 ——
+            // 之前锚点永远扣掉 bottomBarH，触摸模式就白留了一整条底栏的空隙（用户：空隙有点大）。
+            // 这里在高度变化后立刻重算信息层，锚点按真实高度走，两边都不会多留空隙。
+            if (sizes != null) { applyInfoMetrics(); }
         }
         if (!connected) {
             hintView.setText("");
