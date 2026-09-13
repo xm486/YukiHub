@@ -59,7 +59,9 @@ public class AuthActivity extends AppCompatActivity {
 
     // KUN quick login. Fill KUN_ANDROID_CLIENT_ID after the OAuth app is issued.
     private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
-    private static final String KUN_OAUTH_AUTHORIZE_URL = "https://oauth.kungal.com/api/v1/oauth/authorize";
+    // M19-1：账号中心迁移 —— 原「鲲 Galgame」oauth.kungal.com → account.nextmoe.com
+    // 旧域名虽 308 跳转，但跨域跳转会丢 Authorization 头（userinfo 必 401），必须换。
+    private static final String KUN_OAUTH_AUTHORIZE_URL = "https://account.nextmoe.com/api/v1/oauth/authorize";
     private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
     private static final String KUN_OAUTH_SCOPE = "openid profile email";
     private static final String KEY_KUN_OAUTH_STATE = "kun_oauth_state";

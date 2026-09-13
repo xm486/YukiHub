@@ -21,7 +21,7 @@ import java.util.Base64;
  * <p>
  * 端点与契约（developer.nextmoe.dev）：
  * <ul>
- *   <li>授权：GET https://oauth.kungal.com/api/v1/oauth/authorize —— 必须用系统浏览器打开
+ *   <li>授权：GET https://account.nextmoe.com/api/v1/oauth/authorize —— 必须用系统浏览器打开
  *       （RFC 8252 §8.12，禁内嵌 WebView），带 code_challenge / state</li>
  *   <li>回调：http://127.0.0.1:{临时端口}/callback，端口无关匹配，LoopbackListener 收码</li>
  *   <li>换码/刷新：POST /oauth/token，不带 secret，带 code_verifier / refresh_token；
@@ -32,8 +32,10 @@ import java.util.Base64;
 public final class NextMoeAuth {
 
     private static final String TAG = "NextMoe";
-    public static final String AUTHORIZE_URL = "https://oauth.kungal.com/api/v1/oauth/authorize";
-    public static final String TOKEN_URL = "https://oauth.kungal.com/api/v1/oauth/token";
+    // M19-1：账号中心迁移 —— 原 oauth.kungal.com → account.nextmoe.com
+    // （旧域名 308 跳转会丢 Authorization 头，userinfo 必 401；issuer 也已变，旧值不再签发）
+    public static final String AUTHORIZE_URL = "https://account.nextmoe.com/api/v1/oauth/authorize";
+    public static final String TOKEN_URL = "https://account.nextmoe.com/api/v1/oauth/token";
     public static final String CALLBACK_HOST = "http://127.0.0.1";
     public static final String CALLBACK_PATH = "/callback";
     /**
