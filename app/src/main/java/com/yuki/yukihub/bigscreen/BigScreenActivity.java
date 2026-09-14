@@ -1970,7 +1970,9 @@ List<Shelf> defs = new ArrayList<>();
             infoBar.setAlpha(0f);
         }
         // 先用本地信息渲染，元数据（开发商/年份/标签）异步补齐
-        renderInfoMeta(game, null);
+        // M21-1：**能命中元数据缓存就直接用上**（同步、零开销）。
+        // 否则同一款游戏二次进卡时，下面的"只请求一次"守卫会拦住请求 → 永远只剩兜底显示。
+        renderInfoMeta(game, metaLoader != null ? metaLoader.peek(game.id) : null);
 
         addInfoAction("▶ 启动", true, () -> launch(game));
         addInfoAction(keys.third() + (game.favorite ? " 已收藏" : " 收藏"), false, () -> toggleFavorite(game));
@@ -1979,8 +1981,9 @@ List<Shelf> defs = new ArrayList<>();
         addInfoAction(keys.fourth() + " 详情", false, this::openDetails);
         addInfoAction("更多", false, () -> openGameMenu(game));
 
-        // 元数据：切卡才请求（BigScreenMeta 命中缓存时同步回调，很快）
-        if (metaLoader != null && game.id != lastInfoMetaGameId) {
+        // 元数据：只有「缓存没命中」且「没请求过」才真正去读库（M21-1）
+        // 命中缓存的情况上面已经同步渲染过了。
+        if (metaLoader != null && metaLoader.peek(game.id) == null && game.id != lastInfoMetaGameId) {
             lastInfoMetaGameId = game.id;
             final long gid = game.id;
             metaLoader.load(gid, (id, data) -> {

@@ -8,9 +8,9 @@ import com.yuki.yukihub.data.MetadataRepository;
 import com.yuki.yukihub.metadata.VnMetadata;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -74,7 +74,12 @@ public class BigScreenMeta {
     private final MetadataRepository repository;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final Map<Long, Data> cache = new HashMap<>();
+    /**
+     * 元数据缓存。
+     * <p>M21-1：改用 {@link ConcurrentHashMap} —— {@code put} 发生在 IO 线程（executor 里），
+     * 而 {@code get}/{@code peek} 发生在主线程；原来用 HashMap 是跨线程裸访问。
+     */
+    private final Map<Long, Data> cache = new ConcurrentHashMap<>();
 
     public BigScreenMeta(Context context) {
         this.repository = new MetadataRepository(context);
@@ -101,6 +106,17 @@ public class BigScreenMeta {
                 ui.post(() -> callback.onLoaded(gameId, data));
             }
         });
+    }
+
+    /**
+ * M21-1：只读地看一眼缓存（命中返回数据，未命中返回 null）。
+ *
+ * <p>给信息浮层用：同一款游戏**再次进卡**时，即使上次的异步回调因为"焦点已切走"被丢弃，
+ * 数据其实已经进了这里的缓存 —— 直接从缓存同步渲染即可，不会再退化成兜底显示
+ * （用户报的"第二次选同一个游戏，标签消失、厂商变成引擎名"就是这个）。
+ */
+    public Data peek(long gameId) {
+        return cache.get(gameId);
     }
 
     public void shutdown() { executor.shutdownNow(); }

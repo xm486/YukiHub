@@ -202,6 +202,12 @@ private ImageView ivProfileAvatar;
 private View profileStatusDot;
 private LinearLayout detailPanel, detailMetaPanel;
 private ImageView sideDetailCover;
+    /**
+     * M21-2：当前已经设在 sideDetailCover 上的封面 uri。
+     * <p>{@code setImageURI} 是**同步解码**（主线程），每点一次卡片就重解一遍封面，
+     * 既让 UI 发木，又把"第二次点击"推到双击窗口之外。同一张图不再重解。
+     */
+    private String sideDetailCoverUri;
 private ProgressBar sideDetailCoverLoading;
     private TextView sideDetailPlaceholder, sideDetailTitle, sideMetadataSourceBadge, sideDetailOriginalTitle, sideDetailHint, sideDetailPath, sideDetailDeveloper, sideDetailDate, sideDetailRating, sideDetailLength, sideDetailTags, sideDescToggle, sideTranslateToggle;
 private LinearLayout sideTagContainer;
@@ -1945,6 +1951,25 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
         columns = Math.max(2, Math.min(10, columns));
         recycler.setLayoutManager(new GridLayoutManager(this, columns));
         recycler.setAdapter(adapter);
+        // M21-3：**关掉"单格刷新"的交叉淡入动画**（"不能连点、要狂按"的真凶）
+        //
+        // 现象：点一下卡片后要等一会儿才能点第二下，双击启动游戏得狂按。
+        // 真因：15987f5 把点击后的刷新从 notifyDataSetChanged() 改成了 notifyItemChanged(position)，
+        //       而本 RecyclerView 用的是默认的 DefaultItemAnimator：
+        //         · notifyDataSetChanged() → 全量刷新，**不跑 item 动画**（改之前：点一下立刻响应）
+        //         · notifyItemChanged(pos) → 走 animateChange：**新建一个 ViewHolder**、
+        //           把旧的当成"消失中"的视图叠在上面淡出，约 250ms 后 removeView
+        //       于是：① 每次点击都多出一个约 250ms 的动画（用户看到的就是它）；
+        //             ② 手指紧跟着的第二次点击，DOWN 落在那张"正在消失"的 View 上，
+        //                UP 还没到它就被 removeView → 手势被取消 → 点击整个丢掉。
+        //
+        // 关掉 change 动画后，SimpleItemAnimator.canReuseUpdatedViewHolder() 恒为 true，
+        // RecyclerView 复用同一个 ViewHolder：不换视图、不播动画、点击不再被吃。
+        // 只关"change"，增删/移动动画不受影响。
+        if (recycler.getItemAnimator() instanceof androidx.recyclerview.widget.SimpleItemAnimator) {
+            ((androidx.recyclerview.widget.SimpleItemAnimator) recycler.getItemAnimator())
+                    .setSupportsChangeAnimations(false);
+        }
         ensureMultiSelectBar();
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
@@ -4926,6 +4951,8 @@ private void invalidateRemoteImageRequest(ImageView target) {
 private void loadRemoteImage(String url, ImageView target, String prefix) {
     if (target == null) return;
     final boolean isDetailCover = target == sideDetailCover && prefix != null && prefix.startsWith("cover_");
+    // M21-2：走远程加载后，图片内容不再等于 sideDetailCoverUri 所指的那张，标记失效
+    if (isDetailCover) { sideDetailCoverUri = null; }
     final String requestTag = "remote:" + (prefix == null ? "img" : prefix) + ":" + (url == null ? "" : url.trim());
     target.setTag(R.id.tag_remote_image_request, requestTag);
     if (isDetailCover && sideDetailCoverLoading != null) {
@@ -5483,6 +5510,7 @@ if (sideDetailPath != null) sideDetailPath.setText("路径：-");
             sideDetailRating.setText("评分：-/10");
             if (sideDetailLength != null) sideDetailLength.setText("游玩时长：-");
             renderTagChips("-");
+            sideDetailCoverUri = null;
             sideDetailCover.setImageDrawable(null);
             sideDetailCover.setVisibility(View.GONE);
             sideDetailPlaceholder.setVisibility(View.VISIBLE);
@@ -5505,17 +5533,28 @@ if (sideDetailPath != null) sideDetailPath.setText("路径：" + displayPath(gam
         if (sideScreenshot2 != null) sideScreenshot2.setImageDrawable(null);
         String coverUri = safeCoverUri(game);
         if (coverUri != null && !coverUri.isEmpty()) {
-            try {
-                sideDetailCover.setImageURI(Uri.parse(coverUri));
+            // M21-2：**同一张封面不重复解码**。
+            // setImageURI 是同步解码（主线程），每次单击都重解一遍 → 几百毫秒的停顿，
+            // 既让 UI 发木，也把第二次点击推到双击窗口之外（"不能连点/得狂按"的根因之一）。
+            if (coverUri.equals(sideDetailCoverUri) && sideDetailCover.getDrawable() != null) {
                 sideDetailCover.setVisibility(View.VISIBLE);
                 sideDetailPlaceholder.setVisibility(View.GONE);
-            } catch (Throwable t) {
-                sideDetailCover.setImageDrawable(null);
-                sideDetailCover.setVisibility(View.GONE);
-                sideDetailPlaceholder.setVisibility(View.VISIBLE);
-                sideDetailPlaceholder.setText(initials(game.title));
+            } else {
+                try {
+                    sideDetailCover.setImageURI(Uri.parse(coverUri));
+                    sideDetailCoverUri = coverUri;
+                    sideDetailCover.setVisibility(View.VISIBLE);
+                    sideDetailPlaceholder.setVisibility(View.GONE);
+                } catch (Throwable t) {
+                    sideDetailCoverUri = null;
+                    sideDetailCover.setImageDrawable(null);
+                    sideDetailCover.setVisibility(View.GONE);
+                    sideDetailPlaceholder.setVisibility(View.VISIBLE);
+                    sideDetailPlaceholder.setText(initials(game.title));
+                }
             }
         } else {
+            sideDetailCoverUri = null;
             sideDetailCover.setImageDrawable(null);
             sideDetailCover.setVisibility(View.GONE);
             sideDetailPlaceholder.setVisibility(View.VISIBLE);

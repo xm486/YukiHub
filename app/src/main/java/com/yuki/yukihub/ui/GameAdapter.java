@@ -35,8 +35,31 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
     private OnUiFeedbackListener feedbackListener;
     private OnSelectionChangedListener selectionChangedListener;
     private long selectedGameId = -1;
-    private long lastClickTime = 0L;
     private long lastClickGameId = -1L;
+    /**
+     * M21-2：**点击那一刻的触摸事件时刻**（不是 handler 运行时刻）。
+     *
+     * <p>双击判定原来用 {@code System.currentTimeMillis()}：单击要同步解码封面等重活，
+     * 主线程被占住 → 第二次点击的 handler 被推后 → 间隔看起来超过 350ms，
+     * 双击永远判不出来，表现就是"不能连点、得狂按"。
+     * 用 {@code MotionEvent.getEventTime()}（内核时间戳）就不受主线程卡顿影响。
+     */
+    private long lastClickEventTime = 0L;
+    /** 当前这次按压的 DOWN 事件时刻（在 applyCardFeedback 的触摸回调里记录）。 */
+    private long lastDownEventTime = 0L;
+    /**
+     * M21-3：选中态刷新用的 payload。
+     *
+     * <p>带 payload 的 {@code notifyItemChanged(pos, payload)} 会让 {@code DefaultItemAnimator}
+     * 判定"可以复用同一个 ViewHolder"（{@code canReuseUpdatedViewHolder} 返回 true），
+     * 于是**不播 change 动画、不换 View**。
+     *
+     * <p>不带 payload 时会走 {@code animateChange}：给这一格**新建一个 ViewHolder**、
+     * 把旧的当作"消失中"的视图叠在上面淡出，约 250ms 后才 {@code removeView} ——
+     * ① 每次点击都多出一个长动画；② 手指紧跟的第二次点击 DOWN 落在那个正在消失的 View 上，
+     * UP 还没到它就被移除 → 手势被取消 → 点击整个丢掉。
+     */
+    private static final Object PAYLOAD_SELECTION = new Object();
     private int themePrimaryColor = 0xFF8AB4FF;
     private int themeSecondaryColor = 0xFFFF8AB3;
     private int themeCardColor = 0xFF171E33;
@@ -66,8 +89,8 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         final int prev = indexOfGame(selectedGameId);
         selectedGameId = id;
         final int next = indexOfGame(id);
-        if (prev >= 0) { notifyItemChanged(prev); }
-        if (next >= 0 && next != prev) { notifyItemChanged(next); }
+        if (prev >= 0) { notifyItemChanged(prev, PAYLOAD_SELECTION); }
+        if (next >= 0 && next != prev) { notifyItemChanged(next, PAYLOAD_SELECTION); }
     }
     public void setNsfwBlurEnabled(boolean enabled) { nsfwBlurEnabled = enabled; notifyDataSetChanged(); }
     public void submit(List<Game> newGames) {
@@ -163,8 +186,8 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         final long prevId = selectedGameId;
         selectedGameId = game == null ? -1 : game.id;
         final int prevIndex = indexOfGame(prevId);
-        if (prevIndex >= 0 && prevIndex != position) { notifyItemChanged(prevIndex); }
-        if (position != RecyclerView.NO_POSITION) { notifyItemChanged(position); }
+        if (prevIndex >= 0 && prevIndex != position) { notifyItemChanged(prevIndex, PAYLOAD_SELECTION); }
+        if (position != RecyclerView.NO_POSITION) { notifyItemChanged(position, PAYLOAD_SELECTION); }
         // 焦点按回卡片（触摸模式下 requestFocus 会失败，这里静默即可，不影响触摸用户）
         if (h != null && h.itemView != null) { h.itemView.requestFocus(); }
     }
@@ -422,11 +445,17 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
                 toggleChecked(g.id);
                 return;
             }
-            long now = System.currentTimeMillis();
-            boolean isDouble = lastClickGameId == g.id && (now - lastClickTime) <= 350L;
+            // M21-2：用**触摸事件自身的时刻**算间隔，而不是 handler 运行时刻。
+            // 原来用 System.currentTimeMillis()：单击要同步解码封面（几百毫秒），
+            // 主线程被占住 → 第二次点击的 handler 被推后 → 间隔虚高、双击永远判不出来。
+            final long now = lastDownEventTime > 0L ? lastDownEventTime : System.currentTimeMillis();
+            lastDownEventTime = 0L;
+            boolean isDouble = lastClickGameId == g.id
+                    && lastClickEventTime > 0L
+                    && (now - lastClickEventTime) <= 350L;
             emitFeedback(isDouble ? FEEDBACK_CONFIRM : FEEDBACK_CLICK);
             lastClickGameId = g.id;
-            lastClickTime = now;
+            lastClickEventTime = now;
             selectAndKeepFocus(h, position, g);
             if (listener != null) {
                 if (isDouble) listener.onGameDoubleClick(g);
@@ -453,6 +482,8 @@ public class GameAdapter extends RecyclerView.Adapter<GameAdapter.Holder> {
         view.setOnTouchListener((v, event) -> {
             if (event == null) return false;
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                // M21-2：记下这次按压的**真实时刻**，供双击判定使用（见字段注释）
+                lastDownEventTime = event.getEventTime();
                 v.animate().cancel();
                 v.animate().scaleX(0.965f).scaleY(0.965f).alpha(0.82f).setDuration(75L).start();
             } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
