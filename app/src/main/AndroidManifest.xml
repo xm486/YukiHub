@@ -102,6 +102,20 @@
             android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection" />
 
+        <!--
+            3D 展厅（M0）：
+            · MODE_LOCAL  = 离线个人展厅（assets/exhibition，虚拟 origin，无需联网）
+            · MODE_ONLINE = 在线多人展厅（服务器页面）
+            不声明 configChanges 会导致旋转/字体变化时 Activity 重建，3D 场景与走动位置全部丢失。
+        -->
+        <activity
+            android:name=".exhibition.ExhibitionActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:launchMode="singleTop"
+            android:hardwareAccelerated="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection" />
+
         <activity
             android:name=".HomeActivity"
             android:exported="false"

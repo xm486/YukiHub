@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:,">   <!-- 阻止 WebView 请求 favicon（消掉"资产缺失: favicon.ico"日志噪音） -->
+<title>YukiHub 展厅 · M0</title>
+<style>
+    :root {
+        --hud-fg: #EAF2FF;
+        --hud-dim: #9FB3CC;
+        --hud-bg: rgba(12, 18, 30, 0.62);
+        --hud-line: rgba(150, 190, 255, 0.22);
+        --accent: #7FC4FF;
+        --warn: #FFB86B;
+        --bad: #FF7B72;
+        --tap: 44px;                 /* 最小可点尺寸（触摸友好） */
+    }
+    * { box-sizing: border-box; }
+    html, body {
+        margin: 0; padding: 0;
+        width: 100%; height: 100%;
+        overflow: hidden;
+        background: #05070C;
+        color: var(--hud-fg);
+        font-family: -apple-system, "Noto Sans CJK SC", "Source Han Sans SC", Roboto, sans-serif;
+        -webkit-user-select: none; user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        overscroll-behavior: none;
+    }
+    #stage { position: fixed; inset: 0; touch-action: none; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+
+    /* ==================== 左上：性能仪表 ==================== */
+    #hud {
+        position: fixed; top: 0; left: 0;
+        padding: 9px 12px;
+        pointer-events: none;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 3px rgba(0,0,0,.85);
+        z-index: 10;
+    }
+    #hud-fps { font-size: 27px; font-weight: 700; line-height: 1.05; letter-spacing: .5px; }
+    #hud-fps small { font-size: 11px; font-weight: 500; opacity: .7; margin-left: 4px; }
+    #hud-fps.good { color: #8CE99A; }
+    #hud-fps.mid  { color: var(--warn); }
+    #hud-fps.bad  { color: var(--bad); }
+    #hud-detail {
+        margin-top: 3px;
+        font-size: 10px; line-height: 1.5;
+        color: var(--hud-dim);
+        white-space: pre;
+    }
+
+    /* ==================== 右上：调试面板 ==================== */
+    #debug {
+        position: fixed; top: 9px; right: 10px;
+        display: flex; flex-direction: column; gap: 6px;
+        align-items: flex-end;
+        z-index: 30;
+    }
+    .btn {
+        min-width: 84px;
+        padding: 7px 11px;
+        border-radius: 10px;
+        border: 1px solid var(--hud-line);
+        background: var(--hud-bg);
+        color: var(--hud-fg);
+        font-size: 11px; font-weight: 600;
+        text-align: center;
+        backdrop-filter: blur(9px);
+        -webkit-backdrop-filter: blur(9px);
+        touch-action: manipulation;
+    }
+    .btn:active { transform: scale(.96); }
+    .btn.on {
+        border-color: rgba(127,196,255,.75);
+        box-shadow: 0 0 0 1px rgba(127,196,255,.35) inset, 0 0 14px rgba(127,196,255,.22);
+    }
+
+    /* ==================== 动态摇杆（左半屏按下处浮现） ==================== */
+    #joystick {
+        position: fixed;
+        width: 132px; height: 132px;
+        margin: 0;
+        border-radius: 50%;
+        border: 2px solid rgba(160, 200, 255, .30);
+        background: radial-gradient(circle, rgba(120,170,255,.11), rgba(120,170,255,.03) 70%);
+        transform: translate(-50%, -50%);
+        display: none;
+        pointer-events: none;      /* 事件仍由 canvas 收，摇杆纯展示 */
+        z-index: 20;
+    }
+    #joystick.on { display: block; }
+    #joy-knob {
+        position: absolute; left: 50%; top: 50%;
+        width: 56px; height: 56px;
+        border-radius: 50%;
+        background: rgba(190, 220, 255, .26);
+        border: 1.5px solid rgba(205, 228, 255, .55);
+        box-shadow: 0 0 16px rgba(127,196,255,.25);
+        transform: translate(-50%, -50%);
+    }
+
+    /* ==================== 右下：动作键（标准 3D 手游弧形簇） ==================== */
+    /*  跳跃  ↗ 右上（最高，最不易误触）
+        奔跑  ← 蹲下左侧偏上
+        蹲下  ↘ 右下角                                 */
+    #actions {
+        position: fixed; right: 0; bottom: 0;
+        width: 214px; height: 206px;
+        z-index: 30;
+        pointer-events: none;          /* 只让按钮本身可点，空白处仍可转视角 */
+    }
+    .abtn {
+        position: absolute;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 50%;
+        border: 1px solid var(--hud-line);
+        background: var(--hud-bg);
+        color: var(--hud-fg);
+        font-weight: 700;
+        backdrop-filter: blur(9px);
+        -webkit-backdrop-filter: blur(9px);
+        touch-action: manipulation;
+        pointer-events: auto;
+        transition: transform .06s ease-out, box-shadow .12s ease-out;
+    }
+    .abtn:active, .abtn.press { transform: scale(.92); }
+    .abtn.on {
+        border-color: rgba(127,196,255,.8);
+        box-shadow: 0 0 0 1px rgba(127,196,255,.4) inset, 0 0 16px rgba(127,196,255,.3);
+        color: #DCEBFF;
+    }
+    /* 跳跃：右上，抬高 */
+    #btn-jump   { right: 18px;  bottom: 112px; width: 76px; height: 76px; font-size: 15px; }
+    /* 蹲下：右下角 */
+    #btn-crouch { right: 26px;  bottom: 14px;  width: 62px; height: 62px; font-size: 13px; }
+    /* 奔跑：蹲下左边偏上 */
+    #btn-run    { right: 106px; bottom: 60px;  width: 62px; height: 62px; font-size: 13px; }
+
+    /* ==================== 3D 展品查看器（点击盒子弹出） ==================== */
+    #detail {
+        position: fixed; inset: 0;
+        z-index: 40;
+        background: radial-gradient(120% 90% at 50% 0%, rgba(24,32,48,0.97), rgba(6,9,15,0.99));
+        display: flex; flex-direction: row;
+    }
+    #detail[hidden] { display: none; }
+
+    /* 左：3D 展台（可拖动旋转） */
+    #d-stage {
+        flex: 1 1 auto;
+        min-width: 0;
+        position: relative;
+        touch-action: none;      /* 拖动转盒子时不要触发页面滚动 */
+        cursor: grab;
+    }
+    #d-stage.dragging { cursor: grabbing; }
+    #d-stage canvas { display: block; width: 100%; height: 100%; }
+    #d-stage-hint {
+        position: absolute; left: 50%; bottom: 14px;
+        transform: translateX(-50%);
+        font-size: 12px; color: #7E8B9C;
+        letter-spacing: 1px;
+        pointer-events: none;
+    }
+    /* 拖动提示的左右箭头装饰 */
+    #d-stage::before, #d-stage::after {
+        content: ''; position: absolute; top: 50%;
+        width: 34px; height: 34px; margin-top: -17px;
+        border-radius: 50%;
+        border: 1px solid rgba(196,169,107,0.25);
+        pointer-events: none;
+    }
+    #d-stage::before { left: 16px; }
+    #d-stage::after { right: 16px; }
+
+    /* 右：信息栏 */
+    #d-panel {
+        flex: 0 0 clamp(300px, 38%, 460px);
+        overflow-y: auto;
+        padding: 26px 24px 32px;
+        border-left: 1px solid var(--hud-line);
+        background: rgba(10, 15, 24, 0.72);
+        -webkit-overflow-scrolling: touch;
+    }
+    #d-panel::-webkit-scrollbar { width: 4px; }
+    #d-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 2px; }
+
+    #d-title { font-size: 20px; font-weight: 700; color: #FFFFFF; line-height: 1.35; }
+    #d-sub { margin-top: 4px; font-size: 12px; color: #8FA6C0; line-height: 1.5; }
+    #d-meta { margin-top: 14px; font-size: 13px; color: #C9D6E6; line-height: 1.9; }
+    #d-tags { margin-top: 10px; font-size: 12px; color: #9FB3CC; line-height: 1.7; word-break: break-all; }
+
+    /* 时长进度环 */
+    #d-ring-wrap {
+        margin-top: 18px;
+        display: flex; align-items: center; gap: 14px;
+    }
+    #d-ring { flex: 0 0 84px; width: 84px; height: 84px; }
+    #d-ring-text { font-size: 12px; color: #9FB3CC; line-height: 1.8; }
+
+    .d-badge {
+        display: inline-block;
+        margin: 0 6px 4px 0;
+        padding: 2px 9px;
+        border-radius: 999px;
+        font-size: 11px;
+        border: 1px solid rgba(255,255,255,.18);
+        color: #C9D6E6;
+    }
+    .d-badge.fav { border-color: rgba(242,197,107,.6); color: #F2C56B; }
+    .d-badge.playing { border-color: rgba(102,224,192,.6); color: #66E0C0; }
+    .d-badge.done { border-color: rgba(127,196,255,.6); color: #7FC4FF; }
+    .d-badge.unplayed { border-color: rgba(140,150,166,.5); color: #8E9AAB; }
+    .d-badge.nsfw { border-color: rgba(232,124,124,.6); color: #E87C7C; }
+
+    #d-close {
+        position: absolute; top: 16px; right: 18px;
+        padding: 7px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--hud-line);
+        background: rgba(255,255,255,.07);
+        font-size: 13px; color: #DCEBFF;
+        z-index: 2;
+    }
+    #d-close:active { transform: scale(.95); }
+
+    #hint {
+        position: fixed; left: 12px; bottom: 10px;
+        max-width: 46vw;
+        font-size: 11px; line-height: 1.5;
+        color: var(--hud-dim);
+        text-shadow: 0 1px 3px rgba(0,0,0,.85);
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    /* ==================== 覆盖层 ==================== */
+    #overlay {
+        position: fixed; inset: 0;
+        display: none; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 10px; padding: 28px; text-align: center;
+        background: rgba(5,7,12,.94);
+        z-index: 50;
+    }
+    #overlay.show { display: flex; }
+    #overlay h2 { margin: 0; font-size: 16px; color: var(--warn); }
+    #overlay p  { margin: 0; font-size: 12px; line-height: 1.7; color: var(--hud-dim); max-width: 560px; }
+    #overlay code {
+        display: block; margin-top: 6px; padding: 8px 10px;
+        max-width: 560px; max-height: 40vh; overflow: auto;
+        border-radius: 8px; border: 1px solid var(--hud-line);
+        background: rgba(0,0,0,.45);
+        font-size: 11px; text-align: left;
+        color: #C9D6E6;
+        white-space: pre-wrap; word-break: break-all;
+    }
+    /* 进场淡入用的黑场（boot 完成后淡出移除） */
+    #fade {
+        position: fixed; inset: 0;
+        background: #05070C;
+        z-index: 45;
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity .85s ease-out;
+    }
+    #fade.hide { opacity: 0; }
+
+    #loading {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; color: var(--hud-dim);
+        background: #05070C;
+        z-index: 40;
+    }
+    #loading.hide { display: none; }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<div id="fade"></div>
+
+<div id="hud" hidden>
+    <div id="hud-fps">--<small>FPS</small></div>
+    <div id="hud-detail"></div>
+</div>
+
+<div id="debug" hidden>
+    <div class="btn" id="btn-scale">渲染倍率 1.50x</div>
+    <div class="btn" id="btn-stress">压力测试：关</div>
+    <div class="btn" id="btn-detail">详细数据：开</div>
+    <div class="btn" id="btn-sound">声音：开</div>
+</div>
+
+<div id="joystick"><div id="joy-knob"></div></div>
+
+<div id="actions" hidden>
+    <div class="abtn" id="btn-run">奔跑</div>
+    <div class="abtn" id="btn-crouch">蹲下</div>
+    <div class="abtn" id="btn-jump">跳跃</div>
+</div>
+
+<div id="detail" hidden>
+    <div id="d-stage">
+        <div id="d-stage-hint">拖动可旋转展盒</div>
+    </div>
+    <div id="d-panel">
+        <div id="d-close">关闭</div>
+        <div id="d-title"></div>
+        <div id="d-sub"></div>
+        <div id="d-meta"></div>
+        <div id="d-tags"></div>
+        <div id="d-ring-wrap">
+            <canvas id="d-ring" width="84" height="84"></canvas>
+            <div id="d-ring-text"></div>
+        </div>
+    </div>
+</div>
+
+<div id="hint" hidden>
+    左半屏按住拖动 = 移动摇杆 · 右半屏拖动 = 转视角 · 右下 = 跳跃 / 蹲下 / 奔跑
+</div>
+
+<div id="loading">正在构建展厅…</div>
+
+<div id="overlay">
+    <h2 id="ov-title">展厅启动失败</h2>
+    <p id="ov-desc"></p>
+    <code id="ov-code"></code>
+</div>
+
+<!-- 不支持 ES module 的旧 WebView：给出明确提示，避免静默白屏 -->
+<script nomodule>
+    (function () {
+        document.getElementById('loading').classList.add('hide');
+        document.getElementById('ov-title').textContent = '系统 WebView 版本过旧';
+        document.getElementById('ov-desc').textContent =
+            '本展厅需要 Android System WebView 61 以上（推荐 90+）才能运行。' +
+            '请到应用商店更新「Android System WebView」或「Chrome」后重试。';
+        document.getElementById('ov-code').textContent = 'UA: ' + navigator.userAgent;
+        document.getElementById('overlay').classList.add('show');
+    })();
+</script>
+
+<!-- 看门狗：模块加载/执行失败时不至于静默白屏 -->
+<script>
+    window.__exhBooted = false;
+    setTimeout(function () {
+        if (window.__exhBooted) return;
+        var ov = document.getElementById('overlay');
+        if (!ov || ov.classList.contains('show')) return;
+        document.getElementById('loading').classList.add('hide');
+        document.getElementById('ov-title').textContent = '展厅未能启动';
+        document.getElementById('ov-desc').textContent =
+            '离线页模块没有在 8 秒内启动完成，通常是三方文件缺失或 WebView 版本过旧。' +
+            '请检查 assets/exhibition/ 下的 exh.js 与 vendor/three.module.min.js 是否都打包进去了。';
+        document.getElementById('ov-code').textContent = 'UA: ' + navigator.userAgent;
+        ov.classList.add('show');
+    }, 8000);
+</script>
+
+<script type="module" src="./exh.js"></script>
+
+</body>
+</html>

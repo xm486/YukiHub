@@ -33,6 +33,20 @@
 
 ---
 
+## 宣传海报(一眼看懂YukiHub)
+
+<img src="screenshots/hb01.webp" width="720" />
+
+<img src="screenshots/hb02.webp" width="720" />
+
+<img src="screenshots/hb03.webp" width="720" />
+
+<img src="screenshots/hb04.webp" width="720" />
+
+<img src="screenshots/hb05.webp" width="720" />
+
+---
+
 ## 特性
 
 - 多种导入方式：支持手动添加、批量导入文件夹以及从第三方平台迁移（如 <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>、<a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>、<a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>、<a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>）。

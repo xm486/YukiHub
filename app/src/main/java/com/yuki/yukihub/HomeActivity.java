@@ -291,6 +291,11 @@ public class HomeActivity extends AppCompatActivity {
             touch(v);
             startActivity(new Intent(this, com.yuki.yukihub.translate.TranslateControlActivity.class));
         });
+        // M0：3D 展厅入口（点开后选择 离线个人展厅 / 在线多人展厅）
+        findViewById(R.id.homeExhibition).setOnClickListener(v -> {
+            touch(v);
+            showExhibitionDialog();
+        });
         findViewById(R.id.homeCommunity).setOnClickListener(v -> {
             touch(v);
             try {
@@ -299,6 +304,90 @@ public class HomeActivity extends AppCompatActivity {
                 Toast.makeText(this, "无法打开社区，请检查网络", Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    /** M0：3D 展厅入口选择（离线个人展厅 / 在线多人展厅） */
+    private void showExhibitionDialog() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        root.setPadding(pad, dp(4), pad, dp(4));
+
+        // 用自定义卡片而不是 setItems()：setItems 生成的是系统列表项，
+        // 不受 styleDialogDark 控制，在深色主题下会变成黑字看不清（实测）。
+        final androidx.appcompat.app.AlertDialog[] holder = new androidx.appcompat.app.AlertDialog[1];
+
+        root.addView(buildExhibitionOption("离线个人展厅",
+                "本地库存 · 无需联网 · 可离线逛",
+                () -> {
+                    if (holder[0] != null) holder[0].dismiss();
+                    openExhibition(com.yuki.yukihub.exhibition.ExhibitionActivity.MODE_LOCAL);
+                }));
+
+        View gap = new View(this);
+        gap.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(8)));
+        root.addView(gap);
+
+        root.addView(buildExhibitionOption("在线多人展厅",
+                "全站博物馆 · 需联网 · 玩家交流广场",
+                () -> {
+                    if (holder[0] != null) holder[0].dismiss();
+                    openExhibition(com.yuki.yukihub.exhibition.ExhibitionActivity.MODE_ONLINE);
+                }));
+
+        androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("3D 展厅")
+                .setView(root)
+                .setNegativeButton("取消", null)
+                .show();
+        holder[0] = dialog;
+        styleDialogDark(dialog);
+        dialog.setOnDismissListener(d -> applyImmersive());
+    }
+
+    /** 展厅入口卡片：显式指定颜色，避免深色主题下黑字看不清 */
+    private View buildExhibitionOption(String title, String desc, Runnable onClick) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_home_glass);
+        card.setPadding(dp(14), dp(12), dp(14), dp(12));
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView titleView = new TextView(this);
+        titleView.setText(title);
+        titleView.setTextColor(0xFFFFFFFF);
+        titleView.setTextSize(15);
+        titleView.setTypeface(null, android.graphics.Typeface.BOLD);
+        card.addView(titleView);
+
+        TextView descView = new TextView(this);
+        descView.setText(desc);
+        descView.setTextColor(0xB3FFFFFF);
+        descView.setTextSize(11);
+        descView.setPadding(0, dp(3), 0, 0);
+        card.addView(descView);
+
+        card.setOnClickListener(v -> {
+            touch(v);
+            onClick.run();
+        });
+        return card;
+    }
+
+    /** 打开展厅：MODE_LOCAL = 离线个人展厅，MODE_ONLINE = 在线多人展厅 */
+    private void openExhibition(int mode) {
+        try {
+            Intent intent = new Intent(this, com.yuki.yukihub.exhibition.ExhibitionActivity.class);
+            intent.putExtra(com.yuki.yukihub.exhibition.ExhibitionActivity.EXTRA_MODE, mode);
+            startActivity(intent);
+        } catch (Throwable t) {
+            Toast.makeText(this, "无法打开展厅：" + t.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showProfileDialog() {

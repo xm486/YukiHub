@@ -172,6 +172,18 @@
                     <TextView android:id="@+id/homeGreeting" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="欢迎回来，Yuki" android:textColor="#D9FFFFFF" android:textSize="9sp" />
                 </LinearLayout>
 
+                <!-- M0：3D 展厅入口（离线个人展厅 / 在线多人展厅） -->
+                <FrameLayout
+                    android:id="@+id/homeExhibition"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginEnd="7dp"
+                    android:background="@drawable/bg_home_glass"
+                    android:clickable="true"
+                    android:focusable="true">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="center" android:contentDescription="展厅" android:src="@drawable/ic_home_exhibition" />
+                </FrameLayout>
+
                 <FrameLayout
                     android:id="@+id/homeCommunity"
                     android:layout_width="38dp"
