@@ -82,10 +82,31 @@ jobs:
             echo "::warning::未配置 GITCODE_TOKEN，附件下载会失败（release 正文仍可回填）"
           fi
 
+      - name: 令牌权限预检（只读）
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_GH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          RESP=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}")
+          echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('  当前令牌 permissions =', d.get('permissions'))"
+          CAN=$(echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if (d.get('permissions') or {}).get('push') else 'no')")
+          if [ "$CAN" != "yes" ]; then
+            echo "::warning::当前令牌**没有写权限** —— dry-run 不受影响，但 backfill 会 403"
+            echo "  解决 A) 仓库 Settings → Actions → General → Workflow permissions"
+            echo "         → 选 'Read and write permissions' → Save"
+            echo "  解决 B) 建一个 contents 读写的 PAT，存成 Secret: SYNC_GH_TOKEN"
+            if [ "${{ inputs.mode }}" = "backfill" ]; then
+              echo "::error::mode=backfill 需要写权限，已提前中止（避免白跑一遍）"
+              exit 1
+            fi
+          else
+            echo "  ✅ 写权限正常"
+          fi
+
       - name: 巡检（只读，始终执行）
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: python3 tools/release_sync.py check
 
       - name: 附件鉴权探测（只读 · 每个请求仅 1KB）
@@ -98,7 +119,7 @@ jobs:
         if: ${{ inputs.mode == 'dry-run' }}
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           ARGS="--asset-mode ${{ inputs.asset_mode }}"
           if [ -n "${{ inputs.only_tag }}" ]; then ARGS="$ARGS --only-tag ${{ inputs.only_tag }}"; fi
@@ -110,7 +131,7 @@ jobs:
         if: ${{ inputs.mode == 'backfill' }}
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           ARGS="--apply --asset-mode ${{ inputs.asset_mode }}"
           if [ -n "${{ inputs.only_tag }}" ]; then ARGS="$ARGS --only-tag ${{ inputs.only_tag }}"; fi
@@ -122,5 +143,5 @@ jobs:
         if: ${{ inputs.mode == 'backfill' }}
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: python3 tools/release_sync.py check

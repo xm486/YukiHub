@@ -492,6 +492,20 @@ def gh_assets_of(release_id, token):
     return []
 
 
+def gh_can_write(token):
+    """只读探测：当前令牌对该仓库是否有写权限（用 repo 接口的 permissions 字段）。
+
+    返回 (True/False/None, 详情)。403 那种「Resource not accessible by integration」
+    靠这个能提前发现，而不是等跑到一半才炸。
+    """
+    url = "{}/repos/{}/{}".format(GH_API, OWNER, REPO)
+    status, data = http_get(url, token=token)
+    if status != 200 or not isinstance(data, dict):
+        return None, "HTTP {}".format(status)
+    perms = data.get("permissions") or {}
+    return bool(perms.get("push")), perms
+
+
 def sha256_of(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -590,6 +604,22 @@ def cmd_backfill(args):
         log("❌ 未找到 curl，无法进行大文件传输。已中止。")
         return 4
 
+    # 写权限预检：403 那种坑提前拦住
+    if args.apply:
+        can_write, info = gh_can_write(gh_token)
+        if can_write is False:
+            log("❌ 当前令牌对 {}/{} 没有写权限（permissions={}）。已中止。".format(OWNER, REPO, info))
+            log("   解决二选一：")
+            log("     A) 仓库 Settings → Actions → General → Workflow permissions")
+            log("        → 选 'Read and write permissions' → Save，然后重跑")
+            log("     B) 建一个有 contents 读写权限的 PAT，存成 Secret `SYNC_GH_TOKEN`")
+            log("        （工作流会自动优先使用它）")
+            return 5
+        if can_write is True:
+            log("   写权限预检：✅ 通过（permissions={}）".format(info))
+        else:
+            log("   ⚠️ 写权限预检无法判定（{}），继续执行".format(info))
+
     # 拉两边现状
     gh_raw, gh_err = fetch_paged(GH_API, "/repos/{}/{}/releases".format(OWNER, REPO), token=gh_token)
     gc_raw, gc_err = fetch_paged(GC_API, "/repos/{}/{}/releases".format(OWNER, REPO), token=gc_token)
@@ -671,6 +701,12 @@ def cmd_backfill(args):
                 )
                 if status not in (200, 201):
                     log("   ❌ 创建 release 失败 HTTP {}：{}".format(status, data))
+                    if status == 403 and "not accessible by integration" in str(data):
+                        log("   💡 这是**令牌权限**问题，不是脚本问题。二选一：")
+                        log("      A) 仓库 Settings → Actions → General → Workflow permissions")
+                        log("         → 选 'Read and write permissions' → Save，然后重跑")
+                        log("      B) 建一个 contents 读写的 PAT，存成 Secret `SYNC_GH_TOKEN`")
+                        log("         （工作流会自动优先使用它，无需改代码）")
                     failures.append((tag, "create-release HTTP {}".format(status)))
                     fail_cnt += 1
                     continue
