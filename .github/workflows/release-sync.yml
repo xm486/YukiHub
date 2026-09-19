@@ -86,22 +86,42 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SYNC_GH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
+          echo "令牌来源 : ${{ secrets.SYNC_GH_TOKEN && 'SYNC_GH_TOKEN（PAT）' || 'GITHUB_TOKEN（内置）' }}"
           RESP=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}")
           echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('  当前令牌 permissions =', d.get('permissions'))"
-          CAN=$(echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if (d.get('permissions') or {}).get('push') else 'no')")
-          if [ "$CAN" != "yes" ]; then
-            echo "::warning::当前令牌**没有写权限** —— dry-run 不受影响，但 backfill 会 403"
-            echo "  解决 A) 仓库 Settings → Actions → General → Workflow permissions"
-            echo "         → 选 'Read and write permissions' → Save"
-            echo "  解决 B) 建一个 contents 读写的 PAT，存成 Secret: SYNC_GH_TOKEN"
-            if [ "${{ inputs.mode }}" = "backfill" ]; then
-              echo "::error::mode=backfill 需要写权限，已提前中止（避免白跑一遍）"
-              exit 1
-            fi
-          else
-            echo "  ✅ 写权限正常"
-          fi
+          STATE=$(echo "$RESP" | python3 -c "
+import json, sys
+p = (json.load(sys.stdin).get('permissions') or {})
+print('write' if p.get('push') else ('read' if p.get('pull') else 'none'))")
+          echo "  判定结果 : $STATE"
+          case "$STATE" in
+            write)
+              echo "  ✅ 写权限正常，可以 backfill"
+              ;;
+            read)
+              echo "::warning::令牌**只读** —— dry-run 不受影响，但 backfill 会 403"
+              echo "  解决 A) 仓库 Settings → Actions → General → Workflow permissions"
+              echo "         → 选 'Read and write permissions' → **务必点 Save**"
+              echo "  解决 B) 建一个 contents 读写的 PAT，存成 Secret: SYNC_GH_TOKEN"
+              if [ "${{ inputs.mode }}" = "backfill" ]; then
+                echo "::error::mode=backfill 需要写权限，已提前中止（避免白跑一遍）"
+                exit 1
+              fi
+              ;;
+            none)
+              echo "::warning::令牌对仓库**完全没有权限**（连读都没有，permissions 全 False）"
+              echo "  这不是「只读」，说明权限根本没生效。常见原因："
+              echo "   ① 上面那个设置改完**没点 Save**"
+              echo "   ② 仓库处于受限制状态（曾被标记过），GITHUB_TOKEN 被降级"
+              echo "  最可靠解法：建一个 PAT（scope: repo），存成 Secret: SYNC_GH_TOKEN"
+              echo "  （工作流会自动优先使用它，无需改任何代码）"
+              if [ "${{ inputs.mode }}" = "backfill" ]; then
+                echo "::error::mode=backfill 需要写权限，已提前中止（避免白跑一遍）"
+                exit 1
+              fi
+              ;;
+          esac
 
       - name: 巡检（只读，始终执行）
         env:
