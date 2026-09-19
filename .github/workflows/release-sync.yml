@@ -1,0 +1,126 @@
+# ============================================================================
+# YukiHub · GitCode → GitHub  Release 单向同步
+# ============================================================================
+# 方向：只从 GitCode 拉到 GitHub（**不会**写 GitCode）
+#
+# 前置：
+#   1) 在 GitCode 生成个人访问令牌（权限：仓库读写）
+#   2) 在 GitHub 仓库 Settings → Secrets and variables → Actions
+#      新建 Secret：GITCODE_TOKEN = <上面那个令牌>
+#   3) GitHub 侧用内置 GITHUB_TOKEN（本工作流已申请 contents: write）
+#
+# 使用：Actions → 「同步 GitCode Release → GitHub」→ Run workflow
+#   mode = dry-run   只看计划，不写任何东西（第一次请用这个）
+#   mode = backfill  真写（建 tag / release / 上传 APK）
+#
+# 安全：本工作流只会「新建 release / 上传附件」，
+#       脚本里不存在删除任何远端资源的代码路径。
+# ============================================================================
+
+name: 同步 GitCode Release → GitHub
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '执行模式（dry-run 只看计划；backfill 才真写）'
+        required: true
+        type: choice
+        default: 'dry-run'
+        options:
+          - dry-run
+          - backfill
+      only_tag:
+        description: '只处理某个 tag（如 v0.1.4；留空 = 全部）'
+        required: false
+        type: string
+        default: ''
+      asset_mode:
+        description: '附件命名策略（keep=保持 GitCode 原名 / github=补 v）'
+        required: true
+        type: choice
+        default: 'keep'
+        options:
+          - keep
+          - github
+      skip_assets:
+        description: '只建 release、不搬 APK 附件'
+        required: true
+        type: boolean
+        default: false
+
+  # 想开「每天自动巡检一次」就把下面两行取消注释（公共仓库 Actions 免费）
+  # schedule:
+  #   - cron: '0 18 * * *'   # 每天 UTC 18:00 = 北京时间 02:00
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: GitCode → GitHub
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 环境自检
+        run: |
+          echo "Python : $(python3 --version)"
+          echo "curl   : $(curl --version | head -1)"
+          echo "仓库   : ${{ github.repository }}"
+          echo "模式   : ${{ inputs.mode }}"
+          if [ -z "${{ secrets.GITCODE_TOKEN }}" ]; then
+            echo "::warning::未配置 GITCODE_TOKEN，附件下载会失败（release 正文仍可回填）"
+          fi
+
+      - name: 巡检（只读，始终执行）
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/release_sync.py check
+
+      - name: 附件鉴权探测（只读 · 每个请求仅 1KB）
+        continue-on-error: true
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: python3 tools/release_sync.py probe
+
+      - name: 回填 · DRY-RUN（不写）
+        if: ${{ inputs.mode == 'dry-run' }}
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--asset-mode ${{ inputs.asset_mode }}"
+          if [ -n "${{ inputs.only_tag }}" ]; then ARGS="$ARGS --only-tag ${{ inputs.only_tag }}"; fi
+          if [ "${{ inputs.skip_assets }}" = "true" ]; then ARGS="$ARGS --skip-assets"; fi
+          echo "python3 tools/release_sync.py backfill $ARGS"
+          python3 tools/release_sync.py backfill $ARGS
+
+      - name: 回填 · APPLY（真写）
+        if: ${{ inputs.mode == 'backfill' }}
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--apply --asset-mode ${{ inputs.asset_mode }}"
+          if [ -n "${{ inputs.only_tag }}" ]; then ARGS="$ARGS --only-tag ${{ inputs.only_tag }}"; fi
+          if [ "${{ inputs.skip_assets }}" = "true" ]; then ARGS="$ARGS --skip-assets"; fi
+          echo "python3 tools/release_sync.py backfill $ARGS"
+          python3 tools/release_sync.py backfill $ARGS
+
+      - name: 复核（回填后再巡检一次）
+        if: ${{ inputs.mode == 'backfill' }}
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/release_sync.py check
