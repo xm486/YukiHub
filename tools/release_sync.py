@@ -691,6 +691,42 @@ def gh_diag(token):
             log("          → releases 接口**整体写不了**（不只是创建）→ 基本可确定是功能/风控开关")
 
 
+def gh_explain_write_failure(token):
+    """创建 release 返回 403/404 时，按官方文档定位根因。
+
+    官方文档（REST → Releases → Create a release）的要点：
+      当 target_commitish 指向的 commit（省略时为默认分支最新 commit）
+      相对仓库默认分支改动过 .github/workflows/ 下的任何文件时，
+      认证令牌必须具备「可修改 workflow」的授权，否则该接口直接返回 404；
+      部分认证路径则表现为 403 Resource not accessible by integration。
+      · Classic PAT：需要 `workflow` scope
+      · 细粒度 PAT / App 令牌：需要 Workflows 仓库权限（write）
+      · Actions 内置的 GITHUB_TOKEN：官方明确说「无法为此授权」
+    """
+    log("   💡 按官方文档定位（不是脚本问题）：")
+    st, hd, _ = _req_capture(
+        "GET", "{}/repos/{}/{}/releases?per_page=1".format(GH_API, OWNER, REPO), token
+    )
+    scopes = (hd.get("X-OAuth-Scopes") or "").strip()
+    log("      当前令牌 scopes = {}".format(scopes or "（无此响应头 → 不是 Classic PAT）"))
+
+    if "workflow" in scopes.lower():
+        log("      已含 workflow scope → 不是这条原因，转通用诊断：")
+        gh_diag(token)
+        return
+
+    log("      ❗ **缺少 `workflow` scope —— 这就是根因**")
+    log("         回填用的 tag 指向几个月前的旧 commit，而你 main 上新增了")
+    log("         .github/workflows/ 下的文件（build.yml / release-sync.yml），")
+    log("         两者在 workflow 目录存在差异 → 按文档创建 Release 必须有")
+    log("         workflow 授权，否则返回 404。")
+    log("      解法（二选一）：")
+    log("        ① 给现有 PAT 勾选 ☑ workflow（说明：Update GitHub Action workflows）")
+    log("           若该 token 不支持改 scope，则②")
+    log("        ② 新建 classic PAT，勾选 ☑ repo + ☑ workflow，替换 Secret SYNC_GH_TOKEN")
+    log("      ⚠️ 内置 GITHUB_TOKEN 拿不到这个授权（文档明确说明）→ 只能用 PAT。")
+
+
 def cmd_backfill(args):
     gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     gc_token = os.environ.get("GITCODE_TOKEN")
@@ -819,10 +855,7 @@ def cmd_backfill(args):
                 if status not in (200, 201):
                     log("   ❌ 创建 release 失败 HTTP {}：{}".format(status, data))
                     if status in (403, 404):
-                        log("   💡 这是**令牌权限**问题，不是脚本问题。自动诊断如下：")
-                        gh_diag(gh_token)
-                        log("      · 内置令牌 → 仓库 Settings → Actions → General")
-                        log("        → Workflow permissions → 'Read and write permissions' → **点 Save**")
+                        gh_explain_write_failure(gh_token)
                     failures.append((tag, "create-release HTTP {}".format(status)))
                     fail_cnt += 1
                     continue
