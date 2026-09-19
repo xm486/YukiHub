@@ -79,7 +79,7 @@ jobs:
           echo "仓库   : ${{ github.repository }}"
           echo "模式   : ${{ inputs.mode }}"
           if [ -z "${{ secrets.GITCODE_TOKEN }}" ]; then
-            echo "::warning::未配置 GITCODE_TOKEN，附件下载会失败（release 正文仍可回填）"
+            echo "  GITCODE_TOKEN 未配置 —— 实测匿名即可下载 GitCode 附件，不影响本流程"
           fi
 
       - name: 令牌权限预检（只读）
@@ -90,10 +90,7 @@ jobs:
           RESP=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}")
           echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print('  当前令牌 permissions =', d.get('permissions'))"
-          STATE=$(echo "$RESP" | python3 -c "
-import json, sys
-p = (json.load(sys.stdin).get('permissions') or {})
-print('write' if p.get('push') else ('read' if p.get('pull') else 'none'))")
+          STATE=$(echo "$RESP" | python3 -c "import json,sys; p=(json.load(sys.stdin).get('permissions') or {}); print('write' if p.get('push') else ('read' if p.get('pull') else 'none'))")
           echo "  判定结果 : $STATE"
           case "$STATE" in
             write)
@@ -110,10 +107,11 @@ print('write' if p.get('push') else ('read' if p.get('pull') else 'none'))")
               fi
               ;;
             none)
-              echo "::warning::令牌对仓库**完全没有权限**（连读都没有，permissions 全 False）"
+              echo "::warning::令牌对仓库**没有可用权限**（permissions 全 False 或读不到）"
               echo "  这不是「只读」，说明权限根本没生效。常见原因："
               echo "   ① 上面那个设置改完**没点 Save**"
               echo "   ② 仓库处于受限制状态（曾被标记过），GITHUB_TOKEN 被降级"
+              echo "   ③ 用的 PAT 无效 / 过期 / 没勾 repo 权限"
               echo "  最可靠解法：建一个 PAT（scope: repo），存成 Secret: SYNC_GH_TOKEN"
               echo "  （工作流会自动优先使用它，无需改任何代码）"
               if [ "${{ inputs.mode }}" = "backfill" ]; then
