@@ -593,6 +593,78 @@ def cmd_probe(args):
     return 0 if _gc_auth_cache else 1
 
 
+def _req_capture(method, url, token=None, payload=None, timeout=30):
+    """执行请求并**连响应头一起**返回：(status, headers dict, body)。"""
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": UA}
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+            hd = dict(resp.headers.items())
+            try:
+                return resp.status, hd, json.loads(raw)
+            except json.JSONDecodeError:
+                return resp.status, hd, raw
+    except urllib.error.HTTPError as e:
+        hd = dict((e.headers or {}).items())
+        try:
+            raw = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            raw = ""
+        return e.code, hd, raw
+    except Exception as e:
+        return 0, {}, mask(str(e))
+
+
+_diag_done = False
+
+
+def gh_diag(token):
+    """403 / 404 时自动诊断：令牌身份、scope、以及**能否写仓库内容**。
+
+    注意：repo 接口里的 `permissions` 反映的是「你账号对该仓库的权限」，
+    **不代表这个令牌被授权的范围** —— 所以预检通过也可能写不了。
+    这里用一次**完全无害**的 blob 写入来实测真实写权限。
+    """
+    global _diag_done
+    if _diag_done:
+        return
+    _diag_done = True
+
+    base = "{}/repos/{}/{}".format(GH_API, OWNER, REPO)
+
+    st, hd, body = _req_capture("GET", base + "/releases?per_page=1", token)
+    log("   [诊断] GET /repos/.../releases → HTTP {}".format(st))
+    log("   [诊断] x-oauth-scopes          = {}".format(
+        hd.get("X-OAuth-Scopes", "（无此响应头 → 不是 Classic PAT）")))
+    log("   [诊断] x-accepted-oauth-scopes = {}".format(hd.get("X-Accepted-OAuth-Scopes", "（无）")))
+    log("   [诊断] x-ratelimit-remaining   = {}".format(hd.get("X-RateLimit-Remaining", "?")))
+
+    st2, _, body2 = _req_capture("GET", GH_API + "/user", token)
+    login = body2.get("login") if isinstance(body2, dict) else "?"
+    log("   [诊断] GET /user → HTTP {}（login={}）".format(st2, login))
+
+    st3, _, body3 = _req_capture(
+        "POST", base + "/git/blobs", token,
+        {"content": "yukihub-perm-check", "encoding": "utf-8"},
+    )
+    log("   [诊断] POST /git/blobs（**无害写权限实测**）→ HTTP {}".format(st3))
+    if st3 in (200, 201):
+        log("          → 内容可写 ✅，写权限本身没问题")
+    elif st3 == 404:
+        log("          → 404：写权限**根本没生效**")
+        log("             · 细粒度 PAT：Repository access 必须含 YukiHub，且 **Contents = Read and write**")
+        log("             · Classic PAT：必须勾 **repo**")
+        log("             · 内置令牌：仓库设置里要选 Read and write 并**点 Save**")
+    elif st3 == 403:
+        log("          → 403：scope 不足（同上，改 PAT 权限）")
+
+
 def cmd_backfill(args):
     gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     gc_token = os.environ.get("GITCODE_TOKEN")
@@ -701,12 +773,11 @@ def cmd_backfill(args):
                 )
                 if status not in (200, 201):
                     log("   ❌ 创建 release 失败 HTTP {}：{}".format(status, data))
-                    if status == 403 and "not accessible by integration" in str(data):
-                        log("   💡 这是**令牌权限**问题，不是脚本问题。二选一：")
-                        log("      A) 仓库 Settings → Actions → General → Workflow permissions")
-                        log("         → 选 'Read and write permissions' → Save，然后重跑")
-                        log("      B) 建一个 contents 读写的 PAT，存成 Secret `SYNC_GH_TOKEN`")
-                        log("         （工作流会自动优先使用它，无需改代码）")
+                    if status in (403, 404):
+                        log("   💡 这是**令牌权限**问题，不是脚本问题。自动诊断如下：")
+                        gh_diag(gh_token)
+                        log("      · 内置令牌 → 仓库 Settings → Actions → General")
+                        log("        → Workflow permissions → 'Read and write permissions' → **点 Save**")
                     failures.append((tag, "create-release HTTP {}".format(status)))
                     fail_cnt += 1
                     continue
