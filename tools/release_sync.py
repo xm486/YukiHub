@@ -655,7 +655,7 @@ def gh_diag(token):
     )
     log("   [诊断] POST /git/blobs（**无害写权限实测**）→ HTTP {}".format(st3))
     if st3 in (200, 201):
-        log("          → 内容可写 ✅，写权限本身没问题")
+        log("          → git 内容可写 ✅，令牌写权限本身没问题（那 404 就不是 scope 问题）")
     elif st3 == 404:
         log("          → 404：写权限**根本没生效**")
         log("             · 细粒度 PAT：Repository access 必须含 YukiHub，且 **Contents = Read and write**")
@@ -663,6 +663,32 @@ def gh_diag(token):
         log("             · 内置令牌：仓库设置里要选 Read and write 并**点 Save**")
     elif st3 == 403:
         log("          → 403：scope 不足（同上，改 PAT 权限）")
+
+    # 仓库功能开关：has_downloads=False 会让「创建 Release」直接 404
+    st4, _, body4 = _req_capture("GET", base, token)
+    if isinstance(body4, dict):
+        log("   [诊断] 仓库开关：has_downloads={} | has_issues={} | archived={} | disabled={}".format(
+            body4.get("has_downloads"), body4.get("has_issues"),
+            body4.get("archived"), body4.get("disabled")))
+        if body4.get("has_downloads") is False:
+            log("          ⚠️ **has_downloads = False** —— 极可能就是创建 Release 报 404 的根因")
+            log("          处理：仓库 Settings → General → 找 Features 区块里 Releases/下载 相关开关")
+            log("                （若被 GitHub 因风控关闭且界面里改不了，需联系 Support）")
+
+    # PATCH 现有 release（原值回写，内容不变）→ 判断 releases 接口能否写
+    st5, _, rel5 = _req_capture("GET", base + "/releases?per_page=1", token)
+    if isinstance(rel5, list) and rel5:
+        r0 = rel5[0]
+        st6, _, _ = _req_capture(
+            "PATCH", "{}/releases/{}".format(base, r0.get("id")), token,
+            {"name": r0.get("name"), "body": r0.get("body")},
+        )
+        log("   [诊断] PATCH /releases/{}（**原值回写，内容不变**）→ HTTP {}".format(r0.get("id"), st6))
+        if st6 == 200:
+            log("          → releases 接口**可以写**，只有「创建新 release」这一个动作被拦")
+            log("          → 可行折中：你手动建空 release，脚本负责填正文 + 传 APK")
+        elif st6 in (403, 404):
+            log("          → releases 接口**整体写不了**（不只是创建）→ 基本可确定是功能/风控开关")
 
 
 def cmd_backfill(args):
@@ -700,9 +726,26 @@ def cmd_backfill(args):
         return 2
     gh_list = [norm_github(r) for r in gh_raw if isinstance(r, dict)]
     gc_list = [norm_gitcode(r) for r in gc_raw if isinstance(r, dict)]
-    gh_tags = {r["tag"] for r in gh_list}
+    gh_by_tag = {r["tag"]: r for r in gh_list}
 
-    targets = [r for r in gc_list if r["tag"] not in gh_tags]
+    def needs_backfill(gc):
+        """自愈式判断：release 缺失要补；release 在但**附件缺**也要补。
+
+        这样即使你先在网页上手建好 release（绕过创建限制），
+        再跑一次脚本就能自动把 APK 传上去。
+        """
+        gh = gh_by_tag.get(gc["tag"])
+        if gh is None:
+            return True
+        if args.skip_assets:
+            return False
+        have = {a.get("name") for a in (gh.get("assets") or [])}
+        for a in only_attach(gc["assets"]):
+            if apk_target_name(a.get("name"), args.asset_mode) not in have:
+                return True
+        return False
+
+    targets = [r for r in gc_list if needs_backfill(r)]
     if args.only_tag:
         targets = [r for r in targets if r["tag"] == args.only_tag]
     targets.sort(key=lambda r: vkey(r["tag"]))
@@ -723,7 +766,9 @@ def cmd_backfill(args):
 
     for i, r in enumerate(targets, 1):
         att = only_attach(r["assets"])
-        print(" [{}/{}] {}  ← {}".format(i, len(targets), r["tag"], (r.get("commitish") or "?")[:12]))
+        act = "建 release + 传附件" if r["tag"] not in gh_by_tag else "release 已在 → 仅补附件"
+        print(" [{}/{}] {}  [{}]  ← {}".format(
+            i, len(targets), r["tag"], act, (r.get("commitish") or "?")[:12]))
         print("        name  : {}".format(r["name"]))
         print("        正文  : {} 字符".format(len(r["body"])))
         for a in att:
