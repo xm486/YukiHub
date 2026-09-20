@@ -14,7 +14,7 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      * 历史：15 = 聊天回复引用 + 未读锚点；16 = 曾短暂加过群聊等级列（已废弃，等级改为不入缓存）
      *      18 = 清理 metadata_cache 孤儿行（历史存量）+ 压缩数据库
      */
-    public static final int DB_VERSION = 20;
+    public static final int DB_VERSION = 21;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -93,7 +93,11 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 "hidden INTEGER DEFAULT 0," +
                 "favorite INTEGER DEFAULT 0," +
                 "nsfw INTEGER DEFAULT 0," +
-                "trailer_path TEXT" +
+                "trailer_path TEXT," +
+                // v21：这两列原先只写在 onUpgrade 里，全新安装走 onCreate 时漏建，
+                // 导致 INSERT 报 "table games has no column named logo_path" 而全部失败。
+                "logo_path TEXT," +
+                "bg_path TEXT" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -118,6 +122,15 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        // v21：修复 v20 的坑 —— logo_path / bg_path 只在 onUpgrade 里加过，
+        // onCreate 的建表语句漏了这两列，导致「全新安装」的库天生缺列，
+        // 所有 INSERT 都会以 "table games has no column named logo_path" 失败
+        //（表现为：扫描提示已添加但列表为空、手动添加无任何反应）。
+        // safeAlter 是幂等的（重复添加同名列会被吞掉），对已正常的库无副作用。
+        if (oldVersion < 21) {
+            safeAlter(db, "ALTER TABLE games ADD COLUMN logo_path TEXT");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN bg_path TEXT");
+        }
         // v19：大屏模式的本地预告视频路径（spec §S10.2）
         if (oldVersion < 19) {
             safeAlter(db, "ALTER TABLE games ADD COLUMN trailer_path TEXT");
