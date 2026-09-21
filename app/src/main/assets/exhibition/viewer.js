@@ -61,7 +61,7 @@ export function createViewer(deps) {
         renderer.setSize(w, h, false);
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.08;
+        renderer.toneMappingExposure = 1.18;        // 与主场景一致：整体偏暗的修正
         stage.appendChild(renderer.domElement);
 
         scene = new THREE.Scene();
@@ -85,7 +85,7 @@ export function createViewer(deps) {
         rim.position.set(-1.2, 1.4, -2.4);
         scene.add(rim);
 
-        scene.add(new THREE.AmbientLight(0xFFFFFF, 0.45));
+        scene.add(new THREE.AmbientLight(0xFFFFFF, 0.62));   // 0.45 → 0.62：暗部抬亮，避免书脊侧面发黑
 
         return true;
     }

@@ -142,12 +142,30 @@ export function createHall(scene, opts = {}) {
     let panelLeft = null;
     let panelRight = null;
 
+    // 主题展台（玩家自定义陈列：4 座，两排各两座）
+    // islands[i] = { group, mesh, slot, game }，mesh 为 null 表示空台
+    const islands = [];
+    const itemGames = [];    // 当前库存的原始列表（setGames 时灌入，供展台按 id 反查）
+    let islandsBuilt = false;
+    const ISLAND_POS = [
+        { x: 7.5, z: -2.5 }, { x: 10.5, z: -2.5 },   // 第一排（靠后）
+        { x: 7.5, z: 2.5 }, { x: 10.5, z: 2.5 },     // 第二排（靠前）
+    ];
+    // 盒子几何：**共用**（同一类盒子尺寸相同）。
+    // 为什么必须共用：disposeBoxMaterials() 只释放材质不释放几何，
+    // 而这些盒子会在"换展品 / 换库存 / 重填展架"时反复重建 ——
+    // 若每次 new BoxGeometry，几何就会一直累积泄漏。
+    const ISLAND_BOX_GEO = new THREE.BoxGeometry(0.52, 0.74, 0.11);
+    const ROTATOR_BOX_GEO = new THREE.BoxGeometry(0.46, 0.66, 0.10);
+    const PEDESTAL_BOX_GEO = new THREE.BoxGeometry(0.62, 0.9, 0.13);
+
     buildShelfSlots();
     buildPedestal();
     buildSign();
     buildZoneSigns();
     buildRotator();
     buildWallPanels();
+    buildIslands();
 
     /**
      * 先把所有"位置"算出来（不建网格），后续按距离懒建。
@@ -736,6 +754,365 @@ export function createHall(scene, opts = {}) {
         return tex;
     }
 
+        /* ---------- 主题展台（玩家自定义陈列：4 座，两排各两座） ---------- */
+    /*
+     * 与中央展台的区别：
+     *   · 中央展台 = 系统自动挑（收藏 / 最近游玩），玩家不能改
+     *   · 主题展台 = 玩家自己点上去摆，槽位存 App（SharedPreferences）
+     *
+     * 默认全空（只有台座 + 光柱 + 射灯），玩家点一下才弹选品浮层。
+     * 不做投影：中央展台那盏已经是全场唯一的投影灯，再加 4 盏阴影开销不划算。
+     */
+
+    /**
+     * 悬浮按钮（Lv-1）：展台上方的小圆牌，**始终正对相机**。
+     * 返回 { group, disc, slot } —— disc 带 userData.islandButton = slot，供 pick() 识别。
+     *
+     * 为什么圆牌做得比铭牌大得多（⌀0.9m）：
+     *   在 3m 外，⌀0.9m 的圆牌在屏幕上约占 110px（屏幕高 ~1400px、fov 72°），
+     *   手指（触摸目标建议 ≥48px）轻松压中；而原来 0.68×0.17m 的铭牌只有几像素。
+     */
+    function makeIslandButton(slot) {
+        const bg = new THREE.Group();
+
+        // 背板圆盘（不透明，保证按钮醒目）
+        // 尺寸：⌀0.72m（反馈"有点大"，从 0.9 收一点）。
+        // 2.5m 外约 100px，仍远大于 48px 的触控建议下限。
+        const disc = new THREE.Mesh(
+            new THREE.CircleGeometry(0.36, 32),
+            new THREE.MeshBasicMaterial({
+                map: makeButtonTexture(),
+                transparent: true,
+                depthTest: false,       // 永远压在展台/盒子上方，不被遮挡
+                depthWrite: false,
+            })
+        );
+        disc.renderOrder = 20;          // 与 depthTest:false 配合，确保画在最上层
+        disc.userData.islandButton = slot;
+        bg.add(disc);
+
+        // 外圈：细金环（提示"这是可点的"）
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.375, 0.415, 40),
+            new THREE.MeshBasicMaterial({
+                color: 0xFFD479, transparent: true, opacity: 0.85,
+                side: THREE.DoubleSide,
+                depthTest: false, depthWrite: false,
+            })
+        );
+        ring.renderOrder = 21;
+        bg.add(ring);
+
+        return { group: bg, disc, ring, slot };
+    }
+
+    /** 悬浮按钮贴图：深底圆 + 金色"更换展品"+ 一个小笔刷图标（程序化，无素材） */
+    function makeButtonTexture() {
+        const S = 256;
+        const c = document.createElement('canvas');
+        c.width = c.height = S;
+        const g = c.getContext('2d');
+
+        // 圆形底色（径向渐变，中心亮一圈）
+        const rg = g.createRadialGradient(S / 2, S / 2, 20, S / 2, S / 2, S / 2);
+        rg.addColorStop(0.00, 'rgba(38,50,68,0.98)');
+        rg.addColorStop(1.00, 'rgba(20,27,39,0.98)');
+        g.fillStyle = rg;
+        g.beginPath();
+        g.arc(S / 2, S / 2, S / 2 - 4, 0, Math.PI * 2);
+        g.fill();
+
+        // 金边
+        g.strokeStyle = 'rgba(255,212,121,0.92)';
+        g.lineWidth = 5;
+        g.stroke();
+
+        // 笔刷图标（斜的胶囊 + 尖头）
+        g.save();
+        g.translate(S / 2, S / 2 - 34);
+        g.rotate(-Math.PI / 4);
+        g.fillStyle = '#FFD479';
+        g.beginPath();
+        g.roundRect ? g.roundRect(-11, -20, 22, 40, 8) : g.rect(-11, -20, 22, 40);
+        g.fill();
+        g.fillStyle = '#261E0E';
+        g.fillRect(-11, 8, 22, 7);      // 笔尖分界线
+        g.restore();
+
+        // 文字
+        g.fillStyle = '#F3E9CF';
+        g.font = 'bold 40px sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText('更换展品', S / 2, S / 2 + 56);
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        return tex;
+    }
+
+    /**
+     * 每帧更新悬浮按钮：把可见性 + 朝向交给"离玩家有多近"。
+     * 只有**距离 < BUTTON_SHOW_DIST** 的展台才显示按钮，避免 4 个圆牌一直晃。
+     */
+    const BUTTON_SHOW_DIST = 3.2;
+    function updateIslandButtons(camera) {
+        const cp = camera.position;
+        for (const isl of islands) {
+            const btn = isl.btn;
+            if (!btn) continue;
+            // 用展台的世界坐标算距离（group 的 position 就是世界坐标，无父级变换）
+            const d = cp.distanceTo(isl.group.position);
+            const show = d < BUTTON_SHOW_DIST;
+            if (btn.group.visible !== show) btn.group.visible = show;
+            if (!show) continue;
+
+            // ★ billboard：让圆牌永远正对相机（否则走到侧面就看不见了）
+            btn.group.quaternion.copy(camera.quaternion);
+            // 接近时轻微呼吸，提示"可点"
+            const k = 1 + 0.04 * Math.sin(phase * 2.4);
+            btn.group.scale.set(k, k, 1);
+        }
+    }
+
+    /** 单座展台（八棱双层台座 + 金腰线 + 铭牌 + 光柱 + 射灯 + 悬浮按钮） */
+    function buildIsland(slot) {
+        const p = ISLAND_POS[slot];
+        const g = new THREE.Group();
+        g.position.set(p.x, 0, p.z);
+
+        // 台座材质：深灰石质 + 一点金属光泽（比纯黑圆柱有"展馆石台"感）
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x38424F, roughness: 0.55, metalness: 0.20 });
+        const trimMat = new THREE.MeshStandardMaterial({ color: 0xC4A96B, roughness: 0.34, metalness: 0.72 });
+
+        // 下座：八棱柱（八边形比圆柱更有棱线，"石台"感直接出来）
+        // 高度加高到 0.60，整体台面抬到 0.92 —— 原来 0.63 太矮，展品像蹲在地上
+        const lower = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.74, 0.86, 0.60, 8, 1),
+            stoneMat
+        );
+        lower.position.y = 0.30;
+        lower.rotation.y = Math.PI / 8;      // 让一个平面正对门厅方向，铭牌才贴得正
+        lower.receiveShadow = true;
+        g.add(lower);
+
+        // 金腰线：上下座之间一道细亮圈（造型的"点睛"，也是唯一的金色来源）
+        const trim = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.685, 0.685, 0.04, 8, 1),
+            trimMat
+        );
+        trim.position.y = 0.62;
+        trim.rotation.y = Math.PI / 8;
+        g.add(trim);
+
+        // 上座：略小一圈，顶面就是陈列台面
+        const upper = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.62, 0.685, 0.26, 8, 1),
+            stoneMat
+        );
+        upper.position.y = 0.77;
+        upper.rotation.y = Math.PI / 8;
+        upper.receiveShadow = true;
+        g.add(upper);
+
+        const TOP_Y = 0.90;                  // 台面高度（后续摆盒子以此为基准）
+
+        // 台面发光环：柔和的内圈光，把"这里能放东西"说清楚
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.30, 0.56, 32),
+            new THREE.MeshBasicMaterial({
+                color: 0xFFE9C8, transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+            })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = TOP_Y + 0.002;     // 贴住台面，避免 z-fighting
+        g.add(ring);
+
+        // 铭牌：纯视觉，**不再承担点击**（Q3：太小、点不准，问题太多）。
+        // 更换展品改由"靠近展台时浮出的悬浮按钮"负责（见 buildIslandButton / updateIslandButtons）。
+        const plate = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.68, 0.17),
+            new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.94 })
+        );
+        // 高度取下座中段（下座 0~0.60 → 0.36 居中），别贴地也别顶到金腰线
+        plate.position.set(0, 0.36, 0.755);  // 下座外接半径 ≈0.80，贴到 0.755 略嵌进去
+        g.add(plate);
+
+        // 射灯 + 光柱（不投影：中央展台那盏已经是全场唯一的投影灯）
+        // 强度 14→20：台面抬高后展品离灯更近，但距离也要跟着调（3.6→4.1）
+        const spot = new THREE.SpotLight(0xFFE7C4, 20, 10, Math.PI / 8, 0.6, 1.8);
+        spot.position.set(0, 4.1, 0);
+        spot.target.position.set(0, TOP_Y, 0);
+        g.add(spot);
+        g.add(spot.target);
+
+        // 体积光柱：底端必须压在**展品上方**。
+        // 台面已抬到 0.90、展品顶到约 1.56，所以光柱中心取 2.35 才对得上
+        // （原来 2.10 是按旧台面 0.63 算的，加高后会插进台座里）。
+        const beam = new THREE.Mesh(
+            new THREE.ConeGeometry(0.60, 2.9, 22, 1, true),
+            new THREE.MeshBasicMaterial({
+                map: makeBeamTexture(),
+                color: 0xFFE7C4,
+                transparent: true,
+                opacity: 0.10,               // 比中央展台更弱：4 根别抢 C 位
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+            })
+        );
+        beam.position.y = 2.35;
+        g.add(beam);
+
+        // 台座：纯视觉，不参与点击（Q3）。
+        // 之前给 lower/upper/trim 都打了 islandSlot 标记，导致"点哪都能换、
+        // 还会和盒子抢点击"，索性全部去掉 —— 更换入口只剩悬浮按钮。
+
+        // ---- 悬浮按钮（Q1-甲）：靠近时才显示，贴在展台上方 ----
+        // 为什么用 3D 小圆牌而不是铭牌：铭牌只有 0.68×0.17m，
+        // 在 3~4m 外屏幕上只有几像素，手指根本压不准。
+        // 悬浮牌做成 0.9m 见方且**始终正对相机**（billboard），手指好按得多。
+        const btn = makeIslandButton(slot);
+        btn.group.position.set(0, 2.05, 0);
+        btn.group.visible = false;
+        g.add(btn.group);
+        // 按钮挂在 group 下，会跟着展台走；但 billboard 时用到相机四元数，
+        // 而 group 本身没有旋转，所以 btn.group.quaternion 直接复制相机的是安全的。
+
+        group.add(g);
+        islands.push({
+            group: g, mesh: null, slot, game: null,
+            parts: [],                       // 台座不再参与点击（Q3），保留空数组以兼容旧结构
+            plate, plateKey: '',             // 铭牌（纯视觉）+ 当前文字（避免重复重绘）
+            btn,                             // 悬浮按钮 { group, disc, ring, slot }
+            topY: TOP_Y,
+        });
+        drawIslandPlate(slot);               // 先画"点击陈列"
+    }
+
+    /** 画展台铭牌（空台 / 已陈列不同文案） */
+    function drawIslandPlate(slot) {
+        const isl = islands[slot];
+        if (!isl || !isl.plate) return;
+        const text = isl.game ? (isl.game.title || '(无标题)') : '点击陈列';
+        if (isl.plateKey === text) return;   // 文字没变就不重绘（省一次 CanvasTexture）
+        isl.plateKey = text;
+
+        const W = 512, H = 132;
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const g2 = c.getContext('2d');
+
+        // 底板 + 金边（与悬挂小牌同一套视觉语言）
+        g2.fillStyle = 'rgba(12,17,26,0.92)';
+        g2.fillRect(0, 0, W, H);
+        g2.strokeStyle = isl.game ? 'rgba(196,169,107,0.90)' : 'rgba(150,166,190,0.45)';
+        g2.lineWidth = 5;
+        g2.strokeRect(6, 6, W - 12, H - 12);
+
+        g2.fillStyle = isl.game ? '#F0E4C6' : '#8FA0B8';
+        g2.font = (isl.game ? 'bold 46px ' : '40px ') + 'sans-serif';
+        g2.textAlign = 'center';
+        g2.textBaseline = 'middle';
+        // 标题过长就截断（铭牌尺寸固定，不缩字号，保持一排整齐）
+        let t = text;
+        if (t.length > 14) t = t.slice(0, 13) + '…';
+        g2.fillText(t, W / 2, H / 2 + 2);
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const old = isl.plate.material.map;
+        isl.plate.material.map = tex;
+        isl.plate.material.needsUpdate = true;
+        if (old) old.dispose();
+    }
+
+    function buildIslands() {
+        if (islandsBuilt) return;
+        islandsBuilt = true;
+        for (let i = 0; i < ISLAND_POS.length; i++) buildIsland(i);
+        updateIslands(itemGames);
+    }
+
+    /** 把某座展台上的盒子换掉（game 为 null = 清空） */
+    function setIslandGame(slot, game) {
+        const isl = islands[slot];
+        if (!isl) return;
+
+        // 先撤掉旧的（材质/几何都要释放，否则反复换会漏显存）
+        if (isl.mesh) {
+            isl.group.remove(isl.mesh);
+            disposeBoxMaterials(isl.mesh);
+            isl.mesh = null;
+        }
+        isl.game = game || null;
+        if (!game) { drawIslandPlate(slot); return; }
+
+        // 单件展陈失败也只影响这一座台子，不该连累调用方（见 setGames 的注释）
+        try {
+            const mats = makeBoxMaterials(game);
+            // 复用共享几何（不要在这里 new：反复换展品会漏几何）
+            const mesh = new THREE.Mesh(ISLAND_BOX_GEO, mats);
+            mesh.position.y = (isl.topY || 0.90) + 0.74 / 2 + 0.02;   // 立在台面上沿
+            // 初始角度从 0 开始：它在 update() 里会持续自转，
+            // 若这里设个非零初值，每次"重新摆上"都会看到盒子跳一下。
+            mesh.rotation.y = 0;
+            mesh.userData.game = game;
+            // 不再打 islandSlot 标记：Q3 已取消"点展台换展品"，
+            // 留着它会让 pick() 的判定意图含糊（和旧逻辑混淆）。
+            isl.group.add(mesh);
+            isl.mesh = mesh;
+
+            // 贴封面（复用中央展台那套：直连加载，不走货架队列）
+            if (game.cover) {
+                const target = mesh;
+                const img = new Image();
+                img.onload = () => {
+                    if (isl.mesh !== target) return;    // 期间被换掉了，丢弃
+                    applyCoverToBox(target, textureFromImage(img, game.nsfw));
+                };
+                img.onerror = () => { /* 失败就留占位材质 */ };
+                img.src = game.cover;
+            }
+            applyStatus(mats, game);
+        } catch (e) {
+            log('⚠️ 展台 ' + slot + ' 摆件失败：' + (e && e.message ? e.message : e));
+        }
+        drawIslandPlate(slot);              // 铭牌跟着更新（空台 / 标题）
+    }
+
+    /** 按当前槽位重建 4 座展台（打开展厅时、以及玩家选完后各调一次） */
+    function updateIslands(list) {
+        if (!islands.length) return;
+        const ids = readIslandSlots();
+        const byId = new Map();
+        for (const g of (list || itemGames)) byId.set(String(g.id), g);
+        for (const isl of islands) {
+            const id = ids[isl.slot];
+            setIslandGame(isl.slot, id ? (byId.get(String(id)) || null) : null);
+        }
+    }
+
+    /**
+     * 读槽位（与 picker.js 同一格式："12,,45,"）
+     * 桥接不存在时退回 localStorage —— 保证 Java 侧没编译也能跑。
+     */
+    function readIslandSlots() {
+        let raw = '';
+        try {
+            const b = window.ExhibitionBridge;
+            if (b && typeof b.getDisplaySlots === 'function') raw = b.getDisplaySlots() || '';
+            if (!raw) raw = localStorage.getItem('exhibition_display_slots') || '';
+        } catch (e) { raw = ''; }
+        const parts = String(raw).split(',');
+        const out = new Array(ISLAND_POS.length).fill('');
+        for (let i = 0; i < out.length; i++) {
+            const v = parseInt(parts[i], 10);
+            out[i] = (Number.isFinite(v) && v > 0) ? String(v) : '';
+        }
+        return out;
+    }
+
     /** 中央展台 */
     function buildPedestal() {
         pedestal = new THREE.Group();
@@ -856,7 +1233,10 @@ export function createHall(scene, opts = {}) {
         canopy.position.y = 2.42;
         rotator.add(canopy);
 
-        // 悬挂牌：说明这台展架是「最近游玩」（挂在旋转盒子上方，不挡盒子）
+        // 悬挂牌：说明这台展架是「最近游玩」。
+        // 原来放在 (0, 1.70, 0) —— 正好和中央立杆(x=z=0, 高 0.4~2.4)重叠，
+        // 从门口看过去杆子会把"最近游玩"四个字从中间劈开。
+        // 修法：**略微前移 + 抬高**，让它挂在杆的前上方，完全不与杆相交。
         const plate = new THREE.Mesh(
             new THREE.PlaneGeometry(1.45, 0.375),
             new THREE.MeshBasicMaterial({
@@ -865,7 +1245,7 @@ export function createHall(scene, opts = {}) {
                 side: THREE.DoubleSide,
             })
         );
-        plate.position.set(0, 1.70, 0);
+        plate.position.set(0, 2.02, 0.62);   // z 前移 0.62（避开立杆），y 略抬到 2.02
         rotator.add(plate);
 
         // 顶灯：把展架上的盒子照亮
@@ -893,7 +1273,7 @@ export function createHall(scene, opts = {}) {
         const items = (list || []).slice(0, ROTATOR_MAX);
         items.forEach((game, i) => {
             const mats = makeBoxMaterials(game);
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.66, 0.10), mats);
+            const mesh = new THREE.Mesh(ROTATOR_BOX_GEO, mats);
             const a = (i / Math.max(1, items.length)) * Math.PI * 2;
             mesh.position.set(Math.cos(a) * 0.80, 0.52, Math.sin(a) * 0.80);
             mesh.rotation.y = Math.PI / 2 - a;      // 正面朝外
@@ -981,7 +1361,28 @@ export function createHall(scene, opts = {}) {
 
     /* ---------- 状态 → 材质外观 ---------- */
 
+    /**
+     * 给"游戏盒"应用状态灯效。
+     * @param mat 单个材质，**或实体盒的 6 面材质数组**
+     * @param game
+     *
+     * 为什么接受数组：实体盒改造后，调用方手里拿到的是 makeBoxMaterials() 的数组。
+     * 早先只支持单材质，传数组进来会在 mat.emissive 上炸（undefined.setHex）。
+     *
+     * 数组时**只给正反面（下标 4/5）上状态色** —— 书脊/塑料壳不该被染成青的紫的。
+     */
     function applyStatus(mat, game) {
+        if (Array.isArray(mat)) {
+            for (const i of [4, 5]) {
+                if (mat[i]) applyStatusToMaterial(mat[i], game);
+            }
+            return;
+        }
+        if (!mat || !mat.emissive || !mat.color) return;   // 非标准材质，跳过（防御）
+        applyStatusToMaterial(mat, game);
+    }
+
+    function applyStatusToMaterial(mat, game) {
         const st = game.playStatus || 'unplayed';
         // 让封面自带柔光（emissiveMap = 自身贴图）：
         // 这样即使在偏暗的展厅里，封面本身也是清晰可读的，不会整面糊成黑的。
@@ -1314,6 +1715,20 @@ export function createHall(scene, opts = {}) {
             return String(a.title).localeCompare(String(b.title));
         });
 
+        // 记录原始库存：主题展台要按 id 反查"这一件是哪款"（不能靠已排序/已分区的数组）
+        itemGames.length = 0;
+        for (const g of games) itemGames.push(g);
+        // 主题展台：首次进来时才建（默认空台）；已建过就按最新库存刷新槽位
+        //
+        // ⚠️ 必须 try 包起来：主题展台是"锦上添花"的功能，
+        //    它自己出任何错都不该把整个 setGames（分区 / 书架 / 统计）一起带走。
+        //    （曾经因为这里抛异常，导致书架全空、日志全无 —— 整个展厅像被清空）
+        try {
+            if (islandsBuilt) updateIslands(itemGames); else buildIslands();
+        } catch (e) {
+            log('⚠️ 主题展台初始化失败（不影响书架）：' + (e && e.message ? e.message : e));
+        }
+
         // 库存很大时自动降低封面精度，避免"全部架子都建出来"后显存吃紧
         if (sorted.length > 120) {
             CFG.texW = 192;
@@ -1485,7 +1900,7 @@ export function createHall(scene, opts = {}) {
         if (!pedestalGame) return;
 
         const mats = makeBoxMaterials(pedestalGame);
-        pedestalMesh = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.9, 0.13), mats);
+        pedestalMesh = new THREE.Mesh(PEDESTAL_BOX_GEO, mats);
         pedestalMesh.position.y = 1.58;
         pedestalMesh.castShadow = true;      // 只有这件展品投影
         pedestalMesh.userData.game = pedestalGame;
@@ -1614,9 +2029,18 @@ export function createHall(scene, opts = {}) {
         // 4) 中央展台旋转
         if (pedestalMesh) pedestalMesh.rotation.y += dt * 0.35;
         if (spinner) spinner.rotation.y += dt * 0.22;   // 旋转展架：慢速自转
+
+        // 5) 主题展台：展品绕自身垂直轴慢速自转（像"转台展示"，四个面都能看到）
+        //    速度略慢于中央展台，避免 5 件都在转时眼花。
+        for (const isl of islands) {
+            if (isl.mesh) isl.mesh.rotation.y += dt * 0.28;
+        }
+
+        // 6) 悬浮按钮：只有靠近的展台才显示，且始终正对相机
+        updateIslandButtons(camera);
     }
 
-    /** 射线拾取：返回命中的 game（只查可见架子） */
+    /** 射线拾取：返回命中的 game；点空展台返回 { islandSlot:N }（与 game 严格区分） */
     const raycasterHits = [];
     function pick(raycaster) {
         raycasterHits.length = 0;
@@ -1630,10 +2054,29 @@ export function createHall(scene, opts = {}) {
         for (const m of rotatorMeshes) {
             if (m.visible) raycasterHits.push(m);
         }
+        // 主题展台：只剩"可见的悬浮按钮"参与点击（台座/铭牌已按 Q3 摘掉）
+        for (const isl of islands) {
+            if (isl.mesh) raycasterHits.push(isl.mesh);
+            if (isl.btn && isl.btn.group.visible) raycasterHits.push(isl.btn.disc);
+        }
 
         const hits = raycaster.intersectObjects(raycasterHits, false);
         if (!hits.length) return null;
-        return hits[0].object.userData.game || null;
+
+        /*
+         * 判定策略（Q1-甲 / Q3 定稿）：
+         *   · 悬浮按钮可见且被命中 → 换展品
+         *   · 盒子被命中 → 看详情
+         *   · 台座 / 铭牌 **完全不参与**（它们不在候选数组里，所以自动不会命中）
+         *
+         * 只扫描"最近命中"就够：按钮是独立的小圆牌、且绝不与盒子重叠
+         * （它在 y=2.05，盒子顶 ≈1.56），不存在"按钮和盒子抢最近"的问题。
+         */
+        const obj = hits[0].object;
+        if (obj.userData && obj.userData.islandButton !== undefined) {
+            return { isIsland: true, slot: obj.userData.islandButton };
+        }
+        return obj.userData ? (obj.userData.game || null) : null;
     }
 
     return {
@@ -1643,6 +2086,25 @@ export function createHall(scene, opts = {}) {
         openDetail,
         closeDetail,
         resizeDetail,
+        /** 主题展台：玩家选完展品后调用（slot 从 0 起） */
+        setIsland(slot, game) {
+            setIslandGame(slot | 0, game || null);
+        },
+        /**
+         * 找"离给定位置最近、且在交互范围内"的展台槽位（手柄 X 键用）。
+         * 范围与悬浮按钮的显示距离一致 → "看得见按钮就能按 X"。
+         * 没有符合的就返回 -1。
+         */
+        nearestIslandSlot(pos) {
+            let best = -1, bestD = BUTTON_SHOW_DIST;
+            for (const isl of islands) {
+                const d = pos.distanceTo(isl.group.position);
+                if (d < bestD) { bestD = d; best = isl.slot; }
+            }
+            return best;
+        },
+        updateIslands() { updateIslands(itemGames); },
+        getGames() { return itemGames.slice(); },
         stats() {
             let visible = 0, boxes = 0;
             for (const s of shelves) {

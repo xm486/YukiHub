@@ -182,6 +182,44 @@ export function createAudio() {
         });
     }
 
+    /**
+     * 感应滑门：一声低沉的"气动滑轨"声。
+     * 用噪声 + 带通模拟滑轨摩擦，再叠一个低频"咚"作为到位的机械反馈。
+     * @param opening true = 开门（音高上扬），false = 关门（音高下沉）
+     */
+    function doorSlide(opening) {
+        if (!ctx || !started || muted) return;
+        const t = ctx.currentTime;
+        const dur = 0.55;
+
+        // ① 滑轨噪声：带通噪声，中心频率随开关方向滑动
+        const src = ctx.createBufferSource();
+        src.buffer = noiseBuffer(dur);
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.value = 1.1;
+        bp.frequency.setValueAtTime(opening ? 380 : 620, t);
+        bp.frequency.exponentialRampToValueAtTime(opening ? 900 : 260, t + dur);
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.0001, t);
+        ng.gain.linearRampToValueAtTime(0.055, t + 0.06);
+        ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        src.connect(bp); bp.connect(ng); ng.connect(master);
+        try { src.start(t); src.stop(t + dur + 0.05); } catch (e) { }
+
+        // ② 到位机械声：短促低频
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(opening ? 150 : 110, t + 0.40);
+        o.frequency.exponentialRampToValueAtTime(70, t + 0.62);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t + 0.40);
+        g.gain.linearRampToValueAtTime(0.030, t + 0.43);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.66);
+        o.connect(g); g.connect(master);
+        try { o.start(t + 0.40); o.stop(t + 0.70); } catch (e) { }
+    }
+
     /** 静音开关：返回切换后的状态（true = 已静音） */
     function toggle() {
         muted = !muted;
@@ -199,6 +237,7 @@ export function createAudio() {
         footstep,
         click,
         chime,
+        doorSlide,
         toggle,
         isMuted: () => muted,
         isStarted: () => started,

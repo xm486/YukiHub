@@ -7,6 +7,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Display;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -99,6 +100,14 @@ public class ExhibitionActivity extends AppCompatActivity {
         getWindow().setBackgroundDrawable(new ColorDrawable(0xFF05070C));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); // 逛展厅时别息屏
 
+        // ★ 主动申请高刷新率。
+        //   背景：Android 默认会把"非白名单 App"压在 60Hz（厂商省电策略），
+        //        所以同一个 APK 在有些设备上只有 60fps、在已放行的设备上能跑 90/120。
+        //   做法：把 Window 的首选刷新率设为屏幕支持的**最高档**。
+        //   注意：这只是一个"请求"，厂商仍可无视；但能显著提高拿到高刷的概率，
+        //        对已经手动加过白名单的用户则完全生效。
+        applyHighRefreshRate();
+
         // ⚠️ 顺序很重要：applyImmersive() 会取 getWindow().getInsetsController()，
         //    而部分机型（实测 OPlus 系）在 DecorView 尚未创建时会直接抛 NPE
         //    （PhoneWindow.getInsetsController → mDecor.getWindowInsetsController）。
@@ -112,6 +121,59 @@ public class ExhibitionActivity extends AppCompatActivity {
             webView.loadUrl(ONLINE_URL);
         } else {
             webView.loadDataWithBaseURL(null, onlinePlaceholderHtml(), "text/html", "utf-8", null);
+        }
+    }
+
+    /* ==================== 高刷新率申请 ==================== */
+
+    /**
+     * 把当前 Window 的首选刷新率设为屏幕支持的最高值。
+     *
+     * 为什么需要它：Android（尤其国产 ROM）默认把"非系统/未上白名单"的应用
+     * 限制在 60Hz。同一个 APK 在不同设备上帧率不一样，就是这个原因。
+     * 这里显式请求最高刷新率，能提高拿到高刷的概率（厂商仍可能无视）。
+     *
+     * 兼容性：
+     *   · API 30+ 用 Display.getSupportedModes() 找最高 refreshRate
+     *   · API 23~29 用 Display.getSupportedRefreshRates()（已废弃但可用）
+     *   · 都失败就退回"设 120"这个常见值
+     * 整个过程 try 包住：任何机型异常都不该影响展厅启动。
+     */
+    @SuppressWarnings("deprecation")
+    private void applyHighRefreshRate() {
+        try {
+            float best = 0f;
+            Display display = null;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                display = getDisplay();
+            }
+            if (display == null) {
+                display = getWindowManager().getDefaultDisplay();
+            }
+            if (display == null) return;
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                Display.Mode[] modes = display.getSupportedModes();
+                if (modes != null) {
+                    for (Display.Mode m : modes) {
+                        if (m.getRefreshRate() > best) best = m.getRefreshRate();
+                    }
+                }
+            }
+            if (best <= 0f) {
+                float[] rates = display.getSupportedRefreshRates();
+                if (rates != null) {
+                    for (float r : rates) if (r > best) best = r;
+                }
+            }
+            if (best <= 0f) best = 120f;    // 兜底：常见高刷值
+
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.preferredRefreshRate = best;
+            getWindow().setAttributes(lp);
+            Log.i(TAG, "申请高刷新率: " + best + "Hz");
+        } catch (Throwable t) {
+            Log.w(TAG, "申请高刷新率失败（不影响使用）", t);
         }
     }
 

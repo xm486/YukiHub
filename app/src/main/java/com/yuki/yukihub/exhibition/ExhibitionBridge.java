@@ -120,4 +120,51 @@ public class ExhibitionBridge {
     public void log(String msg) {
         Log.i(TAG, String.valueOf(msg));
     }
+
+    /* ==================== 主题展台陈列槽位（M4） ==================== */
+    /*
+     * 4 座主题展台的"玩家自定义陈列"，存 SharedPreferences。
+     *
+     * 为什么用 SP 而不是数据库：
+     *   · 它是本地显示偏好，不参与云同步（需求已明确）
+     *   · 不需要建表 / 迁移 / 关联查询，读写就是一行
+     *   · 与 yukihub_prefs 一样，属于"App 自己记住的小状态"
+     *
+     * 格式：逗号分隔的 4 段（gameId），空段表示空台
+     *   例 "12,,45," → 0号摆12 / 1号空 / 2号摆45 / 3号空
+     */
+
+    private static final String SP_DISPLAY = "exhibition_display";
+    private static final String KEY_SLOTS = "slots";
+
+    /** 读取主题展台槽位（页面启动时调用） */
+    @JavascriptInterface
+    public String getDisplaySlots() {
+        try {
+            if (activity == null) return "";
+            return activity
+                    .getSharedPreferences(SP_DISPLAY, android.content.Context.MODE_PRIVATE)
+                    .getString(KEY_SLOTS, "");
+        } catch (Throwable t) {
+            Log.w(TAG, "getDisplaySlots 失败", t);
+            return "";
+        }
+    }
+
+    /** 保存主题展台槽位；返回是否写入成功 */
+    @JavascriptInterface
+    public boolean setDisplaySlots(String csv) {
+        try {
+            if (activity == null) return false;
+            activity
+                    .getSharedPreferences(SP_DISPLAY, android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_SLOTS, csv == null ? "" : csv)
+                    .apply();
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "setDisplaySlots 失败", t);
+            return false;
+        }
+    }
 }

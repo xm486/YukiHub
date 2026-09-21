@@ -291,9 +291,12 @@
     <div id="hud-detail"></div>
 </div>
 
+<div id="pad-hint" hidden>
+    <span class="pad-icon">🎮</span> 手柄已连接
+</div>
 <div id="debug" hidden>
     <div class="btn" id="btn-scale">渲染倍率 1.50x</div>
-    <div class="btn" id="btn-stress">压力测试：关</div>
+    <div class="btn on" id="btn-fps">帧率上限：60</div>
     <div class="btn" id="btn-detail">详细数据：开</div>
     <div class="btn" id="btn-sound">声音：开</div>
 </div>
@@ -367,5 +370,127 @@
 
 <script type="module" src="./exh.js"></script>
 
+<!-- ==================== 选品浮层（主题展台自定义陈列） ==================== -->
+<div id="picker" hidden>
+    <div id="pk-box">
+        <div id="pk-head">
+            <span id="pk-title">选择要陈列的展品</span>
+            <div id="pk-close">✕</div>
+        </div>
+        <div id="pk-grid"></div>
+        <div id="pk-foot">
+            <div class="pk-btn" id="pk-clear" hidden>清空此展台</div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* 选品浮层：全屏遮罩 + 居中面板 */
+    /* ---------- 手柄连接提示（Q4） ---------- */
+    #pad-hint {
+        position: fixed; top: 14px; right: 16px; z-index: 40;
+        padding: 7px 13px; border-radius: 999px;
+        background: rgba(20, 28, 42, .82);
+        border: 1px solid rgba(120, 220, 190, .45);
+        color: #9FF0D4; font-size: 12.5px; letter-spacing: .3px;
+        font-family: system-ui, -apple-system, "Noto Sans SC", sans-serif;
+        pointer-events: none;
+        animation: padIn .28s ease-out;
+    }
+    #pad-hint .pad-icon { margin-right: 4px; }
+    @keyframes padIn {
+        from { opacity: 0; transform: translateY(-6px); }
+        to   { opacity: 1; transform: none; }
+    }
+
+    #picker {
+        position: fixed; inset: 0; z-index: 60;
+        background: rgba(6, 10, 18, .72);
+        backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center;
+        font-family: system-ui, -apple-system, "Noto Sans SC", sans-serif;
+    }
+    #picker[hidden] { display: none; }
+
+    #pk-box {
+        width: min(88vw, 780px);
+        max-height: min(82vh, 720px);
+        display: flex; flex-direction: column;
+        background: linear-gradient(180deg, #1B2433, #151C29);
+        border: 1px solid rgba(170, 200, 255, .16);
+        border-radius: 16px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+        overflow: hidden;
+    }
+
+    #pk-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(170, 200, 255, .12);
+    }
+    #pk-title { color: #E6EEFB; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+    #pk-close {
+        width: 32px; height: 32px; line-height: 32px; text-align: center;
+        color: #9FB0C6; font-size: 16px; cursor: pointer;
+        border-radius: 9px; background: rgba(255, 255, 255, .05);
+        user-select: none;
+    }
+    #pk-close:active { transform: scale(.94); }
+
+    /* 封面网格：自适应列数，可滚动 */
+    #pk-grid {
+        flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        gap: 12px;
+        padding: 16px 18px;
+    }
+
+    .pk-card {
+        position: relative;
+        display: flex; flex-direction: column; align-items: center;
+        cursor: pointer; border-radius: 10px; padding: 6px;
+        border: 1px solid transparent;
+        transition: background .12s, border-color .12s;
+    }
+    .pk-card:active { background: rgba(140, 190, 255, .12); }
+    .pk-card-cur { border-color: rgba(255, 214, 140, .55); background: rgba(255, 214, 140, .07); }
+
+    .pk-thumb {
+        width: 100%; aspect-ratio: 3 / 4.3; object-fit: cover;
+        border-radius: 7px; background: #0E1420; display: block;
+    }
+    .pk-name {
+        margin-top: 6px; width: 100%;
+        color: #C7D4E5; font-size: 11.5px; line-height: 1.35;
+        text-align: center;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .pk-tag {
+        position: absolute; top: 8px; left: 8px;
+        background: rgba(255, 120, 150, .85); color: #fff;
+        font-size: 9px; font-weight: 700; line-height: 1;
+        padding: 3px 5px; border-radius: 5px;
+    }
+    .pk-empty {
+        grid-column: 1 / -1; padding: 40px 0;
+        color: #7E8B9C; font-size: 14px; text-align: center;
+    }
+
+    #pk-foot {
+        padding: 12px 18px 16px;
+        border-top: 1px solid rgba(170, 200, 255, .1);
+        display: flex; justify-content: flex-end;
+    }
+    .pk-btn {
+        padding: 9px 16px; border-radius: 10px;
+        background: rgba(255, 140, 160, .14);
+        border: 1px solid rgba(255, 140, 160, .35);
+        color: #FFB0C0; font-size: 13.5px; cursor: pointer;
+        user-select: none;
+    }
+    .pk-btn:active { transform: scale(.97); }
+</style>
 </body>
 </html>

@@ -16,6 +16,9 @@
 import * as THREE from './vendor/three.module.min.js';
 import { createHall } from './hall.js';
 import { createAudio } from './audio.js';
+import { createPicker } from './picker.js';
+import { createGamepad } from './gamepad.js';
+import { createConcert } from './concert.js';
 
 // 看门狗标记：index.html 用它判断模块是否真的启动成功
 window.__exhBooted = true;
@@ -37,7 +40,16 @@ const LOOK_SENS_TOUCH = 0.0034;        // 触摸转视角灵敏度（略高于�
 const STICK_RADIUS = 72;               // 摇杆最大半径（px）
 const BOB_AMP = 0.032;                 // 走动时头部微摆幅度（米）
 
-const SCALE_STEPS = [0.75, 1.0, 1.5, 2.0];
+// 渲染倍率档位（循环切换）
+// 已删 0.75：现在设备性能普遍够用，0.75 太糊没人会用；
+// 已加 2.5 / 3.0：给旗舰设备留"把画面拉到最清晰"的空间（1440p+ 屏能吃满）。
+// 帧率上限档位（0 = 不限，跟屏幕刷新率走）
+// 用途：省电 / 降温 / 避免"设备跑不满高刷反而抖动"。
+// 注意：软件限帧只能**往下压**，无法把 60Hz 屏幕抬到 120。
+//       要真正上高刷还得靠系统（见 ExhibitionActivity 的 preferredRefreshRate）。
+const FPS_STEPS = [0, 60, 90, 30];
+const FPS_LABELS = { 0: '不限', 90: '90', 60: '60', 30: '30' };
+const SCALE_STEPS = [1.0, 1.5, 2.0, 2.5, 3.0];
 
 /* ==================== DOM ==================== */
 
@@ -58,7 +70,7 @@ const dom = {
     ovDesc: $('ov-desc'),
     ovCode: $('ov-code'),
     btnScale: $('btn-scale'),
-    btnStress: $('btn-stress'),
+    btnFps: $('btn-fps'),
     btnDetail: $('btn-detail'),
     btnSound: $('btn-sound'),
     btnJump: $('btn-jump'),
@@ -84,7 +96,7 @@ window.addEventListener('error', (e) => {
 
 const state = {
     scaleIndex: 2,               // 默认 1.5x（实测 2.0x 都能稳 90fps，取 1.5x 兼顾清晰与省电）
-    stress: false,
+    fpsIndex: 1,                 // 帧率上限档（默认 60 —— 设备会发烫，别默认跑满）
     detail: true,
 
     yaw: 0,
@@ -117,7 +129,7 @@ const audio = createAudio();
 
 /* ==================== three 主体 ==================== */
 
-let renderer, scene, camera, stressGroup, hall;
+let renderer, scene, camera, hall, picker, gamepad, concert;
 
 function initRenderer() {
     renderer = new THREE.WebGLRenderer({
@@ -128,7 +140,7 @@ function initRenderer() {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     // 电影化色调映射：高光不再死白、暗部更通透，"自然度"提升最明显的一处改动
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.18;         // 1.05 → 1.18：整体提亮一档
     renderer.shadowMap.enabled = true;           // G：只为中央展台射灯开阴影（其余网格不 castShadow，开销极小）
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setPixelRatio(SCALE_STEPS[state.scaleIndex]);
@@ -149,22 +161,43 @@ function initRenderer() {
 
 function initScene() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111826);
-    scene.fog = new THREE.Fog(0x111826, 24, 82);
+    scene.background = new THREE.Color(0x18202F);
+    scene.fog = new THREE.Fog(0x18202F, 30, 95);   // 同背景色；视距也一并放宽，远处不糊成一团
 
     camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 220);
     camera.rotation.order = 'YXZ';
 
     buildRoom();
     buildAtmosphere();
-    buildStressBoxes();
+    // buildStressBoxes()：压力测试已移除（基准早已测完）
 
     // M1：个人收藏馆陈列（书架阵列 + 中央展台）
     hall = createHall(scene, {
         // 把页面侧的封面加载情况打到 logcat（tag: ExhibitionBridge），便于定位问题
         log: (msg) => { try { if (bridge && bridge.log) bridge.log(String(msg)); } catch (e) { } },
     });
+
+    // 音乐厅 + 前厅感应门 + 走廊（数据来源待接入，先搭空间）
+    concert = createConcert(scene, { audio });   // 注入 audio：开门音效用它
+    concert.build();
+
+    // 主题展台的选品浮层：库存、缩略图 URL、选完的回调都从这里接
+    picker = createPicker({
+        games: () => hall.getGames(),
+        // 复用桥接直出的 /cover/<id>（与展厅里盒子走的是同一条路）
+        thumbUrl: (g) => g.cover || '',
+        toast: (msg) => { try { if (bridge && bridge.toast) bridge.toast(msg); } catch (e) { } },
+        onPick: (slot, game) => {
+            hall.setIsland(slot, game);       // 立刻摆上（或清空）
+            hall.closeDetail();
+        },
+    });
+
     loadLibrary();
+
+    // 手柄/键盘输入（M4）：每帧 poll 一次，把设备状态翻译成"动作"
+    gamepad = createGamepad();
+    setPadHint(false);
 }
 
 /* ---------- 房间 ---------- */
@@ -232,17 +265,19 @@ function buildRoom() {
     // 天花板
     const ceil = new THREE.Mesh(
         new THREE.PlaneGeometry(w, d),
-        new THREE.MeshStandardMaterial({ color: 0x1C2634, roughness: 0.95, metalness: 0.0 })
+        new THREE.MeshStandardMaterial({ color: 0x27313F, roughness: 0.95, metalness: 0.0 })
     );
     ceil.rotation.x = Math.PI / 2;
     ceil.position.y = h;
     scene.add(ceil);
 
     // 四面墙
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2C3646, roughness: 0.92, metalness: 0.02 });
+    // ⚠️ 前墙（z = +halfD）**不在这里建** —— 它由 concert.js 建成"带门洞"的
+    //    拼装墙（左块 + 右块 + 门楣上方块 + 门框）。如果这里再建一整面，
+    //    会把门洞整个盖住，玩家走进门后看到的是"穿墙"。
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x38445A, roughness: 0.92, metalness: 0.02 });
     const walls = [
         { w: w, pos: [0, h / 2, -halfD], rotY: 0 },              // 后墙
-        { w: w, pos: [0, h / 2, halfD], rotY: Math.PI },         // 前墙
         { w: d, pos: [-halfW, h / 2, 0], rotY: Math.PI / 2 },    // 左墙
         { w: d, pos: [halfW, h / 2, 0], rotY: -Math.PI / 2 },    // 右墙
     ];
@@ -253,46 +288,42 @@ function buildRoom() {
         scene.add(m);
     }
 
-    // 柱廊：两列，提供纵深与运动参照
-    const pillarGeo = new THREE.CylinderGeometry(0.42, 0.46, h, 16, 1);
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x263043, roughness: 0.68, metalness: 0.12 });
-    const px = halfW - 2.6;
-    for (let z = -halfD + 3; z <= halfD - 3; z += 6.5) {
-        for (const x of [-px, px]) {
-            const p = new THREE.Mesh(pillarGeo, pillarMat);
-            p.position.set(x, h / 2, z);
-            scene.add(p);
-        }
-    }
+    // 柱廊：已移除
+    // 原来左右各 3 根（x=±14.4，z=-8/-1.5/+5）纯粹杵在空地上，
+    // 不承担任何结构或陈列功能，却会从门口直视时挡住后墙书架。
+    // 入口门厅那两根"仪式感方柱"保留（见 buildAtmosphere）。
 
-    // 顶部灯带（自发光，不参与光照计算 → 视觉亮点但几乎零开销）
-    const lampMat = new THREE.MeshBasicMaterial({ color: 0xFFF3DC });
-    const lampGeo = new THREE.BoxGeometry(0.9, 0.06, 5.2);
-    for (let x = -halfW + 5; x <= halfW - 5; x += 8) {
-        for (const z of [-halfD * 0.45, halfD * 0.45]) {
-            const lamp = new THREE.Mesh(lampGeo, lampMat);
-            lamp.position.set(x, h - 0.16, z);
-            scene.add(lamp);
-        }
-    }
+    // 顶部灯带：**已移除**。
+    // 原来是在天花上沿 z 铺 5.2m 长的纯白方条（MeshBasicMaterial → 不受光照、
+    // 永远满亮度，看着像"贴在天花上的白纸"），而且它比横梁还长 16 倍，
+    // 和横梁交叉成一团乱麻。氛围光改由横梁内的"嵌入式灯槽"承担（见 buildAtmosphere）。
 
     // 光照：降低"大面积平行光"的权重（那会让画面很平、很假），
     // 改以带衰减的顶灯为主 → 有明暗层次，更像真实展厅
     scene.add(new THREE.HemisphereLight(0xB8D2FF, 0x141A26, 1.05));
 
-    const key = new THREE.DirectionalLight(0xFFFFFF, 0.55);
+    const key = new THREE.DirectionalLight(0xFFFFFF, 0.70);
     key.position.set(7, 14, 9);
     scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xAECCFF, 0.28);
+    const fill = new THREE.DirectionalLight(0xAECCFF, 0.34);
     fill.position.set(-9, 8, -7);
     scene.add(fill);
 
+    // 中庭补光（新增）：从顶部中央往下打的一束柔和面光，
+    // 专门照亮"房间中央 / 展台 / 地毯"这一带 —— 原来只有四角顶灯，
+    // 中央区域离所有灯都远，衰减下来就偏暗。
+    const core = new THREE.PointLight(0xFFEBD0, 22, 30, 2);
+    core.position.set(0, h - 1.4, 0);
+    scene.add(core);
+
     // 四盏顶灯（带衰减）：真正负责"照亮展品"的是它们
+    // 位置下移（h-1.2 → h-2.2）并适度加强：灯越贴天花板，
+    // 经过 2 次衰减落到 1.6m 视高时越弱，这是"整体偏暗"的主因。
     for (const x of [-8, 8]) {
         for (const z of [-5, 5]) {
-            const lamp = new THREE.PointLight(0xFFE9C8, 30, 34, 2);
-            lamp.position.set(x, h - 1.2, z);
+            const lamp = new THREE.PointLight(0xFFE9C8, 46, 34, 2);
+            lamp.position.set(x, h - 2.2, z);
             scene.add(lamp);
         }
     }
@@ -320,24 +351,54 @@ function updateDust(dt) {
     dustAttr.needsUpdate = true;
 }
 
+/**
+ * 灯槽贴图：纵向（沿 x）"两端淡、中间亮"的暖白渐变。
+ * 用途：让横梁下的灯槽看起来像"一条发光的缝"，而不是一块死白的板子。
+ * 用 AdditiveBlending 叠加，所以贴图越黑越"透明"。
+ */
+function makeSlotTexture() {
+    const W = 256, H = 8;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0.00, 'rgba(0,0,0,0)');
+    grad.addColorStop(0.12, 'rgba(255,214,158,0.45)');
+    grad.addColorStop(0.50, 'rgba(255,236,204,0.95)');   // 中间最亮
+    grad.addColorStop(0.88, 'rgba(255,214,158,0.45)');
+    grad.addColorStop(1.00, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, W, H);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
+
 function buildAtmosphere() {
     const { w, d, h } = ROOM;
     const halfD = d / 2;
 
-    // 天花横梁：改细 + 加嵌条灯槽（原来是大黑块，重量感太重）
+    // 天花横梁：改细 + 嵌入**发光灯槽**（氛围光全靠它，替代原来那片死白灯带）
     const beamMat = new THREE.MeshStandardMaterial({ color: 0x20293A, roughness: 0.92, metalness: 0.04 });
     const beamGeo = new THREE.BoxGeometry(w - 0.6, 0.16, 0.32);
-    const slotMat = new THREE.MeshBasicMaterial({ color: 0xFFE9C8 });
-    const slotGeo = new THREE.BoxGeometry(w - 0.9, 0.05, 0.08);
+
+    // 灯槽用**渐变色带贴图**而不是纯色：两端淡、中间亮，
+    // 这样它看起来是"一条发光的缝"，而不是"一块贴在天花上的白板"。
+    const slotTex = makeSlotTexture();
+    const slotMat = new THREE.MeshBasicMaterial({
+        map: slotTex, transparent: true, opacity: 0.85,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    // 宽度贴合梁内（梁深 0.32 → 灯槽 0.10），只做"梁下的缝"，
+    // 不再横向铺满整个天花（那正是原来显得乱的原因）。
+    const slotGeo = new THREE.BoxGeometry(w - 1.0, 0.03, 0.10);
     for (let z = -halfD + 2.2; z <= halfD - 2.2; z += 4.4) {
         const b = new THREE.Mesh(beamGeo, beamMat);
         b.position.set(0, h - 0.12, z);
         scene.add(b);
-        for (const off of [-0.26, 0.26]) {
-            const s = new THREE.Mesh(slotGeo, slotMat);
-            s.position.set(0, h - 0.13, z + off);
-            scene.add(s);
-        }
+        const s = new THREE.Mesh(slotGeo, slotMat);
+        s.position.set(0, h - 0.205, z);   // 贴在梁的下沿
+        scene.add(s);
     }
 
     // 入口门厅：两根方柱 + 门楣 + 洗墙灯带（"走进展馆"的仪式感）
@@ -432,45 +493,6 @@ function makeCoverTexture(seed) {
     return tex;
 }
 
-let stressMats = null;
-
-function buildStressBoxes() {
-    stressGroup = new THREE.Group();
-    stressGroup.visible = false;
-    scene.add(stressGroup);
-
-    const count = 60;
-    const cols = 10;
-    const geo = new THREE.BoxGeometry(0.9, 1.35, 0.22);
-
-    for (let i = 0; i < count; i++) {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-            roughness: 0.72, metalness: 0.05, color: 0x8899AA,
-        }));
-        mesh.position.set(-8.1 + col * 1.8, 1.05, -6 + row * 3.0);
-        mesh.rotation.y = (row % 2 === 0) ? 0 : Math.PI;
-        stressGroup.add(mesh);
-    }
-}
-
-/** 压力测试的贴图按需生成（不打开就不占显存） */
-function ensureStressTextures() {
-    if (stressMats || !stressGroup) return;
-    stressMats = [];
-    for (let i = 0; i < 4; i++) stressMats.push(makeCoverTexture(i + 1));
-    let k = 0;
-    stressGroup.traverse((o) => {
-        if (o.isMesh && o.material) {
-            o.material.map = stressMats[k % stressMats.length];
-            o.material.color.setHex(0xFFFFFF);
-            o.material.needsUpdate = true;
-            k++;
-        }
-    });
-}
-
 /* ==================== 输入 ==================== */
 
 const pointers = new Map(); // pointerId → { role, lastX, lastY }
@@ -547,7 +569,7 @@ function bindInput() {
             case 'KeyD': case 'ArrowRight': state.keyStrafe = 1; break;
             case 'Space': tryJump(); break;
             case 'KeyC': toggleCrouch(); break;
-            case 'KeyT': toggleStress(); break;
+            case 'KeyT': cycleFps(); break;   // 原「压力测试」键位，改作帧率上限切换
             case 'KeyH': toggleDetail(); break;
             case 'KeyR': cycleScale(); break;
             case 'ShiftLeft': case 'ShiftRight': setRunning(true); break;
@@ -653,8 +675,13 @@ const tmpRight = new THREE.Vector3();
 const tmpTarget = new THREE.Vector3();
 
 function updateMovement(dt) {
-    let forward = state.keyForward + state.stickForward;
-    let strafe = state.keyStrafe + state.stickStrafe;
+    // 三个输入源统一汇到 forward / strafe（动作层思想：逻辑不关心谁在驱动）
+    //   键盘：keyForward/keyStrafe（±1）
+    //   触屏：stickForward/stickStrafe（摇杆模拟量）
+    //   手柄：pad.moveY（前推为负 → 取反）/ pad.moveX
+    const pad = state.pad || { moveX: 0, moveY: 0 };
+    let forward = state.keyForward + state.stickForward - pad.moveY;
+    let strafe = state.keyStrafe + state.stickStrafe + pad.moveX;
 
     // 归一化，避免斜向加速
     const mag = Math.hypot(forward, strafe);
@@ -682,12 +709,39 @@ function updateMovement(dt) {
     state.pos.z += state.vel.z * dt;
 
     // 房间边界约束
-    const halfW = ROOM.w / 2 - WALL_MARGIN;
-    const halfD = ROOM.d / 2 - WALL_MARGIN;
-    if (state.pos.x > halfW) { state.pos.x = halfW; state.vel.x = 0; }
-    if (state.pos.x < -halfW) { state.pos.x = -halfW; state.vel.x = 0; }
-    if (state.pos.z > halfD) { state.pos.z = halfD; state.vel.z = 0; }
-    if (state.pos.z < -halfD) { state.pos.z = -halfD; state.vel.z = 0; }
+    // ★ 多空间改造：主厅 / 走廊 / 音乐厅 三段不同宽度，
+    //   靠 z 分段判定，而不是原来的"单一矩形"。
+    //   门的 x 范围（|x| < DOOR_HALF）内允许 z 越过主厅前墙 → 才能走进门。
+    const DOOR_HALF = 2.5;          // 门洞半宽（与 concert.js 的 DOOR_W/2 同步）
+    const MAIN_Z = ROOM.d / 2;      // 主厅前墙 z = 11
+    const CORR_W = 3.5;             // 走廊半宽
+    const HL_Z0 = MAIN_Z + 8;       // 音乐厅后墙 z = 19（走廊长 8）
+    const HL_W = 13.0;              // 音乐厅半宽
+    const HL_Z1 = HL_Z0 + 20;       // 音乐厅最里 z = 39
+
+    if (state.pos.z <= MAIN_Z - WALL_MARGIN) {
+        // —— 主厅内：原矩形约束 ——
+        const halfW = ROOM.w / 2 - WALL_MARGIN;
+        const halfD = ROOM.d / 2 - WALL_MARGIN;
+        if (state.pos.x > halfW) { state.pos.x = halfW; state.vel.x = 0; }
+        if (state.pos.x < -halfW) { state.pos.x = -halfW; state.vel.x = 0; }
+        if (state.pos.z < -halfD) { state.pos.z = -halfD; state.vel.z = 0; }
+        // 走到门前（z 接近前墙）时，只有门洞范围内才允许继续前进
+        if (state.pos.z > halfD) {
+            if (Math.abs(state.pos.x) > DOOR_HALF - 0.05) {
+                state.pos.z = halfD; state.vel.z = 0;
+            }
+        }
+    } else if (state.pos.z <= HL_Z0 - WALL_MARGIN) {
+        // —— 走廊内：窄矩形 ——
+        if (state.pos.x > CORR_W - WALL_MARGIN) { state.pos.x = CORR_W - WALL_MARGIN; state.vel.x = 0; }
+        if (state.pos.x < -(CORR_W - WALL_MARGIN)) { state.pos.x = -(CORR_W - WALL_MARGIN); state.vel.x = 0; }
+    } else {
+        // —— 音乐厅内：宽矩形 ——
+        if (state.pos.x > HL_W) { state.pos.x = HL_W; state.vel.x = 0; }
+        if (state.pos.x < -HL_W) { state.pos.x = -HL_W; state.vel.x = 0; }
+        if (state.pos.z > HL_Z1 - WALL_MARGIN) { state.pos.z = HL_Z1 - WALL_MARGIN; state.vel.z = 0; }
+    }
 
     // ---------- 垂直：站/蹲过渡 + 跳跃重力 ----------
     const targetEye = state.crouching ? EYE_CROUCH : EYE_STAND;
@@ -730,6 +784,7 @@ function updateMovement(dt) {
 const perf = {
     deltas: [],          // 最近 180 帧耗时（ms）
     lastT: 0,
+    nextAt: 0,           // 限帧用的"下一帧最早时刻"游标
     acc: 0,
     hudAcc: 0,
     reportAcc: 0,
@@ -814,14 +869,25 @@ function cycleScale() {
     dom.btnScale.classList.toggle('on', r !== 1.0);
 }
 
-function toggleStress() {
-    state.stress = !state.stress;
-    stressGroup.visible = state.stress;
-    if (state.stress) ensureStressTextures();
-    resetPerf();
-    dom.btnStress.textContent = `压力测试：${state.stress ? '开(60盒)' : '关'}`;
-    dom.btnStress.classList.toggle('on', state.stress);
+/**
+ * 帧率上限循环切换：不限 → 90 → 60 → 30。
+ * 目的：省电 / 降温 / 避免"设备跑不满高刷反而抖动"。
+ */
+function cycleFps() {
+    state.fpsIndex = (state.fpsIndex + 1) % FPS_STEPS.length;
+    const cap = FPS_STEPS[state.fpsIndex];
+    dom.btnFps.textContent = `帧率上限：${FPS_LABELS[cap]}`;
+    dom.btnFps.classList.toggle('on', cap !== 0);
+    // 重置限帧游标：否则切档后可能苦等旧的 nextAt，表现为"切了没反应"
+    perf.nextAt = 0;
+    perf.lastT = 0;
+    resetPerf();   // 重算帧率统计，免得旧数据干扰判断
 }
+
+/**
+ * 渲染倍率循环切换。
+ * 旧的「压力测试」开关已移除（M4：基准在 M0 就测完了，留着只是干扰）。
+ */
 
 function toggleDetail() {
     state.detail = !state.detail;
@@ -841,7 +907,8 @@ function toggleSound() {
 
 function bindUi() {
     dom.btnScale.addEventListener('click', cycleScale);
-    dom.btnStress.addEventListener('click', toggleStress);
+    if (dom.btnFps) dom.btnFps.addEventListener('click', cycleFps);
+    // dom.btnStress.addEventListener(...)：压力测试已移除
     dom.btnDetail.addEventListener('click', toggleDetail);
     if (dom.btnSound) dom.btnSound.addEventListener('click', toggleSound);
 
@@ -899,38 +966,218 @@ function loadLibrary() {
         if (dom.hint) dom.hint.textContent = '库存解析失败：' + ((e && e.message) ? e.message : e);
     }
 }
+/**
+ * 底部提示条：临时改文案，2.2 秒后恢复成原始（库存）提示。
+ * 用于"播放/暂停""专辑位待接入"这类轻量反馈 —— 不引入新的 DOM 元素。
+ */
+let _hintTimer = 0;
+let _hintOrig = '';
+function showHint(msg) {
+    if (!dom.hint) return;
+    if (!_hintOrig) _hintOrig = dom.hint.textContent;
+    dom.hint.textContent = msg;
+    clearTimeout(_hintTimer);
+    _hintTimer = setTimeout(() => {
+        if (dom.hint) dom.hint.textContent = _hintOrig;
+    }, 2200);
+}
 
 /** 轻点屏幕 → 射线拾取展品（点空处则收起详情） */
 function handleTap(clientX, clientY) {
     if (!hall || !renderer || !camera) return;
+    // 选品浮层开着的时候，点击归浮层处理，不要在 3D 场景里误拾取
+    if (picker && picker.isOpen()) return;
     const rect = renderer.domElement.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     tapNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     tapNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     tapRay.setFromCamera(tapNdc, camera);
-    const game = hall.pick(tapRay);
-    if (game) {
-        audio.click();
-        hall.openDetail(game);
+
+    // ★ 音乐厅的物件（碟机 / 专辑位）采用**独立射线集**，
+    //   优先检测：它们与主厅相距 20 米以上，几何上不会互相干扰，
+    //   但分成两套后 pick 逻辑各自独立、互不牵连（也便于以后接真数据）。
+    if (concert && concert.pickables && concert.pickables.length) {
+        const chits = tapRay.intersectObjects(concert.pickables, false);
+        if (chits.length) {
+            const obj = chits[0].object;
+            audio.click();
+            if (obj.userData && obj.userData.concertDeck) {
+                // 点碟机 → 播放/暂停（转盘开转/停转）
+                const on = concert.togglePlay();
+                showHint(on ? '▶ 开始播放' : '⏸ 已暂停');
+                return;
+            }
+            if (obj.userData && obj.userData.concertAlbumSlot !== undefined) {
+                // 点专辑位 → 占位提示（真数据接入后弹选专辑浮层）
+                showHint('专辑位 ' + (obj.userData.concertAlbumSlot + 1) + '（待接入）');
+                return;
+            }
+        }
     }
-    else hall.closeDetail();
+
+    const hit = hall.pick(tapRay);
+    if (!hit) { hall.closeDetail(); return; }
+
+    audio.click();
+    // 主题展台（空台/点到底盘）→ 弹选品浮层；其余 → 原来的详情卡
+    if (hit && typeof hit === 'object' && hit.isIsland === true) {
+        hall.closeDetail();
+        // ★ 同步打开选品浮层。
+        //   注意：这次 pointerup 之后，浏览器还会把同一手势合成为一次 click
+        //   派发给"抬起坐标下"的 DOM 元素 —— 此时浮层已盖在那里，卡片会直接
+        //   收到 click 并"瞬间选中游戏"。picker 内部用 openedAt + 冷却期挡掉了。
+        picker.openPicker(hit.slot);
+        return;
+    }
+    hall.openDetail(hit);
 }
 
 /* ==================== 主循环 ==================== */
+
+/**
+ * 把"手柄动作"翻译成游戏行为（动作层 → 逻辑）。
+ * 每个动作都尽量复用已有函数（handleTap / picker / toggleDetail），
+ * 避免"手柄走一套、触屏走另一套"的分裂实现。
+ */
+function applyPadActions(pad) {
+    // ⚠️ 没接手柄时**必须整段跳过**。
+    //    否则 poll() 把 act.run 归零后，下面那句 setRunning(false) 会每帧执行，
+    //    把键盘 Shift / 触摸奔跑键设的 true 立刻改回 false —— 表现为"奔跑完全失灵"。
+    if (!pad || !pad.connected) return;
+
+    // ---- 视角：右摇杆（模拟量 → 逐帧累积，和触屏拖动同一条路径）----
+    const LOOK = 2.4;               // 弧度/秒（满推时）
+    if (pad.lookX) state.yaw -= pad.lookX * LOOK * (1 / 60);
+    if (pad.lookY) state.pitch -= pad.lookY * LOOK * (1 / 60);
+    clampPitch();
+
+    // ---- 跑：扳机 / L3（持续状态）----
+    if (pad.act.run !== state.running) setRunning(pad.act.run);
+
+    // ---- A：交互 ----
+    if (pad.act.interact) {
+        if (picker && picker.isOpen()) {
+            // 浮层开着：A = 选中当前高亮项（这里简化为"确认第一张"由 picker 自己处理）
+            // 为保证行为可预期，A 在浮层里等同于"关闭浮层"，避免误选。
+            picker.closePicker();
+        } else if (detailOpen()) {
+            closeDetail();
+        } else {
+            // 对屏幕中心做一次射线（十字准星交互），命中什么就交给 handleTap 同款逻辑
+            doCenterInteract();
+        }
+    }
+
+    // ---- B：取消 / 关闭 ----
+    if (pad.act.cancel) {
+        if (picker && picker.isOpen()) picker.closePicker();
+        else if (detailOpen()) closeDetail();
+    }
+
+    // ---- X：更换展品（等价于点悬浮按钮）----
+    if (pad.act.swap) {
+        const slot = nearestIslandSlot();
+        if (slot >= 0 && picker) {
+            audio.click();
+            picker.openPicker(slot);
+        }
+    }
+
+    // ---- Start：调试面板 ----
+    if (pad.act.menu) {
+        const d = document.getElementById('debug');
+        if (d) d.hidden = !d.hidden;
+    }
+}
+
+/** 屏幕中心射线交互（手柄十字准星） */
+function doCenterInteract() {
+    if (!hall || !renderer || !camera) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    // 用屏幕正中心替代手指坐标
+    handleTap(rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+/** 详情面板是否开着 */
+function detailOpen() {
+    const d = document.getElementById('detail');
+    return !!(d && !d.hidden);
+}
+
+/**
+ * 找出"离玩家最近且在交互范围内的展台槽位"。
+ * 范围与悬浮按钮的显示距离一致（3.2m），保证"看得见按钮就能按 X"。
+ */
+function nearestIslandSlot() {
+    if (!hall || !camera) return -1;
+    return hall.nearestIslandSlot ? hall.nearestIslandSlot(camera.position) : -1;
+}
+
+/** 手柄连接提示（Q4）：右上角小标签 */
+function setPadHint(on) {
+    const el = document.getElementById('pad-hint');
+    if (!el) return;
+    el.hidden = !on;
+}
+
+/**
+ * 手柄连接/断开的提示刷新（每 0.5 秒查一次，不必每帧）。
+ */
+let padHintAcc = 0;
+function updatePadHint(dt) {
+    padHintAcc += dt;
+    if (padHintAcc < 0.5) return;
+    padHintAcc = 0;
+    if (!gamepad) return;
+    const on = gamepad.isConnected();
+    if (on !== state.padHintOn) {
+        state.padHintOn = on;
+        setPadHint(on);
+        if (on) audio.click();          // 连上给一声反馈
+    }
+}
 
 function tick() {
     requestAnimationFrame(tick);
 
     const now = performance.now();
     if (!perf.lastT) perf.lastT = now;
-    let dt = (now - perf.lastT) / 1000;
+
+    // ---- 软件限帧 ----
+    // 上限为 0 表示"不限"，直接跟屏幕刷新率走。
+    // 做法：距上一帧不足 minInterval 就跳过本次渲染（但 rAF 照常排队）。
+    // 注意这会**降低**帧率，不会提高 —— 想上 120 得靠系统给高刷。
+    const cap = FPS_STEPS[state.fpsIndex] || 0;
+    if (cap > 0) {
+        const interval = 1000 / cap;
+        // 累计误差补偿：
+        //   不能用"距上一帧 < interval 就 return"那种写法 ——
+        //   rAF 只在屏幕 vsync 边界触发，150Hz 屏上跳一帧会直接掉到 ~75，
+        //   120Hz 屏上"跳过一帧"就变成 60（这就是"90 档实际只跑 60"的原因）。
+        //   改成维护 nextAt 游标：到点才渲染，并把游标按 interval 递增（超过就追平），
+        //   这样平均帧率能贴近目标值，而不是被锁到屏幕刷新率的整数分之一。
+        if (now < perf.nextAt) return;
+        perf.nextAt += interval;
+        if (perf.nextAt < now) perf.nextAt = now + interval;   // 落后太多就追平，避免连续补帧
+    }
+let dt = (now - perf.lastT) / 1000;
     perf.lastT = now;
+
+    // ---- 手柄：读状态 → 应用动作 ----
+    if (gamepad) {
+        const pad = gamepad.poll();
+        state.pad = pad;                 // updateMovement 会读它做移动
+        applyPadActions(pad);
+        updatePadHint(dt);
+    }
+
 
     pushFrame(dt * 1000);
     if (dt > 0.1) dt = 0.1;          // 后台切回时防止瞬移
 
     updateMovement(dt);
     if (hall) hall.update(dt, camera);
+    if (concert) concert.update(dt, camera);
     if (dusty) updateDust(dt);
     renderer.render(scene, camera);
 
@@ -956,7 +1203,6 @@ function tick() {
                         triangles: renderer.info.render.triangles,
                         textures: renderer.info.memory.textures,
                         pixelRatio: renderer.getPixelRatio(),
-                        stress: state.stress,
                         stalls: perf.stalls,
                     })
                 );
