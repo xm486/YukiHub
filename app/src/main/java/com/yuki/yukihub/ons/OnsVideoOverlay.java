@@ -53,7 +53,7 @@ public final class OnsVideoOverlay {
     // ==================== 长按跳过 ====================
 
     /** 长按多久算「确认跳过」，单位毫秒。 */
-    private static final long SKIP_HOLD_MS = 3000L;
+    private static final long SKIP_HOLD_MS = 2000L;
     /** 圆环重绘间隔，约 60fps。 */
     private static final long RING_TICK_MS = 16L;
     /** 按下点位移超过该值（dp）视为「不是长按」，取消计时。 */
