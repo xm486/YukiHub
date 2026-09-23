@@ -1,5 +1,5 @@
 package com.yuki.yukihub.exhibition;
-
+import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -8,6 +8,8 @@ import android.widget.Toast;
 
 import com.yuki.yukihub.data.GameRepository;
 import com.yuki.yukihub.model.Game;
+
+import java.util.List;
 
 /**
  * 展厅 JS 桥接层（对齐 TyranoActivity 的 appJsInterface 范式）
@@ -92,10 +94,6 @@ public class ExhibitionBridge {
         }
     }
 
-    private static String nz(String s) {
-        return s == null ? "" : s;
-    }
-
     /** 封面 URI 优先级与 GameAdapter / 大屏保持一致：persist 优先，其次 cover */
     static String pickCover(Game g) {
         if (g == null) return null;
@@ -104,7 +102,156 @@ public class ExhibitionBridge {
         return null;
     }
 
-    /** 页面内提示 */
+    /**
+     * M5-c：读取音乐厅墙数据（专辑 + 曲目 + URI 索引）
+     * @return {"albums":[{id,title,gameId,trackCount,cover}], "tracks":[...], "count":N} 或 {"error":"..."}
+     */
+     @JavascriptInterface
+     public String getMusicLibrary() {
+         try {
+             if (activity == null) return "{\"error\":\"宿主已销毁\"}";
+
+             com.yuki.yukihub.data.MusicRepository repo = new com.yuki.yukihub.data.MusicRepository(activity);
+             org.json.JSONArray albumsArr = new org.json.JSONArray();
+             org.json.JSONArray tracksArr = new org.json.JSONArray();
+
+             // 取墙上 12 张专辑（按最近添加优先）
+             List<com.yuki.yukihub.model.MusicAlbum> wallAlbums = repo.getWallAlbums(12);
+             com.yuki.yukihub.exhibition.ExhibitionActivity.MusicIndex idx = new com.yuki.yukihub.exhibition.ExhibitionActivity.MusicIndex();
+
+             for (com.yuki.yukihub.model.MusicAlbum a : wallAlbums) {
+                 org.json.JSONObject ao = new org.json.JSONObject();
+                 ao.put("id", a.id);
+                 ao.put("title", nz(a.title));
+                 ao.put("gameId", a.gameId > 0 ? a.gameId : null);
+                 ao.put("trackCount", a.trackCount);
+                 
+                 String coverUri = a.coverUri;
+                 if (coverUri != null && !coverUri.trim().isEmpty()) {
+                     idx.albumCover.put(a.id, coverUri);
+                     ao.put("cover", "/music/cover/" + a.id);
+                 }
+                 albumsArr.put(ao);
+
+                 // 加曲目到总列表
+                 for (com.yuki.yukihub.model.MusicTrack t : repo.getTracks(a.id)) {
+                     org.json.JSONObject to = new org.json.JSONObject();
+                     to.put("id", t.id);
+                     to.put("albumId", a.id);
+                     to.put("trackNo", t.trackNo);
+                     to.put("title", nz(t.title));
+                     to.put("artist", nz(t.artist));
+                     to.put("durationMs", t.durationMs);
+                     
+                     // URI
+                     String audioUri = t.audioUri;
+                     if (audioUri != null) {
+                         idx.audio.put(t.id, audioUri);
+                         to.put("audioUrl", "/music/audio/" + t.id);
+                     }
+                     
+                     String pvUri = t.pvUri;
+                     if (pvUri != null) {
+                         idx.pv.put(t.id, pvUri);
+                         to.put("hasPv", true);
+                         to.put("pvUrl", "/music/pv/" + t.id);
+                     } else {
+                         to.put("hasPv", false);
+                     }
+                     
+                     // Track cover
+                     String trackCover = t.coverUri;
+                     if (trackCover != null) {
+                         idx.trackCover.put(t.id, trackCover);
+                     }
+                     
+                     tracksArr.put(to);
+                 }
+             }
+             
+// 加上散装单曲虚拟专辑（如果存在）
+com.yuki.yukihub.model.MusicAlbum singles = repo.virtualSinglesAlbum();
+if (singles != null) {
+    org.json.JSONObject saO = new org.json.JSONObject();
+    saO.put("id", singles.id);
+    saO.put("title", "♪ 散装单曲");
+    saO.put("gameId", null);
+    saO.put("trackCount", singles.trackCount);
+    
+    String sCover = singles.coverUri;
+    if (sCover != null && !sCover.trim().isEmpty()) {
+        idx.albumCover.put(singles.id, sCover);
+        saO.put("cover", "/music/cover/" + singles.id);
+    }
+    albumsArr.put(saO);
+    
+    for (com.yuki.yukihub.model.MusicTrack t : repo.getTracks(singles.id)) {
+        org.json.JSONObject taO = new org.json.JSONObject();
+        taO.put("id", t.id);
+        taO.put("albumId", singles.id);
+        taO.put("trackNo", t.trackNo);
+        taO.put("title", nz(t.title));
+        taO.put("artist", nz(t.artist));
+        taO.put("durationMs", t.durationMs);
+        
+        if (t.audioUri != null) {
+            idx.audio.put(t.id, t.audioUri);
+            taO.put("audioUrl", "/music/audio/" + t.id);
+        }
+        
+        if (t.pvUri != null) {
+            idx.pv.put(t.id, t.pvUri);
+            taO.put("hasPv", true);
+            taO.put("pvUrl", "/music/pv/" + t.id);
+        } else {
+            taO.put("hasPv", false);
+        }
+        
+        if (t.coverUri != null) {
+            idx.trackCover.put(t.id, t.coverUri);
+        }
+        
+        tracksArr.put(taO);
+    }
+}
+
+// 建立索引给 Activity
+activity.setMusicIndex(idx);
+
+org.json.JSONObject root = new org.json.JSONObject();
+root.put("albums", albumsArr);
+root.put("tracks", tracksArr);
+root.put("count", albumsArr.length());
+root.put("trackCount", tracksArr.length());
+return root.toString();
+        } catch (Throwable t) {
+            Log.w(TAG, "getMusicLibrary 失败", t);
+            return "{\"error\":\"" + String.valueOf(t.getMessage()).replace("\"", "'") + "\"}";
+        }
+    }
+
+    /** 空串保护器 */
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
+
+    /**
+     * 调起音乐库管理页（从展厅内返回后自动刷新）
+     */
+    @JavascriptInterface
+    public void openMusicLibrary() {
+        main.post(() -> {
+            try {
+                if (activity != null) {
+                    activity.markMusicRefreshPending();
+                    Intent i = new Intent(activity, com.yuki.yukihub.music.MusicLibraryActivity.class);
+                    activity.startActivity(i);
+                }
+            } catch (Throwable ignored) {}
+        });
+    }
+
+    /** 页面内提示 Toast */
     @JavascriptInterface
     public void toast(final String msg) {
         if (msg == null) return;

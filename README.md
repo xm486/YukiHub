@@ -342,10 +342,6 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
   <img src="https://contrib.rocks/image?repo=xm486/YukiHub&max=30&columns=6" />
 </a>
 
-开源伙伴 ❤️
-
-- [Rinne Mobile](https://github.com/Weiss-UltimateSavior/RinneMobile) - 雷圣出品，必属精品，大幅重构过的分支版本，对竖屏非常友好，ui也吊打YukiHub，qwq
-
 ---
 
 ## 相关项目 / 生态 (Related Projects)

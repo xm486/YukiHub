@@ -160,6 +160,7 @@ function makeLightBank() {
 
 export function createConcert(scene, opts) {
     const audio = (opts && opts.audio) || null;   // 开门音效（由 exh.js 注入）
+    const log = (opts && opts.log) || function () { };   // 桥接日志（PV 诊断用）
     const group = new THREE.Group();
     group.name = 'concert';
 
@@ -570,6 +571,8 @@ export function createConcert(scene, opts) {
 
     let platter = null, discMesh = null, spinner = null;   // spinner = 转盘组（播放时旋转）
     let playing = false;                                   // 播放状态（点击碟机切换）
+    /** M5-d：黑胶标签材质（播放时贴当前专辑封面） */
+    let discLabelMat = null;
 
     /**
      * 中央碟机：**复古立式留声机**（v4）
@@ -654,11 +657,31 @@ export function createConcert(scene, opts) {
         discMesh.position.y = 0.05;
         spinner.add(discMesh);
 
-        const lbl = new THREE.Mesh(SHARED.discLabel, brassM);
-        lbl.rotation.x = -Math.PI / 2;
-        lbl.scale.set(0.30, 0.30, 1);
-        lbl.position.y = 0.065;
-        spinner.add(lbl);
+        // —— M5-d：黑胶顶面的"专辑标签"（CD 造型：外圈是封面图，中心是"孔"）——
+        //    ⚠️ 几何换算（上一版翻车）：discLabel = CircleGeometry(半径0.30)，
+        //    scale 是**倍数**不是目标半径！scale 0.52 → 实际半径只有 0.156，
+        //    而黑胶面半径 ≈ 0.92×0.54 ≈ 0.50 → 封面缩成中心一小点 = "CD里套CD"。
+        //    正确：目标半径 0.50 ÷ 0.30 ≈ 1.67 倍。
+        const labelM = new THREE.MeshStandardMaterial({
+            color: 0x3A404C, roughness: 0.45, metalness: 0.30,
+        });
+        const discLabelMesh = new THREE.Mesh(SHARED.discLabel, labelM);
+        discLabelMesh.rotation.x = -Math.PI / 2;
+        discLabelMesh.scale.set(1.67, 1.67, 1);   // 0.30×1.67 ≈ 0.50 → 与黑胶面几乎同大
+        discLabelMesh.position.y = 0.068;
+        spinner.add(discLabelMesh);
+        discLabelMat = labelM;   // 供 setDiscCover 替换 map
+
+        // 中心"孔"：深色小圆片（真 CD 中孔比例 ≈ 直径的 1/7）
+        //    目标半径 0.075 ÷ 0.30 = 0.25 倍
+        const holeM = new THREE.MeshStandardMaterial({
+            color: 0x0A0A0D, roughness: 0.85, metalness: 0.10,
+        });
+        const discHole = new THREE.Mesh(SHARED.discLabel, holeM);
+        discHole.rotation.x = -Math.PI / 2;
+        discHole.scale.set(0.25, 0.25, 1);
+        discHole.position.y = 0.072;
+        spinner.add(discHole);
 
         // —— 唱臂（细金属臂，压在碟片上）——
         const armM = new THREE.MeshStandardMaterial({ color: 0xC6CCD8, roughness: 0.24, metalness: 0.92 });
@@ -771,11 +794,15 @@ export function createConcert(scene, opts) {
                     const idx = (sgn < 0 ? 0 : 1) * (ROWS * COLS) + r * COLS + c;
                     const z = z0 + (c - (COLS - 1) / 2) * gapZ;
 
-                    // —— 唱片封套（带 canvas 封面）——
+                    // —— 唱片封套（带 canvas 封面；M5-d 起支持真实专辑封面）——
                     const tex = makeAlbumCover(idx);
+                    const faceMat = new THREE.MeshStandardMaterial({
+                        map: tex, roughness: 0.72, metalness: 0.06,
+                        emissive: new THREE.Color(0x141A24), emissiveIntensity: 0.55,
+                    });
                     const mesh = new THREE.Mesh(SHARED.albumBox, [
                         woodPM, woodPM, woodPM, woodPM,          // ±x ±y 侧面（看不见，随便）
-                        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.72, metalness: 0.06, emissive: new THREE.Color(0x141A24), emissiveIntensity: 0.55 }),
+                        faceMat,
                         new THREE.MeshStandardMaterial({ color: 0x1A1F28, roughness: 0.85, metalness: 0.05 }),
                     ]);
                     mesh.scale.set(coverW, coverH, 0.10);
@@ -785,6 +812,7 @@ export function createConcert(scene, opts) {
                     mesh.userData.concertAlbumSlot = idx;
                     mesh.userData.concertPlaceholder = true;
                     mesh.userData.concertPart = true;
+                    mesh.userData.albumFaceMat = faceMat;   // M5-d：供真实封面替换
                     scene.add(mesh);
                     pickables.push(mesh);
                     albumSlots.push({ mesh: mesh, slot: idx });
@@ -870,6 +898,12 @@ export function createConcert(scene, opts) {
     /* ---------------- 6. 前方大屏 ---------------- */
 
     let screenMesh = null;
+    /** PV 原生视频纹理；更新随 Three.js 渲染循环受右上角帧率上限约束 */
+    let pvScreenTex = null;
+    let pvOnScreen = false;
+    let pvScreenRequest = 0;
+    let pvPendingVideo = null;
+    let pvPendingListener = null;
 
     /**
      * 大屏：挂在**进门正对的那面墙**（z = HALL_Z0 + HALL_D，厅的最深处）。
@@ -878,37 +912,156 @@ export function createConcert(scene, opts) {
      *   玩家从走廊走进来，**正对的是最深处那面墙** —— 大屏必须在那面。
      *   之前我贴在 z = HALL_Z0（门所在的那面墙），结果"进门迎面一块屏幕挡路"。
      *
-     * ★ 朝向：屏幕面朝 +z（朝门口方向），玩家从 -z 侧走来能直接看到正面。
+     * ★ 屏幕朝向：PlaneGeometry 默认法线 +z；音乐厅玩家位于屏幕前方 z<zBack，
+ *   因此屏幕旋转 Y=π 朝 -z，使用 FrontSide 渲染，正面文字不镜像。
      */
     function buildScreen() {
         const zBack = HALL_Z0 + HALL_D;    // 厅的最深处（= 39）
         const sw = 10.5, sh = 5.9;
         const sy = 3.5;
+        const wallFrontZ = zBack;           // 后墙朝厅内的表面
+        const screenFaceZ = wallFrontZ - 0.12; // 平面在墙前，朝向厅内观察者
+        const frameFrontZ = screenFaceZ - 0.06; // 边框在屏幕前方，只留窄框，不盖画面
 
         // 屏幕内容贴图（程序化动画 —— 无 PV 时的默认表现）
         screenCvs = makeScreenCanvas();
         screenCtx = screenCvs.getContext('2d');
         screenTex = new THREE.CanvasTexture(screenCvs);
         screenTex.colorSpace = THREE.SRGBColorSpace;
+        screenTex.minFilter = THREE.LinearFilter;
+        screenTex.magFilter = THREE.LinearFilter;
+        screenTex.generateMipmaps = false;
 
-        // 屏幕面：贴在后墙的**内侧表面**，默认法线朝 +z → 正对玩家来向
-        screenMesh = new THREE.Mesh(SHARED.screen, new THREE.MeshBasicMaterial({ map: screenTex }));
+        screenMesh = new THREE.Mesh(SHARED.screen, new THREE.MeshBasicMaterial({
+            map: screenTex,
+            // 不再让 Y=π 旋转引入水平镜像；双面材质从厅内可见原始 UV。
+            side: THREE.DoubleSide,
+        }));
         screenMesh.scale.set(sw, sh, 1);
-        screenMesh.position.set(0, sy, zBack - WALL_THICK / 2 - 0.02);
+        screenMesh.rotation.y = Math.PI;
+        screenMesh.position.set(0, sy, screenFaceZ);
         scene.add(screenMesh);
+        log('大屏方向诊断: rotationY=PI scaleX=+1 side=DoubleSide uv=original z=' + screenFaceZ);
 
-        // 屏幕边框（薄 Box，天然双面）
+        // 只做四边框，绝不再用覆盖中心画面的整块 Box。
+        // 四条边框在显示平面前方 6cm，深度 12cm，仅边框区域覆盖贴图。
         const frameM = new THREE.MeshStandardMaterial({ color: 0x14181F, roughness: 0.6, metalness: 0.4 });
-        const frame = new THREE.Mesh(SHARED.box, frameM);
-        frame.scale.set(sw + 0.6, sh + 0.6, 0.20);
-        frame.position.set(0, sy, zBack - WALL_THICK / 2 + 0.02);
-        scene.add(frame);
+        const frameT = 0.30, frameD = 0.12;
+        const frameBars = [
+            { sx: frameT, sy: sh + frameT * 2, x: -(sw + frameT) / 2, y: sy },
+            { sx: frameT, sy: sh + frameT * 2, x:  (sw + frameT) / 2, y: sy },
+            { sx: sw, sy: frameT, x: 0, y: sy + (sh + frameT) / 2 },
+            { sx: sw, sy: frameT, x: 0, y: sy - (sh + frameT) / 2 },
+        ];
+        for (const b of frameBars) {
+            const bar = new THREE.Mesh(SHARED.box, frameM);
+            bar.scale.set(b.sx, b.sy, frameD);
+            bar.position.set(b.x, b.y, frameFrontZ);
+            scene.add(bar);
+        }
 
         // 屏幕自发光（让画面"亮起来"，照亮厅内）
         const sl = new THREE.PointLight(0xBCD8FF, 7.0, 18, 2);
         sl.position.set(0, sy, zBack - 1.8);
         scene.add(sl);
         hallLights.add(sl);
+    }
+
+    /* ---------------- 6.2 大屏 PV 切换（M5-d） ---------------- */
+
+    /*
+     * 大屏 PV：使用 three.js 原生 VideoTexture，由 r160 的
+     * requestVideoFrameCallback 按视频帧更新。实际显示频率受主渲染循环限制：
+     * min(PV 原生帧率, 右上角设置的渲染 FPS 上限)。不做 15fps canvas 中转。
+     * 黑屏的已确认因素是旧版整块实心边框遮挡显示面，边框已改成四条窄条。
+     */
+    function orientScreenTexture(tex) {
+        // 保留为诊断工具：当前屏幕改用 rotationY=0 + 原始 UV，不调用此翻转。
+        if (!tex) return;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.repeat.x = 1;
+        tex.offset.x = 0;
+        tex.needsUpdate = true;
+    }
+
+    /** 不依赖 CanvasTexture / VideoTexture 内部源，只由屏幕几何面朝厅内 */
+    function setScreenPv(video) {
+        if (!screenMesh) return;
+        const request = ++pvScreenRequest;
+        if (pvPendingVideo && pvPendingListener) {
+            pvPendingVideo.removeEventListener('loadeddata', pvPendingListener);
+            pvPendingVideo = null;
+            pvPendingListener = null;
+        }
+        if (video) {
+            // 先有可解码帧再创建 VideoTexture，避免 texImage2D: no video。
+            const attach = () => {
+                if (request !== pvScreenRequest) return;
+                if (video.readyState < video.HAVE_CURRENT_DATA || video.videoWidth <= 0) return;
+                video.removeEventListener('loadeddata', attach);
+                pvPendingVideo = null;
+                pvPendingListener = null;
+                if (!pvScreenTex) {
+                    pvScreenTex = new THREE.VideoTexture(video);
+                    pvScreenTex.colorSpace = THREE.SRGBColorSpace;
+                    pvScreenTex.minFilter = THREE.LinearFilter;
+                    pvScreenTex.magFilter = THREE.LinearFilter;
+                    pvScreenTex.generateMipmaps = false;
+                } else if (pvScreenTex.image !== video) {
+                    // 播放器正常只复用一个 pvVideo；仅异对象时重建纹理。
+                    pvScreenTex.dispose();
+                    pvScreenTex = new THREE.VideoTexture(video);
+                    pvScreenTex.colorSpace = THREE.SRGBColorSpace;
+                    pvScreenTex.minFilter = THREE.LinearFilter;
+                    pvScreenTex.magFilter = THREE.LinearFilter;
+                    pvScreenTex.generateMipmaps = false;
+                }
+                // PV 与默认 Canvas 使用同一份原始 UV，不额外翻转。
+                screenMesh.material.map = pvScreenTex;
+                screenMesh.material.needsUpdate = true;
+                pvOnScreen = true;
+            };
+            if (video.readyState >= video.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+                attach();
+            } else {
+                pvPendingVideo = video;
+                pvPendingListener = attach;
+                video.addEventListener('loadeddata', attach);
+            }
+        } else {
+            screenMesh.material.map = screenTex;
+            screenMesh.material.needsUpdate = true;
+            pvOnScreen = false;
+            // 保留单例 VideoTexture：Three r160 的 requestVideoFrameCallback
+            // 会递归排下一帧；播放器也复用同一 HTMLVideoElement。
+            // dispose 后再次播放会新建第二条 callback 链，造成回调越积越多。
+        }
+    }
+
+    /**
+     * M5-d：把当前播放曲目的专辑封面贴到黑胶标签上（随转盘旋转）。
+     * 传 null = 恢复素面。
+     * @param {string|null} coverUrl 封面 URL（/music/cover/<albumId>）
+     */
+    function setDiscCover(coverUrl) {
+        if (!discLabelMat) return;
+        if (!coverUrl) {
+            discLabelMat.map = null;
+            discLabelMat.color.setHex(0x2A2F3A);
+            discLabelMat.needsUpdate = true;
+            return;
+        }
+        new THREE.TextureLoader().load(
+            coverUrl,
+            (tex) => {
+                tex.colorSpace = THREE.SRGBColorSpace;
+                discLabelMat.map = tex;
+                discLabelMat.color.setHex(0xFFFFFF);
+                discLabelMat.needsUpdate = true;
+            },
+            undefined,
+            () => { /* 加载失败保持素面 */ }
+        );
     }
 
     /* ---------------- 6.5 O：吸音板 + 座椅 ---------------- */
@@ -1067,7 +1220,7 @@ export function createConcert(scene, opts) {
 
     /* 大屏：程序化动画（频谱条 + 呼吸光晕 + 提示文字）*/
     function drawScreen() {
-        if (!screenCtx) return;
+        if (!screenCtx || pvOnScreen) return;
         const W = screenCvs.width, H = screenCvs.height;
         const t = phase;
 
@@ -1111,7 +1264,6 @@ export function createConcert(scene, opts) {
     }
 
     /* ---------------- 对外接口 ---------------- */
-
     return {
         group: group,
         build: build,
@@ -1119,11 +1271,61 @@ export function createConcert(scene, opts) {
         pickables: pickables,
         /** 门是否开着（供外部调试/提示用）*/
         isDoorOpen: () => doorOpen,
-        /** 专辑位目前都是占位，真实数据接入后替换 */
+        /** 专辑位（M5-d：真实数据接入后由 applyAlbums 更新封面） */
         albumSlots: albumSlots,
         /** 点击碟机：切换"播放/暂停"（转盘转不转由它决定）*/
         togglePlay: () => { playing = !playing; return playing; },
         isPlaying: () => playing,
+        /** M5-d：外部播放器驱动转盘（比 togglePlay 更可控 —— 真实播放状态） */
+        setPlaying: (on) => { playing = !!on; },
+        /** M5-d：大屏挂/摘 PV（传 video 元素或 null） */
+        setScreenPv: setScreenPv,
+        /** M5-d：黑胶标签贴当前专辑封面（传 URL 或 null 恢复素面） */
+        setDiscCover: setDiscCover,
+        /**
+         * M5-d：把真实专辑数据铺到专辑墙上。
+         *
+         * @param {Array} albums [{id,title,cover,gameId,trackCount}]
+         * @param {number} limit 最多铺几张（默认 12 = 墙的容量）
+         *
+         * 规则：按传入顺序铺（桥接层已按"最近添加优先"排好）。
+         *      没有 cover 的专辑保留占位 canvas；有 cover 的异步加载替换。
+         *      超出 limit 的专辑：不铺（由调用方 showHint 提示）。
+         */
+        applyAlbums: (albums, limit) => {
+            const list = Array.isArray(albums) ? albums : [];
+            const texLoader = new THREE.TextureLoader();
+
+            for (let i = 0; i < albumSlots.length; i++) {
+                const slot = albumSlots[i];
+                const album = list[i];
+                if (!album) {
+                    // 没数据 → 保持占位
+                    slot.mesh.userData.album = null;
+                    continue;
+                }
+                slot.mesh.userData.album = album;
+                slot.mesh.userData.concertPlaceholder = false;
+
+                if (album.cover) {
+                    // 异步加载真实封面（失败保持占位，不打断）
+                    texLoader.load(
+                        album.cover,
+                        (tex) => {
+                            tex.colorSpace = THREE.SRGBColorSpace;
+                            const mat = slot.mesh.userData.albumFaceMat;
+                            if (mat) {
+                                mat.map = tex;
+                                mat.emissiveIntensity = 0.35;   // 真实封面稍降自发光
+                                mat.needsUpdate = true;
+                            }
+                        },
+                        undefined,
+                        () => { /* 加载失败：保持占位 */ }
+                    );
+                }
+            }
+        },
         /** 射线命中的对象是否属于音乐厅（供 exh.js 的 pick 分支用）
          *  ⚠️ 用 userData 标记判断，而不是"沿 parent 找 group" ——
          *     因为 build* 里全用 scene.add()，group 并非真正的父节点。*/

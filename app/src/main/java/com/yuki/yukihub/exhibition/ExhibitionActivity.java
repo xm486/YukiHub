@@ -22,14 +22,23 @@ import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.yuki.yukihub.data.GameRepository;
+import com.yuki.yukihub.data.MusicRepository;
 import com.yuki.yukihub.model.Game;
+import com.yuki.yukihub.model.MusicAlbum;
+import com.yuki.yukihub.model.MusicTrack;
 
+import android.content.res.AssetFileDescriptor;
 import java.io.ByteArrayInputStream;
+import java.io.EOFException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -87,6 +96,59 @@ public class ExhibitionActivity extends AppCompatActivity {
     /** 由 ExhibitionBridge.getMyLibrary() 调用，建立封面索引 */
     public void setCoverIndex(java.util.Map<Long, String> index) {
         this.coverIndex = index;
+    }
+
+    /* ==================== 音乐厅索引（M5-c） ==================== */
+
+    /**
+     * 音乐媒体索引：把 trackId / albumId 映射回本机 URI。
+     *
+     * <p>引用模式下数据库只存 URI，页面请求 `/music/audio/<id>` 时，
+     * 这里负责把 id 翻回真实 URI 再开流（页面永远看不到真实路径）。
+     *
+     * <p>索引在 {@code getMusicLibrary()} 时由桥接层一次性填好；
+     * 若页面刷新后索引还没建（或 id 不在墙上），走 {@link #lookupMusicUri} 兜底查库。
+     */
+    public static class MusicIndex {
+        public final Map<Long, String> audio = new HashMap<>();      // trackId → 音频 URI
+        public final Map<Long, String> pv = new HashMap<>();         // trackId → PV URI
+        public final Map<Long, String> trackCover = new HashMap<>(); // trackId → 单曲封面
+        public final Map<Long, String> albumCover = new HashMap<>(); // albumId → 专辑封面
+    }
+
+    private volatile MusicIndex musicIndex = null;
+    /** 音乐媒体请求计数（只打印前若干条，避免刷屏） */
+    private int musicReqCount = 0;
+    /**
+     * ★ MIME 缓存：trackId/pvKey → 嗅探出的 MIME。
+     * 真机实录：Range 续传（start>0）时文件头已被跳过、没法嗅探，
+     * 上一版用扩展名兜底 → 假 mp3(实为ogg) 的续传响应变成 octet-stream，
+     * 而 chromium 要求同一资源的所有 Range 响应 Content-Type 一致 → NotSupportedError。
+     * 修法：首次请求嗅探后记住，后续 Range 全部复用。
+     */
+    private final java.util.Map<String, String> mediaMimeCache = new java.util.HashMap<>();
+
+    /** 由 ExhibitionBridge.getMusicLibrary() 调用，建立音乐索引 */
+    public void setMusicIndex(MusicIndex idx) {
+        this.musicIndex = idx;
+    }
+
+    /** 是否已从音乐库返回（用于页面自动刷新） */
+    private volatile boolean musicRefreshPending = false;
+
+    /** 桥接层调起音乐库页面前调用 */
+    public void markMusicRefreshPending() {
+        musicRefreshPending = true;
+        // ★ 坑 19：音乐库可能变过（换歌/换 PV），媒体缓存全部作废重拉
+        try {
+            File dir = new File(getCacheDir(), "exmedia");
+            File[] files = dir.listFiles();
+            if (files != null) {
+                int n = 0;
+                for (File f : files) { if (f.delete()) n++; }
+                Log.i(TAG, "媒体缓存已清空: " + n + " 个文件");
+            }
+        } catch (Throwable ignored) {}
     }
 
     @Override
@@ -199,7 +261,7 @@ public class ExhibitionActivity extends AppCompatActivity {
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return interceptLocal(request == null ? null : request.getUrl());
+                return interceptLocal(request);
             }
 
             @Override
@@ -235,12 +297,14 @@ public class ExhibitionActivity extends AppCompatActivity {
         setContentView(webView);
     }
 
-    /**
-     * 虚拟 origin 的"服务器"。
-     * 只服务 exhibition.local，其它域名返回 null（照常走网络）。
-     */
-    private WebResourceResponse interceptLocal(Uri uri) {
-        if (uri == null) return null;
+/**
+         * 虚拟 origin 的"服务器"。
+         * 只服务 exhibition.local，其它域名返回 null（照常走网络）。
+         * M5-c：接受 WebResourceRequest 以便读取 Range 头（音频/视频拖动进度条必需）。
+         */
+        private WebResourceResponse interceptLocal(WebResourceRequest request) {
+            if (request == null) return null;
+            Uri uri = request.getUrl();
         String host = uri.getHost();
         if (host == null || !LOCAL_HOST.equalsIgnoreCase(host)) return null;
 
@@ -252,6 +316,17 @@ public class ExhibitionActivity extends AppCompatActivity {
         // 不需要 base64（避免几百张封面把内存吃爆），也不存在跨域问题。
         if (path.startsWith("/cover/")) {
             return serveCover(path.substring("/cover/".length()));
+        }
+
+        // M5-c：音乐厅媒体（音频/PV/封面）——支持 Range 拖动进度条
+        if (path.startsWith("/music/audio/")) {
+            return serveMediaAudio(path.substring("/music/audio/".length()), request);
+        }
+        if (path.startsWith("/music/pv/")) {
+            return serveMediaPv(path.substring("/music/pv/".length()), request);
+        }
+        if (path.startsWith("/music/cover/")) {
+            return serveMusicCover(path.substring("/music/cover/".length()));
         }
 
         String rel = path.startsWith("/") ? path.substring(1) : path;
@@ -323,6 +398,357 @@ public class ExhibitionActivity extends AppCompatActivity {
             }
         } catch (Throwable ignored) { }
         return null;
+    }
+
+    /* ==================== M5-c：音乐厅媒体（音频/PV/封面） ==================== */
+
+    /** 兜底：用索引查找音乐 URI，找不到则查库 */
+    private String lookupMusicUri(long id, boolean isTrack) {
+        // 优先从索引找
+        MusicIndex idx = musicIndex;
+        if (idx != null) {
+            if (isTrack) {
+                String s = idx.audio.get(id);
+                if (s != null) return s;
+                s = idx.pv.get(id);
+                if (s != null) return s;
+            }
+            // album cover check handled separately
+        }
+        // 索引没有 -> 查库兜底
+        try {
+            MusicRepository repo = new MusicRepository(this);
+            for (MusicAlbum a : repo.getAllAlbums()) {
+                if (a.id == id) return a.coverUri;
+                for (MusicTrack t : repo.getTracks(a.id)) {
+                    if (t.id == id) return isTrack ? t.audioUri : t.coverUri;
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    /** 专辑/单曲封面 —— 不走 Range，直接流式 */
+    private WebResourceResponse serveMusicCover(String idStr) {
+        long id;
+        try {
+            id = Long.parseLong(idStr.trim());
+        } catch (Throwable t) {
+            return plainText(404, "非法 ID");
+        }
+
+        String uriStr = null;
+        MusicIndex idx = musicIndex;
+        if (idx != null) {
+            uriStr = idx.trackCover.get(id);   // 单曲封面优先
+            if (uriStr == null) uriStr = idx.albumCover.get(id); // 其次专辑封面
+        }
+        if (uriStr == null) {
+            // 兜底：albumId 也可能被当作 trackId 传过来（页面 bug），双向查询
+            uriStr = lookupMusicUri(id, false);
+            if (uriStr == null) uriStr = lookupMusicUri(id, true); // 再试试当作 track
+        }
+        if (uriStr == null) return plainText(404, "未找到封面");
+
+        InputStream raw = null;
+        try {
+            raw = getContentResolver().openInputStream(Uri.parse(uriStr));
+            if (raw == null) return plainText(404, "无法打开封面流");
+            PushbackInputStream in = new PushbackInputStream(raw, 12);
+            String mime = sniffImageMime(in);
+            Map<String, String> h = new HashMap<>();
+            h.put("Cache-Control", "max-age=86400");
+            return new WebResourceResponse(mime, null, 200, "OK", h, in);
+        } catch (Throwable t) {
+            Log.w(TAG, "音乐封面读取失败 id=" + id + " uri=" + uriStr + " : " + t.getMessage());
+            try { if (raw != null) raw.close(); } catch (Throwable ignored) { }
+            return plainText(404, "封面读取失败");
+        }
+    }
+
+    /** 音频流 —— 支持 Range 拖动进度条（关键！） */
+    private WebResourceResponse serveMediaAudio(String idStr, WebResourceRequest request) {
+        return serveMedia(idStr, request, true); // isAudio=true
+    }
+
+    /** PV 视频流 —— 支持 Range（同音频） */
+    private WebResourceResponse serveMediaPv(String idStr, WebResourceRequest request) {
+        return serveMedia(idStr, request, false); // isAudio=false
+    }
+
+    /** 通用媒体流处理器（音频/PV）—— 核心实现 Range + MIME 嗅探 */
+    private WebResourceResponse serveMedia(String idStr, WebResourceRequest request, boolean isAudio) {
+        long id;
+        try {
+            id = Long.parseLong(idStr.trim());
+        } catch (Throwable t) {
+            return plainText(404, "非法 ID");
+        }
+
+        // 先查索引
+        MusicIndex idx = musicIndex;
+        String uriStr = null;
+        if (idx != null) {
+            if (isAudio) uriStr = idx.audio.get(id);
+            else uriStr = idx.pv.get(id);
+        }
+        if (uriStr == null) {
+            uriStr = lookupMusicUri(id, true); // 兜底查库
+        }
+        if (uriStr == null) return plainText(404, "未找到媒体");
+        Uri uri = Uri.parse(uriStr);
+
+        // ★★★ 坑 19（真机实录）：SAF 管道（AFD / openInputStream）的流定位
+        //    全部不可靠——skip 循环不行，FileChannel.position 也不行（平台实现
+        //    在 offset 语义上不老实）。根治：**首次请求把资源完整复制到应用
+        //    私有缓存**，之后全部从真实本地文件（FileInputStream）服务——
+        //    本地 fd 的 lseek 是内核语义，绝无歧义。代价只是首次 ~100ms 级复制。
+        File local = mediaCacheFile(id, isAudio);
+        if (local == null || !local.isFile() || local.length() <= 0) {
+            if (!copyToCache(id, isAudio, uri)) {
+                Log.w(TAG, "缓存复制失败 id=" + id + " uri=" + uriStr);
+                return plainText(404, "媒体缓存失败");
+            }
+            local = mediaCacheFile(id, isAudio);
+        }
+        uri = Uri.fromFile(local);   // 后续全部按本地文件走
+
+        long total = local.length();     // ★ 本地文件直接 stat，长度无歧义
+        String mime = null;
+
+        // 解析 Range 头
+        String rangeHeader = null;
+        if (request != null) {
+            Map<String, String> headers = request.getRequestHeaders();
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    if ("Range".equalsIgnoreCase(e.getKey())) {
+                        rangeHeader = e.getValue();
+                        break;
+                    }
+                }
+            }
+        }
+
+        long start = 0, end = -1;
+        boolean hasRange = false;
+        if (rangeHeader != null && total > 0) {
+            String spec = rangeHeader.trim();
+            int eq = spec.indexOf('=');
+            if (eq >= 0) spec = spec.substring(eq + 1);
+            int comma = spec.indexOf(',');
+            if (comma >= 0) spec = spec.substring(0, comma); // 只取第一段
+            int dash = spec.indexOf('-');
+            if (dash >= 0) {
+                String s = spec.substring(0, dash).trim();
+                String eStr = spec.substring(dash + 1).trim();
+                try {
+                    if (!s.isEmpty()) start = Long.parseLong(s);
+                    if (!eStr.isEmpty()) end = Long.parseLong(eStr);
+                } catch (NumberFormatException ignored) {}
+                hasRange = true;
+                if (start < 0) start = 0;
+                if (start >= total) return plainText(416, "Invalid range start");
+                if (end < 0 || end >= total) end = total - 1;
+                if (end < start) return plainText(416, "Invalid range end");
+            }
+        }
+
+        // 开流（★ 全部走本地真文件——坑 19 根治，本地 fd 的 lseek 是内核语义）
+        InputStream in = null;
+        try {
+            in = new FileInputStream(local);
+
+            // ★ MIME 决策（真机实录见 mediaMimeCache 注释）：
+            //   同一资源的所有请求（含 Range 续传）必须返回一致 Content-Type。
+            //   首次请求（start=0）→ 魔数嗅探并缓存；Range 续传 → 直接用缓存；
+            //   缓存未命中（极端时序）→ 扩展名兜底。
+            String cacheKey = (isAudio ? "a" : "v") + id;
+            synchronized (mediaMimeCache) {
+                mime = mediaMimeCache.get(cacheKey);
+            }
+            if (mime == null && !(hasRange && start > 0)) {
+                PushbackInputStream pin = new PushbackInputStream(in, 12);
+                mime = sniffMediaMime(pin, isAudio, uriStr);
+                in = pin;
+                synchronized (mediaMimeCache) { mediaMimeCache.put(cacheKey, mime); }
+            }
+            if (mime == null) {
+                mime = guessMediaMime(isAudio, uriStr);
+                if (!"application/octet-stream".equals(mime)) {
+                    synchronized (mediaMimeCache) { mediaMimeCache.put(cacheKey, mime); }
+                }
+            }
+            if (musicReqCount < 12) {
+                musicReqCount++;
+                Log.i(TAG, "音乐流 #" + musicReqCount + " id=" + id + " mime=" + mime + " total=" + total
+                        + " range=" + (hasRange ? (start + "-" + end) : "-")
+                        + " src=" + (local != null && local.isFile() ? "cache" : "saf"));
+            }
+
+            Map<String, String> h = new HashMap<>();
+            h.put("Cache-Control", "no-store");
+            // ★★★ 坑 20（四轮真机实录的最终结论）：这条 WebView 通道上
+            //   **206 全灭、200 全活**——
+            //   · 四轮构建里所有能播的响应都是 200 全量（MP3 顺序流）；
+            //   · 一旦 chromium 发起 Range 续传（mp4 找 moov / ogg 找页结构），
+            //     我们的 206 无论数据多正确都会陷入"拉同一段×N"死循环；
+            //   · 与 skip/FileChannel/本地缓存都无关（全试过，行为分毫不变）。
+            //   修法：**不再支持 Range，永远 200 全量**。HTTP 语义允许服务器
+            //   忽略 Range 头（客户端必须接受 200 全量响应）——chromium 会
+            //   自动切换到"顺序下载"模式播放，这正是 MP3 一直在走的、被
+            //   本设备反复证明可行的路径。本地缓存文件顺序读极快，全量秒级缓冲。
+            if (musicReqCount < 12) {
+                musicReqCount++;
+                Log.i(TAG, "音乐流 #" + musicReqCount + " id=" + id + " mime=" + mime + " total=" + total
+                        + " range要求=" + (hasRange ? (start + "-" + end) + "(忽略)" : "-")
+                        + " src=" + (local != null && local.isFile() ? "cache" : "saf"));
+            }
+            if (total > 0) h.put("Content-Length", String.valueOf(total));
+            return new WebResourceResponse(mime, null, 200, "OK", h, in);
+        } catch (Throwable t) {
+            Log.w(TAG, "媒体读取失败 id=" + id + " uri=" + uriStr + " : " + t.getMessage());
+            try { if (in != null) in.close(); } catch (Throwable ignored) {}
+            return plainText(404, "媒体读取失败");
+        }
+    }
+
+    /**
+     * ★ 坑 19 辅助：媒体私有缓存路径
+     *   /data/data/<pkg>/cache/exmedia/{a|v}<id>.bin
+     *   bin 后缀是故意的：绝不让任何组件按扩展名猜 MIME（MIME 只信魔数嗅探）。
+     */
+    private File mediaCacheFile(long id, boolean isAudio) {
+        try {
+            File dir = new File(getCacheDir(), "exmedia");
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            return new File(dir, (isAudio ? "a" : "v") + id + ".bin");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** ★ 坑 19 辅助：把 SAF 资源完整复制到私有缓存（顺序读，不用任何 skip/seek） */
+    private boolean copyToCache(long id, boolean isAudio, Uri uri) {
+        InputStream src = null;
+        java.io.FileOutputStream dst = null;
+        try {
+            long t0 = android.os.SystemClock.elapsedRealtime();
+            src = getContentResolver().openInputStream(uri);
+            if (src == null) return false;
+            File out = mediaCacheFile(id, isAudio);
+            if (out == null) return false;
+            dst = new java.io.FileOutputStream(out);
+            byte[] buf = new byte[256 * 1024];
+            long copied = 0;
+            int n;
+            while ((n = src.read(buf)) > 0) {
+                dst.write(buf, 0, n);
+                copied += n;
+            }
+            dst.flush();
+            dst.getFD().sync();
+            Log.i(TAG, "媒体缓存完成 id=" + id + " bytes=" + copied
+                    + " 耗时=" + (android.os.SystemClock.elapsedRealtime() - t0) + "ms");
+            return copied > 0;
+        } catch (Throwable t) {
+            Log.w(TAG, "媒体缓存异常 id=" + id + " : " + t.getMessage());
+            return false;
+        } finally {
+            try { if (src != null) src.close(); } catch (Throwable ignored) {}
+            try { if (dst != null) dst.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    /**
+     * ★ 媒体 MIME：魔数优先（真机实录：用户目录里一半的"mp3"实际是 OGG 改后缀——
+     * 按扩展名报 audio/mpeg，Chromium 拿 MP3 解码器吃 OGG 数据 → NotSupportedError）。
+     *
+     * 策略：先从流头读 12 字节嗅探真实格式；读不出再回退扩展名。
+     * PushbackInputStream 把字节推回流，后续消费不受影响。
+     */
+    private static String sniffMediaMime(PushbackInputStream in, boolean isAudio, String pathOrUri) {
+        try {
+            byte[] b = new byte[12];
+            int n = in.read(b);
+            if (n > 0) in.unread(b, 0, n);
+            if (n >= 12 && b[0] == 'I' && b[1] == 'D' && b[2] == '3') return "audio/mpeg";       // ID3 头的 MP3
+            if (n >= 4 && b[0] == 'f' && b[1] == 'L' && b[2] == 'a' && b[3] == 'C') return "audio/flac";
+            if (n >= 4 && b[0] == 'O' && b[1] == 'g' && b[2] == 'g' && b[3] == 'S') return "audio/ogg";
+            if (n >= 12 && b[4] == 'f' && b[5] == 't' && b[6] == 'y' && b[7] == 'p') {
+                // ftyn 盒：可能是 M4A 音频或 MP4 视频——按用途给（网页里 m4a 也能用 audio/mp4）
+                return isAudio ? "audio/mp4" : "video/mp4";
+            }
+            if (n >= 4 && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F') return "audio/wav";
+            if (n >= 4 && b[0] == (byte)0x1A && b[1] == (byte)0x45 && b[2] == (byte)0xDF && b[3] == (byte)0xA3) return "video/webm"; // EBML
+            // MP3 裸帧同步（0xFFEx/0xFFFx）
+            if (n >= 2 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xE0) == 0xE0) return "audio/mpeg";
+            if (n >= 4 && b[0] == (byte)0x30 && b[1] == (byte)0x26 && b[2] == (byte)0xB2 && b[3] == (byte)0x75) return "video/x-ms-wmv"; // ASF(WMA)
+        } catch (Throwable ignored) { }
+        return guessMediaMime(isAudio, pathOrUri);   // 兜底：扩展名
+    }
+
+    /** 按扩展名猜媒体 MIME（sniffMediaMime 的兜底） */
+    private static String guessMediaMime(boolean isAudio, String pathOrUri) {
+        String p = pathOrUri.toLowerCase();
+        if (p.contains(".mp3")) return "audio/mpeg";
+        if (p.contains(".flac")) return "audio/flac";
+        if (p.contains(".m4a") || p.contains(".aac")) return "audio/mp4";
+        if (p.contains(".wav")) return "audio/wav";
+        if (p.contains(".ogg") || p.contains(".oga")) return "audio/ogg";
+        if (p.contains(".opus")) return "audio/opus";
+        if (p.contains(".mp4")) return "video/mp4";
+        if (p.contains(".webm")) return "video/webm";
+        if (p.contains(".mkv")) return "video/x-matroska";
+        return "application/octet-stream";
+    }
+
+    /** 流跳过 n 字节（可靠版本）*/
+    private static void skipFully(InputStream in, long n) throws IOException {
+        long remaining = n;
+        while (remaining > 0) {
+            long s = in.skip(remaining);
+            if (s <= 0) {
+                if (in.read() < 0) throw new EOFException("stream ended early");
+                remaining--;
+            } else {
+                remaining -= s;
+            }
+        }
+    }
+
+    /** 限制读取长度的过滤器 */
+    private static class LimitedInputStream extends FilterInputStream {
+        private final long limit;
+        private long remaining;
+
+        LimitedInputStream(InputStream in, long limit) {
+            super(in);
+            this.limit = limit;
+            this.remaining = limit;
+        }
+
+        @Override public int read() throws IOException {
+            if (remaining <= 0) return -1;
+            int b = in.read();
+            if (b >= 0) remaining--;
+            return b;
+        }
+
+        @Override public int read(byte[] b, int off, int len) throws IOException {
+            if (remaining <= 0) return -1;
+            int toRead = (int) Math.min(len, remaining);
+            int n = in.read(b, off, toRead);
+            if (n > 0) remaining -= n;
+            return n;
+        }
+
+        @Override public long skip(long n) throws IOException {
+            long toSkip = Math.min(n, remaining);
+            long skipped = in.skip(toSkip);
+            remaining -= skipped;
+            return skipped;
+        }
     }
 
     /** 按魔数嗅探图片类型 */
@@ -412,11 +838,21 @@ public class ExhibitionActivity extends AppCompatActivity {
     }
 
     /* ==================== 生命周期 ==================== */
-
-    @Override
+@Override
     protected void onResume() {
         super.onResume();
         applyImmersive();
+        
+        // M5-c：从音乐库返回后自动刷新音乐数据（如果页面已注册钩子）
+        if (musicRefreshPending) {
+            musicRefreshPending = false;
+            try {
+                webView.evaluateJavascript(
+                    "window.__exhibitionRefreshMusic && window.__exhibitionRefreshMusic()", 
+                    null);
+            } catch (Throwable ignored) {}
+        }
+        
         if (webView != null) webView.onResume();
     }
 

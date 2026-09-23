@@ -335,6 +335,16 @@ public class HomeActivity extends AppCompatActivity {
                     if (holder[0] != null) holder[0].dismiss();
                     openExhibition(com.yuki.yukihub.exhibition.ExhibitionActivity.MODE_ONLINE);
                 }));
+        View gap2 = new View(this);
+        gap2.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(8)));
+        root.addView(gap2);
+        root.addView(buildExhibitionOption("🎵 音乐库",
+                "管理展厅音乐与 PV · 加专辑/单曲、绑 PV",
+                () -> {
+                    if (holder[0] != null) holder[0].dismiss();
+                    openMusicLibrary();
+                }));
 
         androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("3D 展厅")
@@ -387,6 +397,16 @@ public class HomeActivity extends AppCompatActivity {
             startActivity(intent);
         } catch (Throwable t) {
             Toast.makeText(this, "无法打开展厅：" + t.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** 打开音乐库管理页（音乐厅数据录入的唯一入口） */
+    private void openMusicLibrary() {
+        try {
+            startActivity(new Intent(this, com.yuki.yukihub.music.MusicLibraryActivity.class));
+            overridePendingTransition(0, 0);
+        } catch (Throwable t) {
+            Toast.makeText(this, "无法打开音乐库：" + t.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 

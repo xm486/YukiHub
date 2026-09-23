@@ -19,6 +19,7 @@ import { createAudio } from './audio.js';
 import { createPicker } from './picker.js';
 import { createGamepad } from './gamepad.js';
 import { createConcert } from './concert.js';
+import { createMusic } from './music.js';
 
 // 看门狗标记：index.html 用它判断模块是否真的启动成功
 window.__exhBooted = true;
@@ -126,10 +127,13 @@ const bridge = (typeof window.ExhibitionBridge === 'object' && window.Exhibition
 
 // 程序化音频（首次用户手势时启动，符合 WebAudio 的自动播放策略）
 const audio = createAudio();
+// 用户拍板：不做音量调节 UI，整个展厅固定 200%（主总线倍率 2.0）。
+// 提前设置，确保环境音/脚步/交互音从首次启动开始就统一放大。
+if (audio && audio.setVolumeBoost) audio.setVolumeBoost(2.0);
 
 /* ==================== three 主体 ==================== */
 
-let renderer, scene, camera, hall, picker, gamepad, concert;
+let renderer, scene, camera, hall, picker, gamepad, concert, music;
 
 function initRenderer() {
     renderer = new THREE.WebGLRenderer({
@@ -178,8 +182,60 @@ function initScene() {
     });
 
     // 音乐厅 + 前厅感应门 + 走廊（数据来源待接入，先搭空间）
-    concert = createConcert(scene, { audio });   // 注入 audio：开门音效用它
+    concert = createConcert(scene, {
+        audio,   // 注入 audio：开门音效用它
+        log: (msg) => { try { if (bridge && bridge.log) bridge.log(String(msg)); } catch (e) { } },
+    });
     concert.build();
+
+    // M5-d：音乐厅播放器（曲目浮层 / 播放 / 大屏 PV / HUD 条）
+    music = createMusic({
+        scene,
+        audio,
+        showHint: (msg) => showHint(msg),
+        log: (msg) => { try { if (bridge && bridge.log) bridge.log(String(msg)); } catch (e) { } },
+        // 数据到位 → 铺专辑墙
+        onLibrary: (albums, tracks) => {
+            if (concert && concert.applyAlbums) {
+                concert.applyAlbums(albums, 12);
+            }
+            if (!albums.length) {
+                showHint('音乐厅还没有专辑 · 去 App「音乐库」添加 ♪');
+            } else if (albums.length > 12) {
+                showHint('专辑墙已满（12 张），还有 ' + (albums.length - 12) + ' 张未展示');
+            }
+        },
+        // PV 开始 → 挂到大屏
+        onPvStart: (video) => {
+            if (concert && concert.setScreenPv) concert.setScreenPv(video);
+            if (concert && concert.setPlaying) concert.setPlaying(true);
+        },
+        // PV 结束 → 摘掉，恢复程序化频谱
+        onPvEnd: () => {
+            if (concert && concert.setScreenPv) concert.setScreenPv(null);
+        },
+        // 播放状态变化 → 留声机转盘跟着转/停 + 黑胶标签换封面
+        onPlayingChange: (on) => {
+            if (concert && concert.setPlaying) concert.setPlaying(on);
+            // 贴/清当前曲目所属专辑的封面
+            if (concert && concert.setDiscCover) {
+                const t = music ? music.currentTrack() : null;
+                if (on && t) {
+                    const album = music.albums().find(a => a.id === t.albumId);
+                    concert.setDiscCover(album && album.cover ? album.cover : null);
+                } else {
+                    concert.setDiscCover(null);
+                }
+            }
+        },
+    });
+    // 页面级刷新钩子：从音乐库管理页返回时由原生调用（见 ExhibitionActivity.onResume）
+    window.__exhibitionRefreshMusic = () => {
+        try {
+            music.loadLibrary();
+            showHint('音乐库已刷新 ♪');
+        } catch (e) { }
+    };
 
     // 主题展台的选品浮层：库存、缩略图 URL、选完的回调都从这里接
     picker = createPicker({
@@ -194,6 +250,9 @@ function initScene() {
     });
 
     loadLibrary();
+
+    // M5-d：音乐库（桥接调用是同步的）
+    if (music) music.loadLibrary();
 
     // 手柄/键盘输入（M4）：每帧 poll 一次，把设备状态翻译成"动作"
     gamepad = createGamepad();
@@ -903,6 +962,8 @@ function toggleSound() {
         dom.btnSound.textContent = '声音：' + (muted ? '关' : '开');
         dom.btnSound.classList.toggle('on', !muted);
     }
+    // M5-d：音乐播放器跟着"声音开关"走（用 gain 节点控，不是 el.volume）
+    if (music) music.setMuted(muted);
 }
 
 function bindUi() {
@@ -987,6 +1048,9 @@ function handleTap(clientX, clientY) {
     if (!hall || !renderer || !camera) return;
     // 选品浮层开着的时候，点击归浮层处理，不要在 3D 场景里误拾取
     if (picker && picker.isOpen()) return;
+    // M5-d：曲目浮层刚关闭的冷却期内忽略 tap（同一手势的合成 click
+    // 会穿透到 3D 画布 —— 不挡的话会误触碟机/专辑位，表现为"切歌后马上又停"）
+    if (music && music.tapGuarded && music.tapGuarded()) return;
     const rect = renderer.domElement.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     tapNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -1002,14 +1066,23 @@ function handleTap(clientX, clientY) {
             const obj = chits[0].object;
             audio.click();
             if (obj.userData && obj.userData.concertDeck) {
-                // 点碟机 → 播放/暂停（转盘开转/停转）
-                const on = concert.togglePlay();
-                showHint(on ? '▶ 开始播放' : '⏸ 已暂停');
+                // M5-d：点碟机 → 切换真实播放（没有曲目时给引导）
+                if (music && (music.currentTrack() || (music.tracks() && music.tracks().length))) {
+                    music.toggle();
+                } else {
+                    showHint('留声机还没有曲目 · 去 App「音乐库」添加 ♪');
+                }
                 return;
             }
             if (obj.userData && obj.userData.concertAlbumSlot !== undefined) {
-                // 点专辑位 → 占位提示（真数据接入后弹选专辑浮层）
-                showHint('专辑位 ' + (obj.userData.concertAlbumSlot + 1) + '（待接入）');
+                // M5-d：点专辑位 → 弹曲目浮层（真实数据）；没有数据时给引导
+                const slot = obj.userData.concertAlbumSlot;
+                const album = obj.userData.album;
+                if (album && album.id !== undefined) {
+                    music.openAlbum(album.id);
+                } else {
+                    showHint('这个位置还没有专辑 · 去 App「音乐库」添加 ♪');
+                }
                 return;
             }
         }

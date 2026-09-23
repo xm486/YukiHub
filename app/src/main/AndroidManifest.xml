@@ -115,6 +115,15 @@
             android:launchMode="singleTop"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection" />
+        <!--
+            音乐库管理页（M5-b）：音乐厅数据录入的唯一入口。
+            添加专辑/单曲、绑定 PV、改封面。引用模式：只做 SAF 持久化授权，不复制文件。
+        -->
+        <activity
+            android:name=".music.MusicLibraryActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection" />
 
         <activity
             android:name=".HomeActivity"

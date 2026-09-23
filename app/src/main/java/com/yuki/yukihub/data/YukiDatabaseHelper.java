@@ -13,8 +13,9 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      * 版本号改小会触发 onDowngrade，默认实现直接抛异常导致打开数据库就闪退。
      * 历史：15 = 聊天回复引用 + 未读锚点；16 = 曾短暂加过群聊等级列（已废弃，等级改为不入缓存）
      *      18 = 清理 metadata_cache 孤儿行（历史存量）+ 压缩数据库
+     *      22 = 音乐厅：music_albums / music_tracks（只存本机 URI 引用，不复制文件、不入备份）
      */
-    public static final int DB_VERSION = 21;
+    public static final int DB_VERSION = 22;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -117,6 +118,7 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)");
         createMetadataCacheTable(db);
         createChatCacheTables(db);
+        createMusicTables(db);
         try { db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_play_sessions_uuid ON play_sessions(session_uuid)"); } catch (Exception ignored) { }
     }
 
@@ -216,6 +218,12 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
                 android.util.Log.w("YukiDB", "upgrade 18 prune failed", t);
             }
         }
+        if (oldVersion < 22) {
+            // v22：音乐厅数据表（专辑 / 曲目）。
+            // 只存本机 URI 引用（SAF 持久化授权），不复制文件本体，也不参与备份与云同步。
+            // ⚠️ 与 v21 的教训一致：这里和 onCreate 必须成对写，否则「全新安装」的库会缺表。
+            createMusicTables(db);
+        }
     }
 
     /**
@@ -299,6 +307,47 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
                 "last_read_id INTEGER DEFAULT 0," +
                 "updated_at INTEGER DEFAULT 0" +
                 ")");
+    }
+
+    /**
+     * 音乐厅数据表（v22）：专辑 + 曲目。
+     *
+     * <p><b>设计前提：引用模式</b> —— 只记录本机文件的 URI（SAF 持久化授权），
+     * 不复制文件本体。好处是几乎不占 App 空间；代价是原文件被移动/删除后 URI 失效，
+     * 这种情况由上层做「失效自愈」（静默降级占位、播放失败跳过），不在这里存状态位
+     * （避免"文件删了但标记还是正常"的陈旧数据）。
+     *
+     * <p><b>不参与备份与云同步</b>：持久化 URI 授权是设备本地的东西，
+     * 换设备恢复后必然失效，导出了也是死数据。
+     *
+     * <p><b>album_id = 0</b> 表示"散装单曲"（没有归入任何专辑）。
+     */
+    private void createMusicTables(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS music_albums (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "title TEXT NOT NULL," +
+                "root_uri TEXT," +                 // SAF 目录树 URI（选文件夹添加时）
+                "cover_uri TEXT," +                // 封面（独立授权 URI，或目录内 cover 文件）
+                "game_id INTEGER DEFAULT 0," +     // 可选：关联游戏库条目（0 = 未关联）
+                "track_count INTEGER DEFAULT 0," + // 冗余计数（列表免查询）
+                "created_at INTEGER DEFAULT 0," +
+                "updated_at INTEGER DEFAULT 0" +
+                ")");
+        db.execSQL("CREATE TABLE IF NOT EXISTS music_tracks (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "album_id INTEGER NOT NULL DEFAULT 0," +   // 0 = 散装单曲
+                "track_no INTEGER DEFAULT 0," +
+                "title TEXT NOT NULL," +
+                "artist TEXT," +
+                "audio_uri TEXT NOT NULL," +       // content:// 音频（持久化授权）
+                "pv_uri TEXT," +                   // content:// PV（可选）
+                "cover_uri TEXT," +                // 单曲封面（可选，优先于专辑封面）
+                "duration_ms INTEGER DEFAULT 0," +
+                "size_bytes INTEGER DEFAULT 0," +
+                "created_at INTEGER DEFAULT 0" +
+                ")");
+        try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_music_tracks_album ON music_tracks(album_id, track_no)"); } catch (Exception ignored) { }
+        try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_music_albums_created ON music_albums(created_at DESC)"); } catch (Exception ignored) { }
     }
 
     private void upgradeMetadataCachePrimaryKey(SQLiteDatabase db) {

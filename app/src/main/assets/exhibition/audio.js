@@ -24,6 +24,25 @@ export function createAudio() {
     let muted = false;
     let chimeTimer = null;
 
+    // ==================== 全局音量（M5-d） ====================
+    // 用户需求：展厅整体音量偏小，要能拉到 200%。
+    // 实现：master 的"目标电平"乘上 volBoost（1.0 = 原始 0.85 满档）。
+    // 环境音/脚步/交互音全部走 master，一处放大全局生效。
+    let volBoost = 1.0;                    // 音量倍率（1.0 = 原始，最高 2.35 ≈ 200%+）
+    const BASE_LEVEL = 0.85;               // 原始满档电平
+    function targetLevel() { return Math.min(BASE_LEVEL * volBoost, 2.0); }
+
+    /** 设置全局音量倍率（1.0 = 原始音量，2.35 = 200%+ 的可感知增益） */
+    function setVolumeBoost(v) {
+        volBoost = v;
+        if (ctx && master && started) {
+            const t = ctx.currentTime;
+            master.gain.cancelScheduledValues(t);
+            master.gain.setTargetAtTime(muted ? 0 : targetLevel(), t, 0.12);
+        }
+    }
+    function getVolumeBoost() { return volBoost; }
+
     function ensure() {
         if (ctx) return true;
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -106,7 +125,7 @@ export function createAudio() {
         const t = ctx.currentTime;
         master.gain.cancelScheduledValues(t);
         master.gain.setValueAtTime(0, t);
-        master.gain.linearRampToValueAtTime(muted ? 0 : 0.85, t + 2.0);
+        master.gain.linearRampToValueAtTime(muted ? 0 : targetLevel(), t + 2.0);
 
         // ---------- 偶发风铃 ----------
         const scheduleChime = () => {
@@ -226,7 +245,7 @@ export function createAudio() {
         if (ctx && master) {
             const t = ctx.currentTime;
             master.gain.cancelScheduledValues(t);
-            master.gain.setTargetAtTime(muted ? 0 : 0.85, t, 0.12);
+            master.gain.setTargetAtTime(muted ? 0 : targetLevel(), t, 0.12);
         }
         if (!muted) start();   // 从静音切回时确保已经启动
         return muted;
@@ -241,5 +260,15 @@ export function createAudio() {
         toggle,
         isMuted: () => muted,
         isStarted: () => started,
+        /** 全局音量倍率（M5-d）：>1 为增益，作用于展厅主总线（环境/脚步/交互全算） */
+        setVolumeBoost,
+        getVolumeBoost,
+        /**
+         * 暴露 WebAudio 上下文（M5-d：音乐厅播放器要接 MediaElementSource 做频谱）。
+         * 返回 null 表示音频还没启动（未发生用户手势）——调用方应先确保 start() 已跑过。
+         */
+        context: () => (started ? ctx : null),
+        /** 暴露总线增益（音乐播放器的静音要跟着"声音开关"走） */
+        masterGain: () => master,
     };
 }
