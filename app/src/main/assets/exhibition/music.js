@@ -35,7 +35,7 @@ export function createMusic(deps = {}) {
 
     /* ==================== 状态 ==================== */
 
-    let albums = [];      // [{id,title,gameId,trackCount,cover}]
+    let albums = [];      // [{id,title,trackCount,cover}]
     let tracks = [];      // [{id,albumId,trackNo,title,artist,durationMs,audioUrl,hasPv,pvUrl}]
     let loaded = false;   // 是否已成功拉取过数据
 
@@ -136,6 +136,7 @@ export function createMusic(deps = {}) {
         barEl.hidden = true;
         // 图标用内联 SVG（emoji 在不同 ROM 上渲染差异大，且廉价感强）
         barEl.innerHTML =
+            '<div id="mb-controls">' +
             '<button class="mb-btn" id="mb-prev" title="上一首">' + SVG_PREV + '</button>' +
             '<button class="mb-btn mb-play" id="mb-play" title="播放/暂停">' + SVG_PLAY + '</button>' +
             '<button class="mb-btn" id="mb-next" title="下一首">' + SVG_NEXT + '</button>' +
@@ -145,8 +146,27 @@ export function createMusic(deps = {}) {
             '</div>' +
             '<div id="mb-pv" hidden>PV</div>' +
             '<button class="mb-btn mb-queue" id="mb-queue" title="播放队列" aria-label="播放队列">' + SVG_LIST + '</button>' +
-            '<button class="mb-btn mb-shuffle" id="mb-shuffle" title="随机播放">' + SVG_SHUFFLE + '</button>';
+            '<button class="mb-btn mb-shuffle" id="mb-shuffle" title="随机播放">' + SVG_SHUFFLE + '</button>' +
+            '</div>' +
+            '<div id="mb-timeline">' +
+            '  <span id="mb-time-current">0:00</span>' +
+            '  <input id="mb-seek" type="range" min="0" max="1000" step="1" value="0" aria-label="播放进度">' +
+            '  <span id="mb-time-total">0:00</span>' +
+            '</div>';
         document.body.appendChild(barEl);
+
+        // ★ 进度条：输入中只预览时间，松手（change）才真正 seek，避免拖动时疯狂跳转
+        const seekInput = barEl.querySelector('#mb-seek');
+        seekInput.addEventListener('input', () => onSeekInput());
+        seekInput.addEventListener('change', () => commitSeek());
+        // 拖动进度条时不要触发播放条的"点一下展开/收起"逻辑
+        ['pointerdown', 'touchstart'].forEach(t => seekInput.addEventListener(t, (e) => {
+            e.stopPropagation();
+            wakeBar();
+        }, { passive: true }));
+        ['pointerup', 'touchend', 'click'].forEach(t => seekInput.addEventListener(t, (e) => {
+            e.stopPropagation();
+        }, { passive: true }));
 
         // ★ 收起态：任何点击只负责"展开"，不触发功能（避免误暂停）
         const ifExpanded = (fn) => (e) => {
@@ -259,18 +279,22 @@ export function createMusic(deps = {}) {
 
 /* —— HUD 播放条 —— */
 #music-bar{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));
-  transform:translateX(-50%);z-index:55;display:flex;align-items:center;gap:2px;
-  height:52px;padding:0 10px;border-radius:26px;
+  transform:translateX(-50%);z-index:55;display:flex;flex-direction:column;align-items:center;gap:2px;
+  width:min(430px,calc(100vw - 24px));padding:5px 10px 6px;border-radius:22px;
   border:1px solid rgba(150,190,255,.22);
   background:rgba(10,15,26,.78);backdrop-filter:blur(8px);
   box-shadow:0 8px 32px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
   -webkit-user-select:none;user-select:none;
   transform-origin:50% 100%;
-  transition:height .32s cubic-bezier(.4,0,.2,1), padding .32s cubic-bezier(.4,0,.2,1),
-             border-radius .32s ease, opacity .28s ease, box-shadow .3s ease;}
-/* ★ 收起态（真·缩小）：整条收成一颗 44×28 的小胶囊，只留播放键 */
-#music-bar.mb-min{height:30px;padding:0 4px;border-radius:15px;opacity:.86;
+  transition:padding .32s cubic-bezier(.4,0,.2,1), border-radius .32s ease,
+             opacity .28s ease, box-shadow .3s ease;}
+#mb-controls{display:flex;align-items:center;justify-content:center;gap:2px;width:100%;}
+/* ★ 收起态（真·缩小）：整条收成一颗小胶囊，只留播放键
+   ⚠️ 必须 width:auto —— 展开态是固定 430px，收起态若继承该宽度会变成一根长条 */
+#music-bar.mb-min{width:auto;padding:0 4px;border-radius:15px;opacity:.86;
   box-shadow:0 4px 16px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05);}
+#music-bar.mb-min #mb-timeline{display:none;}
+#music-bar.mb-min #mb-controls{width:auto;height:30px;}
 #music-bar.mb-min .mb-btn{width:0;height:0;opacity:0;margin:0;pointer-events:none;}
 #music-bar.mb-min .mb-play{width:24px;height:24px;opacity:1;margin:0 3px;
   border-width:0;background:transparent;pointer-events:auto;}
@@ -281,26 +305,45 @@ export function createMusic(deps = {}) {
 #music-bar.mb-min #mb-queue,#music-bar.mb-min #mb-shuffle{display:none;}
 #music-bar.mb-min #mb-pv{font-size:8px;padding:1px 5px;}
 /* 子元素跟着一起做尺寸过渡，避免"突变" */
-.mb-btn,#mb-info,#mb-title,#mb-sub,#mb-pv{
+.mb-btn,#mb-info,#mb-title,#mb-sub,#mb-pv,#mb-controls{
   transition:width .3s cubic-bezier(.4,0,.2,1), height .3s cubic-bezier(.4,0,.2,1),
              opacity .24s ease, font-size .3s ease, margin .3s ease, max-width .3s ease;}
 #music-bar[hidden]{display:none;}
-.mb-btn{display:flex;align-items:center;justify-content:center;
-  width:40px;height:40px;margin:0;padding:0;border:0;border-radius:50%;
+.mb-btn{display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+  width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;
   background:transparent;color:#C9D6E6;cursor:pointer;
   transition:background .15s ease, color .15s ease;}
 .mb-btn:active{background:rgba(138,180,255,.16);color:#EAF2FF;}
-.mb-play{width:44px;height:44px;background:rgba(138,180,255,.14);
+.mb-play{width:42px;height:42px;background:rgba(138,180,255,.14);
   border:1px solid rgba(138,180,255,.35);color:#EAF2FF;margin:0 4px;}
 .mb-play:active{background:rgba(138,180,255,.26);}
-.mb-shuffle{width:34px;height:34px;opacity:.42;}
+.mb-shuffle{width:32px;height:32px;opacity:.42;}
 .mb-shuffle.on{opacity:1;color:#8AB4FF;}
-.mb-queue{width:34px;height:34px;color:#9FB3CC;}
-#mb-info{min-width:110px;max-width:min(320px,44vw);margin:0 10px 0 6px;}
+.mb-queue{width:32px;height:32px;color:#9FB3CC;}
+#mb-info{flex:0 1 auto;min-width:74px;max-width:min(300px,40vw);margin:0 8px 0 6px;
+  overflow:hidden;}
 #mb-title{font-size:13px;font-weight:500;color:#EAF2FF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #mb-sub{font-size:10px;color:#9FB3CC;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #mb-pv{font-size:9px;letter-spacing:.5px;color:#8AB4FF;border:1px solid rgba(122,158,217,.5);
   border-radius:999px;padding:2px 8px;flex:0 0 auto;}
+/* —— 进度条：已播 / 总时长 + 可拖动滑块（音频与 PV 共用） —— */
+#mb-timeline{display:flex;align-items:center;gap:8px;width:100%;height:16px;padding:0 4px;box-sizing:border-box;}
+#mb-time-current,#mb-time-total{flex:0 0 34px;width:34px;text-align:center;font-size:9px;
+  font-variant-numeric:tabular-nums;color:#9FB3CC;letter-spacing:.2px;}
+#mb-seek{--mb-fill:0%;appearance:none;-webkit-appearance:none;flex:1 1 auto;min-width:0;
+  height:16px;margin:0;padding:0;background:transparent;cursor:pointer;touch-action:none;}
+#mb-seek:disabled{opacity:.45;cursor:default;}
+/* ★ 坑 28：源不可 seek（回退流式）时滑块只做进度展示，拖动无效 → 视觉上弱化 */
+#mb-seek.mb-noseek{pointer-events:none;opacity:.7;cursor:default;}
+#mb-seek::-webkit-slider-runnable-track{height:3px;border-radius:2px;
+  background:linear-gradient(to right,#8AB4FF 0%,#8AB4FF var(--mb-fill,0%),
+             rgba(150,190,255,.26) var(--mb-fill,0%),rgba(150,190,255,.26) 100%);}
+#mb-seek::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;margin-top:-3.5px;
+  border:0;border-radius:50%;background:#EAF2FF;box-shadow:0 0 6px rgba(138,180,255,.85);}
+#mb-seek::-moz-range-track{height:3px;border-radius:2px;background:rgba(150,190,255,.26);}
+#mb-seek::-moz-range-progress{height:3px;border-radius:2px;background:#8AB4FF;}
+#mb-seek::-moz-range-thumb{width:10px;height:10px;border:0;border-radius:50%;background:#EAF2FF;
+  box-shadow:0 0 6px rgba(138,180,255,.85);}
 `;
         document.head.appendChild(css);
     }
@@ -319,6 +362,216 @@ export function createMusic(deps = {}) {
     /** PV 看门狗定时器（8s 未进入 playing 就回退原曲，见 startPv） */
     let pvWatchdog = null;
 
+    /* ==================== 播放进度（音频 / PV 共用一条 HUD） ==================== */
+
+    /** 拖动进度条中（true 时不回写 value，避免跟手指抢） */
+    let seeking = false;
+    /** 拖动预览时间（秒），仅 seeking 时有效 */
+    let seekPreviewSec = 0;
+    /** 进度刷新定时器（250ms 一次，够顺滑又几乎不耗电） */
+    let progressTimer = null;
+
+    /** 当前真正在出声/出画的媒体元素；PV 优先（PV 规则：只播 PV） */
+    function mediaEl() {
+        if (pvActive && pvVideo) return pvVideo;
+        return el;
+    }
+
+    /** 媒体总时长（秒）；未知返回 0（此时进度条禁用） */
+    function mediaDurationSec() {
+        const m = mediaEl();
+        if (!m) return 0;
+        const d = Number(m.duration);
+        return (Number.isFinite(d) && d > 0) ? d : 0;
+    }
+
+    /** 秒 → m:ss（超过 1 小时显示 h:mm:ss） */
+    function fmtTime(sec) {
+        if (!Number.isFinite(sec) || sec < 0) return '0:00';
+        const s = Math.floor(sec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const ss = String(s % 60).padStart(2, '0');
+        return h > 0 ? (h + ':' + String(m).padStart(2, '0') + ':' + ss) : (m + ':' + ss);
+    }
+
+    /** 拖动中：只更新时间文字和填充，不动媒体 */
+    function onSeekInput() {
+        if (!barEl) return;
+        const dur = mediaDurationSec();
+        const input = barEl.querySelector('#mb-seek');
+        if (!input) return;
+        if (dur <= 0) return;
+        seeking = true;
+        seekPreviewSec = dur * (Number(input.value) / 1000);
+        paintProgress(seekPreviewSec, dur);
+    }
+
+    /** 松手：真正 seek 到目标位置 */
+    function commitSeek() {
+        if (!barEl) return;
+        const input = barEl.querySelector('#mb-seek');
+        const m = mediaEl();
+        if (!input) return;
+        const dur = mediaDurationSec();
+        if (m && dur > 0) {
+            const target = Math.max(0, Math.min(dur, dur * (Number(input.value) / 1000)));
+            // ★ 诊断（坑 28）：只有"可 seek"的源（blob）才真的能跳。
+            //   旧实现（拦截流 200 全量）seekable 为空，赋 currentTime 会被钳回 0，
+            //   表现就是"点哪都从头播"。这里显式检查，让问题在日志里一眼可见。
+            let canSeek = true;
+            try {
+                if (typeof m.seekable === 'object' && m.seekable && m.seekable.length > 0) {
+                    const s = m.seekable.start(0), e = m.seekable.end(0);
+                    canSeek = target >= s - 0.5 && target <= e + 0.5;
+                }
+            } catch (err) { canSeek = true; }
+            try {
+                m.currentTime = target;
+            } catch (e) {
+                log('seek 失败: ' + (e && e.message ? e.message : e));
+            }
+            if (!canSeek) {
+                log('⚠️ 该源不可 seek（seekable 空）→ 回退流式所致；进度条将无法跳转');
+                showHint('⚠️ 当前音源不支持拖动跳转');
+            } else {
+                log('seek → ' + fmtTime(target));
+            }
+        }
+        seeking = false;
+        updateProgress(true);
+    }
+
+    /** 画进度条：填充 + 已播/总时长文字 */
+    function paintProgress(cur, dur) {
+        if (!barEl) return;
+        const input = barEl.querySelector('#mb-seek');
+        const tCur = barEl.querySelector('#mb-time-current');
+        const tTot = barEl.querySelector('#mb-time-total');
+        if (!input || !tCur || !tTot) return;
+        if (tCur.textContent !== fmtTime(cur)) tCur.textContent = fmtTime(cur);
+        if (tTot.textContent !== fmtTime(dur)) tTot.textContent = fmtTime(dur);
+        const pct = dur > 0 ? Math.max(0, Math.min(100, cur / dur * 100)) : 0;
+        input.style.setProperty('--mb-fill', pct.toFixed(2) + '%');
+    }
+
+    /**
+     * 同步进度（force=true 立即刷新，否则只由定时器调用）。
+     * 拖动中不覆盖 input.value，否则滑块会跳回。
+     */
+    function updateProgress(force) {
+        if (!barEl || barEl.hidden) return;
+        const input = barEl.querySelector('#mb-seek');
+        if (!input) return;
+        const dur = mediaDurationSec();
+        const m0 = mediaEl();
+        // ★ 坑 28：时长为 0（元数据未到）或源不可 seek 时，滑块给"禁用"视觉
+        let seekable = true;
+        try {
+            if (m0 && typeof m0.seekable === 'object' && m0.seekable) seekable = m0.seekable.length > 0;
+        } catch (e) { }
+        input.disabled = dur <= 0;
+        input.classList.toggle('mb-noseek', dur > 0 && !seekable);
+        if (dur <= 0) {
+            paintProgress(0, 0);
+            if (force) input.value = '0';
+            return;
+        }
+        const m = mediaEl();
+        const cur = seeking ? seekPreviewSec
+            : (m && Number.isFinite(Number(m.currentTime)) ? Number(m.currentTime) : 0);
+        if (!seeking) {
+            const val = String(Math.round(Math.max(0, Math.min(1, cur / dur)) * 1000));
+            if (force || input.value !== val) input.value = val;
+        }
+        paintProgress(cur, dur);
+    }
+
+    function startProgressTimer() {
+        if (progressTimer) return;
+        progressTimer = setInterval(() => updateProgress(false), 250);
+    }
+
+    function stopProgressTimer() {
+        if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+        seeking = false;
+        seekPreviewSec = 0;
+    }
+
+    /* ==================== 媒体源装载（blob 化 → 让 seek 真正可用） ==================== */
+
+    /**
+     * ★★★ 坑 28（真机实录）：拖动进度条无效，点哪都从头播。
+     *
+     * 根因：展厅媒体走"虚拟 origin 拦截流"（ExhibitionActivity.serveMedia），
+     * 而这条通道受坑 20 约束——**只能 200 全量、给不了 206**
+     * （WebResourceResponse 在部分 OEM WebView 上对 206 支持不可靠）。
+     * Chromium 的媒体 seek 必须拿到 206，拿不到就认为"不可 seek"：
+     * seekable 为空 → 给 currentTime 赋值被钳到 0 → 表现即"点哪都从头播"。
+     *
+     * 修法（纯 JS，不改 Java、不动已稳定的播放管线）：播放前先把媒体
+     * fetch 成 Blob，用 blob: URL 交给媒体元素。blob 是浏览器自己的资源，
+     * **天然完整可 seek**，与 HTTP Range 完全无关。数据本来就在 App 私有
+     * 缓存里，本地 fetch 极快。
+     *
+     * 兜底：fetch 失败（内存不足 / 超时）→ 回退原来的流式 URL。
+     * 原则："最差也能正常播，最好还能拖进度"。
+     */
+    /** 装载序号：每次换曲 +1，用于作废迟到的异步回调 */
+    let mediaToken = 0;
+    /** 媒体元素 → 当前 blob URL（换曲时释放，防内存泄漏） */
+    const mediaBlobUrl = new WeakMap();
+
+    /** 释放某媒体元素的 blob URL（务必在赋上新 src 之后再调） */
+    function releaseBlobUrl(media) {
+        if (!media) return;
+        const old = mediaBlobUrl.get(media);
+        if (old) {
+            mediaBlobUrl.delete(media);
+            try { URL.revokeObjectURL(old); } catch (e) { }
+        }
+    }
+
+    /**
+     * 给媒体元素挂源：优先 blob（可 seek），失败回退流式。
+     * 回调里若 token 已过期必须直接放弃（用户可能已切歌）。
+     * @returns Promise<'blob' | 'stream' | 'stale'>
+     */
+    function attachMediaSrc(media, url, token) {
+        // ★ 体积上限（坑 28 的配套安全阀）：blob 要把整个文件读进内存，
+        //   超过阈值就放弃 seek、退回流式 —— 宁可拖不了，也不能 OOM 崩掉展厅。
+        const MAX_BLOB_BYTES = 150 * 1024 * 1024;
+        const useStream = (why) => {
+            const prev = mediaBlobUrl.get(media);
+            media.src = url;                                      // 兜底：流式（不可 seek，但能播）
+            mediaBlobUrl.delete(media);
+            if (prev) { try { URL.revokeObjectURL(prev); } catch (e2) { } }
+            log('媒体走流式(' + why + ')，进度条只读不可拖');
+            return 'stream';
+        };
+        return fetch(url).then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const len = Number(r.headers.get('content-length'));
+            if (Number.isFinite(len) && len > MAX_BLOB_BYTES) {
+                return useStream('文件 ' + Math.round(len / 1048576) + 'MB 超过上限');
+            }
+            return r.blob();
+        }).then(b => {
+            if (b === 'stream') return 'stream';
+            if (token !== mediaToken) return 'stale';
+            const prev = mediaBlobUrl.get(media);
+            const objUrl = URL.createObjectURL(b);
+            media.src = objUrl;                                   // ★ 先赋新
+            mediaBlobUrl.set(media, objUrl);
+            if (prev) { try { URL.revokeObjectURL(prev); } catch (e) { } }  // 再放旧
+            return 'blob';
+        }).catch(e => {
+            if (token !== mediaToken) return 'stale';
+            log('媒体 blob 化失败，回退流式: ' + (e && e.message ? e.message : e));
+            return useStream('fetch 失败');
+        });
+    }
+
     /**
      * ⚠️ 血泪教训（真机实录：UI 显示播放中、实际无声、零报错）：
      * 之前把 el 接进 WebAudio（createMediaElementSource）想给大屏供频谱——
@@ -333,6 +586,10 @@ export function createMusic(deps = {}) {
         el = new Audio();
         el.preload = 'auto';
         el.volume = mediaVolume;
+        // ★ 进度：时长为 0（元数据未到）时进度条禁用；元数据/跳转后立即刷新一次
+        ['loadedmetadata', 'durationchange', 'seeked', 'ended'].forEach(evt => {
+            el.addEventListener(evt, () => updateProgress(true));
+        });
         // 用户拍板：全局音量 200% 定死（媒体 100% + 展厅总线 2×）。
         // 播放必然发生在用户手势之后（首次触摸已 audio.start()），
         // 此时设置总线增益才能真实生效。
@@ -631,9 +888,19 @@ export function createMusic(deps = {}) {
     function startAudio(t) {
         ensurePlayer();
         try {
-            el.src = t.audioUrl;
-            safePlay(el);
+            const token = ++mediaToken;
+            // ★ blob 化有 fetch 延迟，这段时间旧曲会继续响 → 立刻静音旧的，
+            //   保持与旧实现（换 src 即刻停）一致的手感。
+            try { el.pause(); } catch (e) { }
             playing = true;
+            startProgressTimer();
+            updateProgress(true);
+            // ★ 先取回本地字节（blob），再赋 src 播放 —— 换取可 seek，详见坑 28
+            attachMediaSrc(el, t.audioUrl, token).then(r => {
+                if (r === 'stale' || current !== t) return;
+                log('音频源就绪(' + r + '): ' + t.title);
+                safePlay(el);
+            });
         } catch (e) {
             log('播放失败: ' + e);
         }
@@ -669,35 +936,47 @@ export function createMusic(deps = {}) {
                     updateBar();
                 }
             });
+            pvVideo.addEventListener('loadedmetadata', () => updateProgress(true));
+            pvVideo.addEventListener('durationchange', () => updateProgress(true));
+            pvVideo.addEventListener('seeked', () => updateProgress(true));
             pvVideo.addEventListener('playing', () => log('PV playing: ' + (t ? t.title : '?')));
         }
         try {
+            const token = ++mediaToken;
             // ★★★ Bug（真机实录）：切到 PV 歌时**没停掉正在播的音频元素**，
             //   导致"上一首歌 + PV" 两路音频同时响。PV 规则是"只播 PV 的音视频"，
             //   所以这里必须先把音乐元素彻底停住。
             if (el) {
                 try { el.pause(); el.removeAttribute('src'); el.load(); } catch (e) { }
+                releaseBlobUrl(el);
             }
-            pvVideo.src = t.pvUrl;
-            safePlay(pvVideo);
             pvActive = true;
             playing = true;
-            if (deps.onPvStart) deps.onPvStart(pvVideo);
+            startProgressTimer();
+            updateProgress(true);
+
+            // ★ 先取回本地字节（blob），再赋 src 播放 —— 换取可 seek，详见坑 28
+            attachMediaSrc(pvVideo, t.pvUrl, token).then(r => {
+                if (r === 'stale' || current !== t || !pvActive) return;
+                log('PV 源就绪(' + r + '): ' + t.title);
+                safePlay(pvVideo);
+                if (deps.onPvStart) deps.onPvStart(pvVideo);
+            });
 
             // ★ PV 看门狗（坑 16 的终极形态）：error 事件在"无限重拉"型失败里
-            //   根本不触发（chromium 内部重试不报错）。8 秒内没进 playing
-            //   就视为 PV 失败 → 自动回退播原曲。用户永远不会再遇到"点了没反应"。
+            //   根本不触发（chromium 内部重试不报错）。现在 PV 先经 fetch 取字节、
+            //   再本地播放，窗口统一放宽到 15s；超时未进 playing 视为失败 → 回退原曲。
             if (pvWatchdog) clearTimeout(pvWatchdog);
             pvWatchdog = setTimeout(() => {
                 if (pvActive && pvVideo && pvVideo.paused && current === t) {
-                    log('PV 看门狗: 8s 未进入 playing → 回退原曲');
+                    log('PV 看门狗: 15s 未进入 playing → 回退原曲');
                     showHint('⚠️ PV 播放超时，改播原曲');
                     pvActive = false;
                     releasePv();
                     startAudio(t);
                     updateBar();
                 }
-            }, 8000);
+            }, 15000);
         } catch (e) {
             log('PV 播放失败: ' + e);
         }
@@ -712,6 +991,7 @@ export function createMusic(deps = {}) {
                 pvVideo.removeAttribute('src');
                 pvVideo.load();
             } catch (e) { /* ignore */ }
+            releaseBlobUrl(pvVideo);
         }
         pvActive = false;
         if (deps.onPvEnd) deps.onPvEnd();
@@ -728,10 +1008,13 @@ export function createMusic(deps = {}) {
             if (pvActive && pvVideo) pvVideo.pause();
             else el.pause();
             playing = false;
+            stopProgressTimer();
         } else {
             if (pvActive && pvVideo) safePlay(pvVideo);
             else safePlay(el);
             playing = true;
+            startProgressTimer();
+            updateProgress(true);
         }
         updateBar();
         if (queueEl && !queueEl.hidden) renderQueue();
@@ -756,6 +1039,7 @@ export function createMusic(deps = {}) {
 
     function stop() {
         releasePv();
+        stopProgressTimer();
         if (el) {
             try { el.pause(); } catch (e) { }
         }
@@ -787,6 +1071,7 @@ export function createMusic(deps = {}) {
         if (!current) {
             barEl.hidden = true;
             if (queueEl) queueEl.hidden = true;
+            stopProgressTimer();
             return;
         }
         barEl.hidden = false;
@@ -798,6 +1083,8 @@ export function createMusic(deps = {}) {
             (album ? album.title : '') + (current.artist ? ' · ' + current.artist : '');
         const pvTag = barEl.querySelector('#mb-pv');
         pvTag.hidden = !current.hasPv;
+        // ★ 换曲/UI 刷新时同步一次进度（时长可能还没到，会显示 0:00 并禁用滑块）
+        updateProgress(true);
         if (queueEl && !queueEl.hidden) renderQueue();
     }
 

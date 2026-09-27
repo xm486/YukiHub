@@ -225,12 +225,7 @@ public class MusicLibraryActivity extends Activity {
         texts.addView(t1);
 
         TextView t2 = new TextView(this);
-        StringBuilder sub = new StringBuilder();
-        sub.append(album.trackCount).append(" 首");
-        long gid = album.gameId;
-        if (gid > 0) sub.append(" · 已关联游戏");
-        else if (!isSingles) sub.append(" · 未关联");
-        t2.setText(sub.toString());
+        t2.setText(album.trackCount + " 首");
         t2.setTextSize(12);
         t2.setTextColor(getColorCompat(R.color.yh_text_muted));
         t2.setPadding(0, dp(4), 0, 0);

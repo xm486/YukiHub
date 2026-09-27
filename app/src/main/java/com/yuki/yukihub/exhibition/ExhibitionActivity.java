@@ -579,12 +579,6 @@ public class ExhibitionActivity extends AppCompatActivity {
                     synchronized (mediaMimeCache) { mediaMimeCache.put(cacheKey, mime); }
                 }
             }
-            if (musicReqCount < 12) {
-                musicReqCount++;
-                Log.i(TAG, "音乐流 #" + musicReqCount + " id=" + id + " mime=" + mime + " total=" + total
-                        + " range=" + (hasRange ? (start + "-" + end) : "-")
-                        + " src=" + (local != null && local.isFile() ? "cache" : "saf"));
-            }
 
             Map<String, String> h = new HashMap<>();
             h.put("Cache-Control", "no-store");
@@ -867,6 +861,15 @@ public class ExhibitionActivity extends AppCompatActivity {
         if (webView != null) {
             webView.removeJavascriptInterface(ExhibitionBridge.NAME);
             webView.loadUrl("about:blank");
+            // ★ 真机日志（2026-09-27）：直接 destroy() 时 Chromium 会警告
+            //   "WebView.destroy() called while WebView is still attached to window"。
+            //   标准收尾顺序：先从父容器摘下，再销毁（否则可能泄漏渲染进程资源）。
+            try {
+                android.view.ViewParent parent = webView.getParent();
+                if (parent instanceof android.view.ViewGroup) {
+                    ((android.view.ViewGroup) parent).removeView(webView);
+                }
+            } catch (Throwable ignored) { }
             webView.destroy();
             webView = null;
         }
