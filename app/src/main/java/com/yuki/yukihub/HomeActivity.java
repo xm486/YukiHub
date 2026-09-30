@@ -291,6 +291,10 @@ public class HomeActivity extends AppCompatActivity {
             touch(v);
             startActivity(new Intent(this, com.yuki.yukihub.translate.TranslateControlActivity.class));
         });
+        findViewById(R.id.homeGalToolbox).setOnClickListener(v -> {
+            touch(v);
+            startActivity(new Intent(this, com.yuki.yukihub.galtoolbox.GalToolboxActivity.class));
+        });
         // M0：3D 展厅入口（点开后选择 离线个人展厅 / 在线多人展厅）
         findViewById(R.id.homeExhibition).setOnClickListener(v -> {
             touch(v);

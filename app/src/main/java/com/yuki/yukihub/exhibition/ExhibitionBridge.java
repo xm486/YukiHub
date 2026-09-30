@@ -268,6 +268,47 @@ return root.toString();
         Log.i(TAG, String.valueOf(msg));
     }
 
+    /* ==================== 在线展厅身份（E1） ==================== */
+    /*
+     * 在线多人展厅（MODE_ONLINE）页面在与服务器同源（yukihub.zh.kg），
+     * 页面可用 fetch 直连 /api/*，只需要这里暴露"我是谁"和访问令牌。
+     * 读取与 SocialApiClient 同一份 SharedPreferences("yukihub_prefs")，
+     * key 对齐（auth_access_token / auth_uid / auth_nickname / auth_avatar）。
+     */
+
+    private static final String PREFS_AUTH = "yukihub_prefs";
+    private static final String K_TOKEN = "auth_access_token";
+    private static final String K_UID = "auth_uid";
+    private static final String K_NICK = "auth_nickname";
+    private static final String K_AVATAR = "auth_avatar";
+    /** 在线 API 根（与 SocialApiClient.AUTH_BASE_URL 一致） */
+    private static final String ONLINE_API_BASE = "https://yukihub.zh.kg/api";
+
+    /**
+     * 在线模式身份信息，页面启动时调用。
+     * @return {"loggedIn":bool,"token":...,"uid":...,"nickname":...,"avatar":...,"apiBase":...}
+     */
+    @JavascriptInterface
+    public String getAuthInfo() {
+        try {
+            if (activity == null) return "{\"loggedIn\":false,\"error\":\"宿主已销毁\"}";
+            android.content.SharedPreferences sp = activity
+                    .getSharedPreferences(PREFS_AUTH, android.content.Context.MODE_PRIVATE);
+            String token = sp.getString(K_TOKEN, "");
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("loggedIn", token != null && !token.trim().isEmpty());
+            o.put("token", token == null ? "" : token);
+            o.put("uid", sp.getString(K_UID, ""));
+            o.put("nickname", sp.getString(K_NICK, ""));
+            o.put("avatar", sp.getString(K_AVATAR, ""));
+            o.put("apiBase", ONLINE_API_BASE);
+            return o.toString();
+        } catch (Throwable t) {
+            Log.w(TAG, "getAuthInfo 失败", t);
+            return "{\"loggedIn\":false}";
+        }
+    }
+
     /* ==================== 主题展台陈列槽位（M4） ==================== */
     /*
      * 4 座主题展台的"玩家自定义陈列"，存 SharedPreferences。

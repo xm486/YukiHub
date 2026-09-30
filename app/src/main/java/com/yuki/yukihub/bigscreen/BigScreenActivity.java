@@ -217,6 +217,7 @@ public class BigScreenActivity extends AppCompatActivity
     private TrailerPlayer trailerPlayer;
     private TextureView bgVideo;
     private ActivityResultLauncher<String> trailerPickerLauncher;
+    private ActivityResultLauncher<String[]> trailerDocumentLauncher;
     /** 自定义标题图 / 背景图（M10） */
     private BigScreenArt artManager;
     private ActivityResultLauncher<String> artPickerLauncher;
@@ -723,6 +724,12 @@ public class BigScreenActivity extends AppCompatActivity
                     pendingTrailerGame = null;
                 });
         // 自定义标题图 / 背景图选择器（M10）
+        // OpenDocument 明确走系统文件选择器；选完立即复制，无需长期 URI 授权。
+        trailerDocumentLauncher = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri != null) { onTrailerPicked(uri); }
+                    pendingTrailerGame = null;
+                });
         artManager = new BigScreenArt(this);
         artPickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.GetContent(), uri -> {
@@ -739,16 +746,46 @@ public class BigScreenActivity extends AppCompatActivity
         try {
             trailerPickerLauncher.launch("video/*");
         } catch (Throwable t) {
+            pendingTrailerGame = null;
             toast("无法打开文件选择器：" + t.getMessage());
         }
     }
 
-    /** PV 来源选择（M11）：本地视频 / 网络直链 */
+    /** 按目录浏览，不受系统相册的时间线/相册限制。SD 卡走 SAF 文件选择兜底。 */
+    private void requestTrailerFolderPick(final Game game) {
+        if (game == null) { return; }
+        new com.yuki.yukihub.ui.filechooser.FileChooserDialog(this)
+                .setMode(com.yuki.yukihub.ui.filechooser.FileChooserDialog.Mode.FILE)
+                .setTitle("从文件夹选择 PV 视频")
+                .setExtFilter(".mp4", ".m4v", ".mkv", ".avi", ".mov", ".webm", ".3gp", ".ts", ".mpeg", ".mpg")
+                .setOnFileSelectedListener(new com.yuki.yukihub.ui.filechooser.FileChooserDialog.OnFileSelectedListener() {
+                    @Override public void onFileSelected(Uri uri, String path, String fileName) {
+                        if (uri == null) { return; }
+                        pendingTrailerGame = game;
+                        onTrailerPicked(uri);
+                        pendingTrailerGame = null;
+                    }
+                    @Override public void onDirectorySelected(Uri uri, String path) { }
+                })
+                .setOnSafRequestListener(() -> {
+                    pendingTrailerGame = game;
+                    try { trailerDocumentLauncher.launch(new String[]{"video/*"}); }
+                    catch (Exception e) {
+                        pendingTrailerGame = null;
+                        toast("无法打开系统文件选择器：" + e.getMessage());
+                    }
+                })
+                .show();
+    }
+
+    /** PV 来源选择：相册 / 按文件夹浏览 / 网络直链 */
     private void openTrailerSourceMenu(Game game) {
         if (game == null) { return; }
         List<BigScreenPanel.Item> items = new ArrayList<>();
-        items.add(new BigScreenPanel.Item("本地视频文件", "从文件里挑一个", R.drawable.bs_ic_play,
+        items.add(new BigScreenPanel.Item("从相册选择", "系统相册 / 媒体选择器", R.drawable.bs_ic_play,
                 () -> { panel.hide(); requestTrailerPick(game); }));
+        items.add(new BigScreenPanel.Item("从文件夹选择", "按目录和文件名查找视频", R.drawable.bs_ic_chip,
+                () -> { panel.hide(); requestTrailerFolderPick(game); }));
         items.add(new BigScreenPanel.Item("视频链接（URL）", "http(s) 直链",
                 R.drawable.bs_ic_chip, () -> { panel.hide(); promptTrailerUrl(game); }));
         if (!TextUtils.isEmpty(game.trailerPath)) {
@@ -2323,13 +2360,10 @@ List<Shelf> defs = new ArrayList<>();
                     () -> { panel.hide(); removeTrailer(game); }));
         }
         items.add(BigScreenPanel.Item.sep());
-        items.add(new BigScreenPanel.Item(game.hidden ? "取消隐藏" : "在库中隐藏", null, 0, () -> {
-            panel.hide();
-            game.hidden = !game.hidden;
-            try { repository.update(game); } catch (Throwable ignored) { }
-            buildRailEntries();
-            buildShelves();
-            toast(game.hidden ? "已隐藏 · " + game.title : "已取消隐藏");
+        items.add(new BigScreenPanel.Item(game.hidden ? "取消隐藏" : "在库中隐藏",
+                "可在主菜单 → 隐藏游戏管理恢复", 0, () -> {
+            if (game.hidden) { changeGameHidden(game, false); }
+            else { confirmHideGame(game); }
         }));
         items.add(new BigScreenPanel.Item("编辑信息", "触摸模式", 0,
                 () -> { panel.hide(); jumpToTouchMode("编辑信息 → 跳转触摸模式"); }));
@@ -2340,12 +2374,67 @@ List<Shelf> defs = new ArrayList<>();
         panel.show("游戏操作 · " + game.title, items);
     }
 
+    /** 用同一菜单面板做二次确认，触摸与手柄都可操作，取消放在首项。 */
+    private void confirmHideGame(final Game game) {
+        List<BigScreenPanel.Item> items = new ArrayList<>();
+        items.add(new BigScreenPanel.Item("取消，不隐藏", null, 0, () -> openGameMenu(game)));
+        items.add(new BigScreenPanel.Item("确认隐藏这款游戏", "不删除游戏；主菜单 → 隐藏游戏管理可恢复", 
+                R.drawable.bs_ic_check, () -> {
+            if (changeGameHidden(game, true)) { panel.hide(); }
+        }));
+        panel.show("隐藏游戏？· " + game.title, items);
+    }
+
+    private boolean changeGameHidden(Game game, boolean hidden) {
+        try {
+            if (repository.setHidden(game.id, hidden) != 1) {
+                toast("操作失败：未找到游戏记录");
+                return false;
+            }
+        } catch (Exception e) {
+            toast("保存隐藏状态失败，请重试");
+            return false;
+        }
+        game.hidden = hidden;
+        // 恢复时重新读取数据库，否则原 allGames 根本不包含隐藏项。
+        // 不调用 loadGames()，避免记忆筛选把用户当前的分类覆盖掉。
+        try {
+            List<Game> visible = repository.getAll();
+            allGames.clear();
+            allGames.addAll(visible);
+        } catch (Exception e) {
+            toast("隐藏状态已保存，但刷新失败；请重新进入大屏模式");
+            return true;
+        }
+        buildRailEntries();
+        buildShelves();
+        toast(hidden ? "已隐藏；主菜单 → 隐藏游戏管理可恢复" : "已恢复 · " + game.title + "（全部游戏中可查看）");
+        return true;
+    }
+
+    private void openHiddenGames() {
+        final List<Game> hidden;
+        try { hidden = repository.getHiddenGames(); }
+        catch (Exception e) { toast("读取隐藏游戏失败，请重试"); return; }
+        List<BigScreenPanel.Item> items = new ArrayList<>();
+        items.add(new BigScreenPanel.Item("返回主菜单", null, 0, this::openMainMenu));
+        for (Game game : hidden) {
+            items.add(new BigScreenPanel.Item(TextUtils.isEmpty(game.title) ? "未命名游戏" : game.title,
+                    "点击恢复 · 保留封面、PV与游玩时长", R.drawable.bs_ic_all, () -> {
+                if (changeGameHidden(game, false)) { openHiddenGames(); }
+            }));
+        }
+        panel.show(hidden.isEmpty() ? "隐藏游戏管理 · 没有隐藏游戏" : "隐藏游戏管理 · " + hidden.size() + " 款", items);
+    }
+
     private void openMainMenu() {
         List<BigScreenPanel.Item> items = new ArrayList<>();
         items.add(new BigScreenPanel.Item("设置", null, 0, () -> {
             panel.hide();
             openSettings();
         }));
+        items.add(new BigScreenPanel.Item("隐藏游戏管理", "找回误隐藏的游戏", 0,
+                this::openHiddenGames));
         items.add(new BigScreenPanel.Item("重新扫描游戏库", "触摸模式", 0,
                 () -> { panel.hide(); jumpToTouchMode("重新扫描 → 跳转触摸模式执行"); }));
         items.add(new BigScreenPanel.Item("随机选一款", null, 0, () -> {

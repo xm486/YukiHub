@@ -42,6 +42,26 @@ public class GameRepository {
         return list;
     }
 
+    /** 隐藏游戏独立查询；getAll() 仍只返回可见游戏，避免改变其他页面语义。 */
+    public List<Game> getHiddenGames() {
+        List<Game> list = new ArrayList<>();
+        SQLiteDatabase db = helper.getReadableDatabase();
+        try (Cursor c = db.query("games", null, "hidden=1", null, null, null,
+                "updated_at DESC, id DESC")) {
+            while (c.moveToNext()) { list.add(fromCursor(c)); }
+        }
+        return list;
+    }
+
+    /** 仅更新指定游戏的隐藏标志，不覆盖封面、PV、游玩时长等其他字段。 */
+    public int setHidden(long gameId, boolean hidden) {
+        ContentValues values = new ContentValues();
+        values.put("hidden", hidden ? 1 : 0);
+        values.put("updated_at", System.currentTimeMillis());
+        return helper.getWritableDatabase().update("games", values, "id=?",
+                new String[]{String.valueOf(gameId)});
+    }
+
     public long insert(Game game) {
         SQLiteDatabase db = helper.getWritableDatabase();
         long now = System.currentTimeMillis();

@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Gal工具箱</title>
+  <!-- 引入CSS文件 -->
+  <link rel="stylesheet" href="css/index.css?v=20250930b">
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <style>
+   .friend-link-entry{text-align:center;margin:.4rem 0 1rem}.friend-link-toggle{padding:.35rem .9rem;border:1px solid #d8d2ff;border-radius:999px;background:#fff;color:#6c5ce7;font-size:.85rem;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08)}.friend-link-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:10001;padding:1rem}.friend-link-modal.active{display:flex!important}.friend-link-dialog{position:relative;width:min(86vw,320px);background:#fff;border-radius:14px;padding:1rem;box-shadow:0 8px 28px rgba(0,0,0,.22)}.friend-link-close{position:absolute;top:.45rem;right:.6rem;border:none;background:transparent;font-size:1.4rem;line-height:1;color:#999;cursor:pointer}.friend-link-modal-title{font-size:1rem;font-weight:600;color:#2d3436;margin-bottom:.8rem;padding-right:1.5rem}.friend-link-item{display:flex;align-items:center;gap:.6rem;padding:.65rem;border-radius:10px;color:#333;text-decoration:none;transition:background .2s ease}.friend-link-item:hover{background:#f4f1ff}.friend-link-icon{width:28px;height:28px;border-radius:7px;object-fit:cover;flex-shrink:0;border:1px solid #e0e0e0;background:#fff}
+  </style>
+  </head>
+ <body>
+ <!-- Default Statcounter code for index web https://xm486.github.io/ -->
+<script type="text/javascript">
+var sc_project=13206107; 
+var sc_invisible=1; 
+var sc_security="ac6d25b6"; 
+</script>
+<script type="text/javascript"
+src="https://www.statcounter.com/counter/counter.js" async></script>
+<noscript><div class="statcounter"><a title="web statistics"
+href="https://statcounter.com/" target="_blank"><img loading="lazy" class="statcounter"
+src="https://c.statcounter.com/13206107/0/ac6d25b6/1/" alt="web statistics"
+referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
+<!-- End of Statcounter Code -->
+  <!--雪花特效-->
+  <div id="snow-container"></div>
+  <!-- 顶部导航栏 -->
+  <div class="top-nav" style="overflow: hidden;">
+   <img loading="lazy" src="favicon.ico" alt="图片描述" style="width: 20%;">Gal工具箱
+  </div>
+  <!-- 顶部按钮-->
+  <div class="top-search">
+   <form action="https://sg.saop.cc/">
+	<b>
+	 <p align="center">Galgame聚合搜索</p>
+	</b>
+	<button type="submit" class="btn" style="padding: 0.5rem 1rem;">点击进入</button>
+   </form>
+  </div>
+  
+  <!-- ai聊天页-->
+  <div class="top-search ai-chat-panel" style="text-align: center;border-radius: 0;padding: 10px;">
+   <!-- 背景动图：原 690KB GIF，现为 58KB VP9 视频（不支持时由 js/index.js 回退到 GIF） -->
+   <video class="ai-chat-panel-bg" autoplay loop muted playsinline aria-hidden="true">
+	<source src="image/ttk.webm" type="video/webm">
+   </video>
+  <img loading="lazy" src="https://img1.baidu.com/it/u=387114539,619131152&fm=253&fmt=auto&app=120&f=JPEG?w=667&h=500" alt="图片描述" style="width: 65px;height:60px;border-radius:50%;border: 1px solid blue;">
+   <form action="ai_chat.html">
+	<button type="submit" class="btn" style="padding: 0.5rem 1rem;width: 50%;background-color: rgba(255, 155, 200, 0.7)">AI妃爱♡在线激聊</button>
+   </form>
+  </div>
+  <!-- 封面放大遮罩层 -->
+  <div class="cover-modal" id="coverModal">
+   <button class="close-modal" onclick="closeModal()">×</button>
+   <img loading="lazy" src="" alt="放大的游戏封面" class="modal-content" id="modalImage">
+  </div>
+  <!-- 主内容容器 -->
+  <div class="container">
+   <!-- vndb查询板块 -->
+   <div class="section">
+ 	<div class="section-title">vndb游戏查询<button type="button" onclick="window.location.href='pan.html'" style="font-size: 14px;margin-left: 35px;margin-bottom:8px;border-radius: 5px;background:#CBA0E7;">网盘链接转换/解密加密</button></div>
+	<div class="vndb-tool">
+	 <!-- 输入区域 -->
+	 <div class="input-area">
+	  <input type="text" id="gameInput" placeholder="输入游戏名称，查询vndb数据库...">
+	  <button id="searchBtn" class="btn" onclick="searchGame()">查询</button>
+	  <button class="btn reset-btn" onclick="resetAll()">重置</button>
+	 </div>
+	 <!-- 查询结果区域 -->
+	 <div class="result-area" id="searchResultArea">输入游戏名称，点击查询获取vndb数据库结果～</div>
+	 <!-- 详情展示区域 -->
+	 <div class="detail-area" id="detailArea">
+	  <div class="detail-header">
+	   <!-- 封面加载状态 -->
+	   <div class="loading-wrapper" id="coverLoading">
+		<span class="spin-loading"></span> <span>加载封面中...</span>
+	   </div>
+	   <img loading="lazy" src="" alt="游戏封面" class="game-cover" id="gameCover" style="display: none;" onclick="openModal(this.src)">
+	   <div class="detail-title" id="detailTitle"></div>
+	   <div class="detail-original" id="detailOriginal"></div>
+	  </div>
+	  <div class="detail-grid">
+	  <div class="detail-item">
+  <div class="detail-label">游戏评分</div>
+  <div class="detail-value" id="detailRating">
+	<div class="loading-wrapper"><span class="spin-loading"></span></div>
+  </div>
+</div>
+	   <div class="detail-item">
+		<div class="detail-label">游玩时长</div>
+		<div class="detail-value" id="detailLength">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	   <!-- 新增：游戏标签区域 -->
+	   <div class="detail-item">
+		<div class="detail-label">游戏标签</div>
+		<div class="detail-value" id="detailTags">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	   <div class="detail-item">
+		<div class="detail-label">发售日期</div>
+		<div class="detail-value" id="detailReleased">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	   <div class="detail-item">
+		<div class="detail-label">支持语言</div>
+		<div class="detail-value" id="detailLanguages">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	   <div class="detail-item">
+		<div class="detail-label">支持平台</div>
+		<div class="detail-value" id="detailPlatforms">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	   <div class="detail-item">
+		<div class="detail-label">开发商</div>
+		<div class="detail-value" id="detailDevelopers">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	   <div class="detail-item">
+		<div class="detail-label">游戏ID</div>
+		<div class="detail-value" id="detailId">
+		 <div class="loading-wrapper">
+		  <span class="spin-loading"></span>
+		 </div>
+		</div>
+	   </div>
+	  </div>
+	  <!-- 游戏简介 -->
+	  <div class="detail-item">
+	   <div class="detail-label">游戏简介</div>
+	   <div class="detail-value" id="descriptionContainer" style="min-height: auto; line-height: 1.5;">
+		<div class="loading-wrapper" style="justify-content: flex-start; padding: 0.5rem 0;">
+		 <span class="spin-loading"></span> <span>加载简介中...</span>
+		</div>
+		<div id="detailDescription" style="display: none;"></div>
+	   </div>
+	  </div>
+	  <div class="search-time" id="detailSearchTime"></div>
+	 </div>
+	</div>
+   </div>
+   <!-- 链接分享板块 -->
+   <div class="section">
+	<div class="section-title">实用gal链接</div>
+	<div class="links-grid">
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;border: 1px solid #6699ff;">
+	   <img loading="lazy" src="image/zy1.webp" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">gal资源站</div>
+	  <div class="link-desc">提供galgame游戏资源、补丁的综合站点</div>
+	  <a href="gal_zy.html" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;border: 1px solid #6699ff;">
+	   <img loading="lazy" src="image/zy2.webp" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">gal资料/攻略/论坛库</div>
+	  <div class="link-desc">收录海量galgame的资料、论坛、全流程攻略、CG收集指南</div>
+	  <a href="gal_zl.html" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;border: 1px solid #6699ff;">
+	   <img loading="lazy" src="image/zy3.webp" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">Gal正版渠道</div>
+	  <div class="link-desc">Galgame正版入正渠道</div>
+	  <a href="gal_zb.html" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;border: 1px solid #6699ff;">
+	   <img loading="lazy" src="image/zy4.webp" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">实用工具站</div>
+	  <div class="link-desc">一些gal实用小工具(雾)</div>
+	  <a href="gal_tools.html" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	</div>
+   </div>
+   <!-- 链接分享板块 -->
+   <div class="section">
+	<div class="section-title">一些Gal教学</div>
+	<div class="links-grid">
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;">
+	   <img loading="lazy" src="https://ecmb.bdimg.com/tam-ogel/628247478_446721719_192_192.png" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">【Gal萌新小白入门课】从零开始的Galgame 之旅</div>
+	  <div class="link-desc">
+	   <span style="color: pink; font-weight: bold;font-size:15px;text-shadow: 1px 1px 0 black,-1px -1px 0 black,1px -1px 0 black,-1px 1px 0 black;   ">-适用于PC/安卓-</span>
+	   <br>
+	   站长做的一个萌新向入门指南，欢迎观看喵
+	  </div>
+	  <a href="https://b23.tv/wuJZxkc" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;">
+	   <img loading="lazy" src="https://ecmb.bdimg.com/tam-ogel/628247478_446721719_192_192.png" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">【盖世游戏模拟器教程(专注于Gal版)/在手机上畅玩Galgame】</div>
+	  <div class="link-desc">
+	   <span style="color: pink; font-weight: bold;font-size:15px;text-shadow: 1px 1px 0 black,-1px -1px 0 black,1px -1px 0 black,-1px 1px 0 black;   ">-适用于安卓-</span>
+	   <br>
+	   能用手机游玩非kr，ar引擎的PC Gal的模拟器教程
+	  </div>
+	  <a href="https://b23.tv/L55kOOq" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;">
+	   <img loading="lazy" src="https://ecmb.bdimg.com/tam-ogel/628247478_446721719_192_192.png" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">【萌萌萌新向】连时间大人都能学会的解压教学</div>
+	  <div class="link-desc">
+	   <span style="color: pink; font-weight: bold;font-size:15px;text-shadow: 1px 1px 0 black,-1px -1px 0 black,1px -1px 0 black,-1px 1px 0 black;   ">-适用于任何设备-</span>
+	   <br>
+	   站内一个很好的解压教学视频，不会解压的推荐学习
+	  </div>
+	  <a href="https://b23.tv/WwNsqmM" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	 <div class="link-card">
+	  <div class="link-icon" style="overflow: hidden;">
+	   <img loading="lazy" src="https://ecmb.bdimg.com/tam-ogel/628247478_446721719_192_192.png" alt="图片描述" style="width: 100%;">
+	  </div>
+	  <div class="link-title">【Gal小课堂】07分21秒教会你如何购买Galgame</div>
+	  <div class="link-desc">
+	   <span style="color: pink; font-weight: bold;font-size:15px;text-shadow: 1px 1px 0 black,-1px -1px 0 black,1px -1px 0 black,-1px 1px 0 black;   ">-适用于任何设备-</span>
+	   <br>
+	   还在为不会买日本正版旮旯而发愁吗？ 让Tama和Mako7分21秒教会你！
+	  </div>
+	  <a href="https://b23.tv/wyvA2b4" target="_blank" class="link-btn">访问站点</a>
+	 </div>
+	</div>
+   </div>
+
+   <!-- 友情链接入口 -->
+   <div class="friend-link-entry" style="text-align:center;margin:.4rem 0 1rem;">
+	<button type="button" class="friend-link-toggle" onclick="openFriendLinks()" style="padding:.35rem .9rem;border:1px solid #d8d2ff;border-radius:999px;background:#fff;color:#6c5ce7;font-size:.85rem;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08);">友情链接</button>
+   </div>
+
+   <!-- 友情链接弹窗 -->
+   <div class="friend-link-modal" id="friendLinkModal" onclick="closeFriendLinks(event)" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:10001;padding:1rem;">
+	<div class="friend-link-dialog" style="position:relative;width:min(86vw,320px);background:#fff;border-radius:14px;padding:1rem;box-shadow:0 8px 28px rgba(0,0,0,.22);">
+	 <button type="button" class="friend-link-close" onclick="closeFriendLinks()" style="position:absolute;top:.45rem;right:.6rem;border:none;background:transparent;font-size:1.4rem;line-height:1;color:#999;cursor:pointer;">×</button>
+	 <div class="friend-link-modal-title" style="font-size:1rem;font-weight:600;color:#2d3436;margin-bottom:.8rem;padding-right:1.5rem;">友情链接</div>
+	 <a href="https://xm486.kesug.com/" target="_blank" class="friend-link-item" style="display:flex;align-items:center;gap:.6rem;padding:.65rem;border-radius:10px;color:#333;text-decoration:none;">
+ <img loading="lazy" class="friend-link-icon" src="https://xm486.kesug.com/image/favicon.ico" alt="次元音乐favicon" style="width:28px;height:28px;border-radius:7px;object-fit:cover;flex-shrink:0;border:1px solid #e0e0e0;background:#fff;">
+ <span>次元音乐</span>
+</a>
+
+<a href="https://xm486.github.io/music.html" target="_blank" class="friend-link-item" style="display:flex;align-items:center;gap:.6rem;padding:.65rem;border-radius:10px;color:#333;text-decoration:none;">
+ <img loading="lazy" class="friend-link-icon" src="https://xm486.github.io/favicon.ico" alt="次元音乐favicon" style="width:28px;height:28px;border-radius:7px;object-fit:cover;flex-shrink:0;border:1px solid #e0e0e0;background:#fff;">
+ <span>次元音乐备用网址</span>
+</a>
+
+<a href="https://yukihub.zh.kg/" target="_blank" class="friend-link-item" style="display:flex;align-items:center;gap:.6rem;padding:.65rem;border-radius:10px;color:#333;text-decoration:none;">
+ <img loading="lazy" class="friend-link-icon" src="https://yukihub.kesug.com/assets/images/yukihub-icon.png" alt="yukihub_favicon" style="width:28px;height:28px;border-radius:7px;object-fit:cover;flex-shrink:0;border:1px solid #e0e0e0;background:#fff;">
+ <span>YukiHub</span>
+</a>
+
+	</div>
+   </div>
+  
+  <!--评论区-->
+  <div class="msg-board-wrapper">
+  <h2 class="msg-board-title"><span>留言板</span></h2>
+  </div>
+  <p style="text-align: center;font-size: 12px;">(安卓客户端无法加载留言板请移动至<a href="https://xm486.github.io/?">网页端</a>)</p>
+  <p style="text-align: center;font-size: 12px;color:purple;">可能需要魔法</p>
+  <br>
+  <div style="text-align: center; background:white;width: 95%;border-radius:5%;margin: 0 auto;box-shadow: 0px 2px 4px rgba(0,0,0,0.1);">
+  <p> </p>
+  <div style="width: 92%;margin: 0 auto;">
+  <script src="https://giscus.app/client.js"
+		data-repo="xm486/gal_chat"
+		data-repo-id="R_kgDOQ1wu_w"
+		data-category="Announcements"
+		data-category-id="DIC_kwDOQ1wu_84C0tIQ"
+		data-mapping="pathname"
+		data-strict="0"
+		data-reactions-enabled="1"
+		data-emit-metadata="0"
+		data-input-position="top"
+		data-theme="light"
+		data-lang="zh-CN"
+		data-loading="lazy"
+		crossorigin="anonymous"
+		async>
+</script>
+</div>
+</div>
+  <!-- 底部说明 -->
+  <div class="footer">galgame工具箱 © 2025 | 数据来源于vndb数据库<br>
+  <a href="https://xm486.github.io/?">网页端</a><br>
+  Gal交流群:1群:<a href="https://qm.qq.com/q/sEx22BQoa4">788146169</a> 2群:<a href="https://qm.qq.com/q/2VLXC8fE1W">964771256</a><br>
+  </div>
+  <!-- 伸缩式文字播放器 -->
+  <div class="player-container" id="playerContainer">
+   <div class="player-icon" id="playerIcon">🎵▶️</div>
+   <!-- 展开后显示的文字 -->
+   <div class="player-text" id="playerText">▶️正在播放音乐:二人のクロニクル</div>
+   <audio id="floatPlayer" preload="none" loop>
+	<source src="music/m1.mp3" type="audio/mpeg"> 您的浏览器不支持音频播放
+   </audio>
+  </div>
+  <!-- 引入JS文件 -->
+   <script>
+	function openFriendLinks() {
+	 document.getElementById('friendLinkModal').style.display = 'flex';
+	}
+
+	function closeFriendLinks(event) {
+	 if (!event || event.target.id === 'friendLinkModal') {
+	  document.getElementById('friendLinkModal').style.display = 'none';
+	 }
+	}
+	document.addEventListener('keydown', function(e){
+	 if(e.key === 'Escape') closeFriendLinks();
+	});
+   </script>
+   <script src="js/index.js?v=20250930b"></script>
+ </body>
+</html>

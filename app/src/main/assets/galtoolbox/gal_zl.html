@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Gal工具箱–Gal资料/攻略/论坛库</title>
+	<style>
+		/* CSS变量系统 - 主题色定义 */
+		:root {
+			--bg-primary: #0f0c29;
+			--bg-secondary: #302b63;
+			--bg-tertiary: #24243e;
+			--card-bg: rgba(30, 30, 60, 0.25);
+			--card-border: rgba(100, 150, 255, 0.15);
+			--card-shadow: rgba(0, 0, 0, 0.3);
+			--text-primary: #ffffff;
+			--text-secondary: #c0c0ff;
+			--text-tertiary: #b0b0ff;
+			--accent-primary: #6a82fb;
+			--accent-secondary: #8e6afe;
+			--tag-bg: rgba(100, 100, 200, 0.15);
+			--tag-border: rgba(150, 150, 255, 0.1);
+			--header-glow: rgba(100, 150, 255, 0.7);
+			--particle-color: rgba(100, 150, 255, 0.8);
+		}
+
+		[data-theme="light"] {
+			--bg-primary: #f5f7fa;
+			--bg-secondary: #e4e7f4;
+			--bg-tertiary: #d8dcf0;
+			--card-bg: rgba(255, 255, 255, 0.7);
+			--card-border: rgba(100, 120, 200, 0.15);
+			--card-shadow: rgba(0, 0, 0, 0.1);
+			--text-primary: #2c3e50;
+			--text-secondary: #4a5a7a;
+			--text-tertiary: #6a7a9a;
+			--accent-primary: #5a7afb;
+			--accent-secondary: #7a5afb;
+			--tag-bg: rgba(100, 120, 200, 0.1);
+			--tag-border: rgba(120, 140, 220, 0.2);
+			--header-glow: rgba(90, 120, 250, 0.5);
+			--particle-color: rgba(90, 120, 250, 0.6);
+		}
+
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+
+		body {
+			font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+			background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-tertiary) 100%);
+			min-height: 100vh;
+			padding: 20px;
+			position: relative;
+			overflow-x: hidden;
+			color: var(--text-primary);
+			transition: background 0.5s ease, color 0.3s ease;
+		}
+
+		body::before {
+			content: '';
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background: 
+				radial-gradient(circle at 10% 20%, var(--particle-color) 0%, transparent 20%),
+				radial-gradient(circle at 90% 80%, var(--particle-color) 0%, transparent 20%),
+				repeating-linear-gradient(45deg, rgba(0,0,0,0.05) 0px, rgba(0,0,0,0.05) 1px, transparent 1px, transparent 10px);
+			z-index: -1;
+			animation: float 20s infinite linear;
+		}
+
+		@keyframes float {
+			0% { transform: translate(0, 0); }
+			25% { transform: translate(-5px, -5px); }
+			50% { transform: translate(-10px, 0); }
+			75% { transform: translate(-5px, 5px); }
+			100% { transform: translate(0, 0); }
+		}
+
+		/* 主题切换按钮 */
+		.theme-toggle {
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			width: 50px;
+			height: 50px;
+			border-radius: 50%;
+			background: var(--card-bg);
+			backdrop-filter: blur(10px);
+			border: 1px solid var(--card-border);
+			box-shadow: 0 4px 20px var(--card-shadow);
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 1.5em;
+			z-index: 1000;
+			transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+		}
+
+		.theme-toggle:hover {
+			transform: scale(1.1) rotate(15deg);
+			box-shadow: 0 6px 25px var(--card-shadow);
+			border: 1px solid var(--accent-primary);
+		}
+
+		/* 返回顶部按钮 */
+		.back-to-top {
+			position: fixed;
+			bottom: 30px;
+			right: 30px;
+			width: 55px;
+			height: 55px;
+			border-radius: 50%;
+			background: var(--card-bg);
+			backdrop-filter: blur(10px);
+			border: 1px solid var(--card-border);
+			box-shadow: 0 4px 20px var(--card-shadow);
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 1.8em;
+			z-index: 1000;
+			transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+			opacity: 0;
+			visibility: hidden;
+			transform: translateY(20px);
+			color: var(--text-primary);
+		}
+
+		.back-to-top.visible {
+			opacity: 1;
+			visibility: visible;
+			transform: translateY(0);
+		}
+
+		.back-to-top:hover {
+			transform: translateY(-5px) scale(1.1);
+			box-shadow: 0 8px 25px var(--accent-primary);
+			border: 1px solid var(--accent-primary);
+			background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary));
+			color: white;
+		}
+
+		/* 头部样式 */
+		.header {
+			text-align: center;
+			margin-bottom: 30px;
+			position: relative;
+			z-index: 1;
+			padding: 20px;
+		}
+
+		.header h1 {
+			font-size: 2.5em;
+			margin-bottom: 10px;
+			text-shadow: 0 0 15px var(--header-glow);
+			color: var(--text-primary);
+			letter-spacing: 1px;
+			position: relative;
+			display: inline-block;
+			font-weight: 700;
+			transition: color 0.3s ease;
+		}
+
+		.header h1::after {
+			content: '';
+			position: absolute;
+			bottom: -10px;
+			left: 50%;
+			transform: translateX(-50%);
+			width: 80px;
+			height: 4px;
+			background: linear-gradient(90deg, transparent, var(--accent-primary), var(--accent-secondary), transparent);
+			border-radius: 2px;
+			animation: glow 2s infinite alternate;
+		}
+
+		@keyframes glow {
+			0% { opacity: 0.5; }
+			100% { opacity: 1; }
+		}
+
+		/* 搜索栏样式 */
+		.search-container {
+			max-width: 550px;
+			margin: 0 auto 25px;
+			position: relative;
+			z-index: 1;
+		}
+
+		.search-box {
+			width: 100%;
+			padding: 12px 20px;
+			font-size: 15px;
+			border: none;
+			border-radius: 25px;
+			background: var(--card-bg);
+			backdrop-filter: blur(12px);
+			box-shadow: 0 8px 32px var(--card-shadow);
+			transition: all 0.4s ease;
+			color: var(--text-primary);
+			border: 1px solid var(--card-border);
+		}
+
+		.search-box:focus {
+			outline: none;
+			background: var(--card-bg);
+			box-shadow: 0 0 20px var(--header-glow);
+			border: 1px solid var(--accent-primary);
+		}
+
+		.search-box::placeholder {
+			color: var(--text-secondary);
+			opacity: 0.7;
+		}
+
+		/* 卡片容器 */
+		.cards-container {
+			display: flex;
+			flex-direction: column;
+			gap: 15px;
+			max-width: 800px;
+			margin: 0 auto;
+			position: relative;
+			z-index: 1;
+			padding: 0 20px;
+		}
+
+		/* 横版卡片样式 - 移除动画效果 */
+		.card {
+			background: var(--card-bg);
+			backdrop-filter: blur(12px);
+			border-radius: 12px;
+			overflow: hidden;
+			border: 1px solid var(--card-border);
+			box-shadow: 0 8px 32px var(--card-shadow);
+			transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+			cursor: pointer;
+			position: relative;
+		}
+
+		.card:hover {
+			transform: translateY(-3px);
+			box-shadow: 0 12px 40px var(--card-shadow);
+			border: 1px solid var(--accent-primary);
+		}
+
+		/* 卡片内部布局 */
+		.card-inner {
+			display: flex;
+			align-items: center;
+			padding: 15px;
+			gap: 15px;
+		}
+
+		/* 圆形头像 */
+		.card-avatar {
+			width: 60px;
+			height: 60px;
+			border-radius: 50%;
+			flex-shrink: 0;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 1.8em;
+			background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+			color: var(--text-primary);
+			box-shadow: 0 0 15px var(--header-glow);
+			transition: all 0.4s ease;
+			position: relative;
+			overflow: hidden;
+		}
+
+		@keyframes shimmer {
+			0% { transform: translateX(-100%); }
+			100% { transform: translateX(100%); }
+		}
+
+		/* 卡片内容区 */
+		.card-content {
+			flex: 1;
+			min-width: 0;
+		}
+
+		.card-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 6px;
+		}
+
+		.card-title {
+			font-size: 1.1em;
+			font-weight: 600;
+			color: var(--text-primary);
+			letter-spacing: 0.3px;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+		}
+
+		.card-title::before {
+			content: '';
+			display: inline-block;
+			width: 5px;
+			height: 5px;
+			background: var(--accent-secondary);
+			border-radius: 50%;
+			box-shadow: 0 0 6px var(--accent-secondary);
+		}
+
+		.card-site-type {
+			font-size: 0.75em;
+			padding: 3px 8px;
+			background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary));
+			border-radius: 10px;
+			color: white;
+			font-weight: 500;
+			white-space: nowrap;
+			box-shadow: 0 2px 8px var(--card-shadow);
+		}
+
+		.card-description {
+			color: var(--text-secondary);
+			line-height: 1.5;
+			font-size: 0.85em;
+			font-weight: 300;
+			margin-bottom: 8px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			display: -webkit-box;
+			-webkit-line-clamp: 2;
+			-webkit-box-orient: vertical;
+		}
+
+		.card-tags {
+			display: flex;
+			gap: 5px;
+			flex-wrap: wrap;
+		}
+
+		.card-tag {
+			padding: 2px 8px;
+			background: var(--tag-bg);
+			border-radius: 10px;
+			font-size: 0.75em;
+			color: var(--text-tertiary);
+			border: 1px solid var(--tag-border);
+			transition: all 0.3s ease;
+			white-space: nowrap;
+		}
+
+		.card-tag:hover {
+			background: var(--accent-primary);
+			color: white;
+			transform: translateY(-1px);
+			border: 1px solid var(--accent-primary);
+		}
+
+		/* 访问按钮 */
+		.visit-button {
+			padding: 8px 16px;
+			background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary));
+			color: white;
+			border: none;
+			border-radius: 6px;
+			font-size: 0.85em;
+			font-weight: 500;
+			cursor: pointer;
+			transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+			position: relative;
+			overflow: hidden;
+			white-space: nowrap;
+			box-shadow: 0 4px 15px var(--card-shadow);
+			z-index: 1;
+		}
+
+		.visit-button::before {
+			content: '';
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background: linear-gradient(45deg, var(--accent-secondary), var(--accent-primary));
+			opacity: 0;
+			transition: opacity 0.4s ease;
+			z-index: -1;
+		}
+
+		.visit-button:hover {
+			transform: translateY(-2px);
+			box-shadow: 0 8px 20px var(--accent-primary);
+		}
+
+		.visit-button:hover::before {
+			opacity: 1;
+		}
+
+		.visit-button:active {
+			transform: translateY(0);
+			box-shadow: 0 4px 10px var(--card-shadow);
+		}
+
+		/* 加载动画 */
+		.loading {
+			text-align: center;
+			padding: 40px;
+			color: var(--text-secondary);
+			font-size: 1.1em;
+		}
+
+		/* 响应式设计 */
+		@media (max-width: 768px) {
+			.header h1 {
+				font-size: 1.8em;
+			}
+			
+			.card-inner {
+				padding: 12px;
+				gap: 12px;
+			}
+			
+			.card-avatar {
+	width: 60px;
+	height: 60px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	object-fit: cover; /* 确保图片填充圆形区域 */
+	box-shadow: 0 0 15px var(--header-glow);
+	transition: all 0.4s ease;
+	border: 2px solid var(--card-border); /* 可选：添加边框 */
+}
+
+.card:hover .card-avatar {
+	transform: scale(1.1);
+	box-shadow: 0 0 20px var(--accent-primary);
+}
+			
+			.card-title {
+				font-size: 1em;
+			}
+			
+			.card-description {
+				font-size: 0.8em;
+				-webkit-line-clamp: 3;
+			}
+
+			.card-tag {
+				font-size: 0.7em;
+				padding: 1px 6px;
+			}
+
+			.visit-button {
+				padding: 6px 12px;
+				font-size: 0.8em;
+			}
+
+			.card-header {
+				flex-direction: column;
+				align-items: flex-start;
+				gap: 5px;
+			}
+
+			.theme-toggle {
+				width: 45px;
+				height: 45px;
+				font-size: 1.3em;
+			}
+
+			.back-to-top {
+				width: 45px;
+				height: 45px;
+				font-size: 1.5em;
+				bottom: 20px;
+				right: 20px;
+			}
+		}
+
+		/* 滚动条美化 */
+		::-webkit-scrollbar {
+			width: 10px;
+		}
+
+		::-webkit-scrollbar-track {
+			background: var(--bg-primary);
+		}
+
+		::-webkit-scrollbar-thumb {
+			background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary));
+			border-radius: 5px;
+			border: 2px solid var(--bg-primary);
+		}
+
+		::-webkit-scrollbar-thumb:hover {
+			background: linear-gradient(45deg, var(--accent-secondary), var(--accent-primary));
+		}
+
+		/* 粒子背景效果 */
+		.particles {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: -1;
+			pointer-events: none;
+		}
+
+		.particle {
+			position: absolute;
+			border-radius: 50%;
+			background: radial-gradient(circle, var(--particle-color) 0%, transparent 70%);
+			animation: float-particle 15s infinite linear;
+			filter: blur(1px);
+		}
+
+		@keyframes float-particle {
+			0% { transform: translateY(0) translateX(0); opacity: 0; }
+			10% { opacity: 1; }
+			90% { opacity: 1; }
+			100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
+		}
+	</style>
+	<link rel="icon" href="/favicon.ico" type="image/x-icon">
+</head>
+<body>
+<!-- Default Statcounter code for index web https://xm486.github.io/ -->
+<script type="text/javascript">
+var sc_project=13206107; 
+var sc_invisible=1; 
+var sc_security="ac6d25b6"; 
+</script>
+<script type="text/javascript"
+src="https://www.statcounter.com/counter/counter.js" async></script>
+<noscript><div class="statcounter"><a title="web statistics"
+href="https://statcounter.com/" target="_blank"><img loading="lazy" class="statcounter"
+src="https://c.statcounter.com/13206107/0/ac6d25b6/1/" alt="web statistics"
+referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
+<!-- End of Statcounter Code -->
+	<!-- 主题切换按钮 -->
+	<button class="theme-toggle" id="themeToggle" title="切换主题">
+		<span id="themeIcon">☀️</span>
+	</button>
+
+	<!-- 返回顶部按钮 -->
+	<button class="back-to-top" id="backToTop" title="返回顶部">
+		⬆️
+	</button>
+
+	<!-- 粒子背景 -->
+	<div class="particles" id="particles"></div>
+
+	<!-- 头部 -->
+	<header class="header">
+		<h1>Gal资料/攻略/论坛库</h1>
+	</header>
+
+	<!-- 搜索栏 -->
+	<div class="search-container">
+		<input type="text" class="search-box" placeholder="搜索网站名称或标签..." id="searchInput">
+	</div>
+
+	<!-- 卡片容器 -->
+	<div class="cards-container" id="cardsContainer">
+		<!-- 卡片将通过JavaScript动态生成 -->
+	</div>
+
+	<!-- 加载提示 -->
+	<div class="loading" id="loading">正在加载资源...</div>
+
+	<script>
+		// 网站数据
+		const websiteData = [
+			{
+				id: 1,
+				name: "CnGal 中文GalGame资料站",
+				url: "https://www.cngal.org/",
+				description: "CnGal是一个非营利性的，立志于收集整理国内制作组创作及中文化的中文Galgame/AVG的介绍、攻略、评测、感想等内容的资料性质的网站。 此外，CnGal官方还会与圈内中文AVG制作组进行友好合作，如免费提供Banner广告位，网站服务器资源等。",
+				category: "forum",
+				categoryName: "资料站",
+				tags: ["资料", "中文"],
+				icon: "https://www.cngal.org/favicon.ico"
+			},
+			{
+				id: 2,
+				name: "VNDB",
+				url: "https://vndb.org",
+				description: "全球最大的视觉小说数据库，收录详细的游戏信息、角色介绍、用户评价等。",
+				category: "wiki",
+				categoryName: "资料站",
+				tags: ["资料", "英语"],
+				icon: "https://vndb.org/favicon.ico"
+			},
+			{
+				id: 3,
+				name: "2DFan",
+				url: "https://2dfmax.top/",
+				description: "专注于galgame的资料站，提供游戏介绍、CG预览、攻略指南等。",
+				category: "wiki",
+				categoryName: "资料站",
+				tags: ["资料", "补丁"],
+				icon: "https://2dfmax.top/favicon.ico"
+			},
+			{
+				id: 4,
+				name: "萌娘百科",
+				url: "https://mzh.moegirl.org.cn/",
+				description: "中文ACG百科，包含大量galgame角色、作品详细介绍。",
+				category: "wiki",
+				categoryName: "百科站",
+				tags: ["百科","资料"],
+				icon: "https://ts3.tc.mm.bing.net/th/id/ODF.FoV_OUnv3jxRDjDPa-sDTQ?w=32&h=32&qlt=91&pcl=fffffa&o=6&pid=1.2"
+			},
+			{
+				id: 5,
+				name: "Gal图书馆",
+				url: "https://gallibrary.pw/",
+				description: "图书馆旨在搭建一个以爱与和平与自由为梦想的世界。",
+				category: "forum",
+				categoryName: "资料站",
+				tags: ["图书馆","资料"],
+				icon: "https://ts1.tc.mm.bing.net/th/id/ODF.MifywHdQcZvRIQVXDvU2_w?w=32&h=32&qlt=90&pcl=fffffa&o=6&pid=1.2"
+			},
+			{
+				id: 6,
+				name: "Hikarinagi",
+				url: "https://www.hikarinagi.org/",
+				description: "一个ACGN文化社区",
+				category: "guide",
+				categoryName: "论坛站",
+				tags: ["论坛", "交流",],
+				icon: "https://www.hikarinagi.org/favicon.ico"
+			},
+			{
+				id: 7,
+				name: "月幕 galgame",
+				url: "https://www.ymgal.games/",
+				description: "YM Galgame, 月幕 Galgame -最戳你XP的美少女游戏综合交流平台 | 来感受这绝妙的艺术体裁",
+				category: "news",
+				categoryName: "综合站",
+				tags: ["论坛","咨询" ],
+				icon: "https://www.ymgal.games/favicon.ico"
+			},
+			{
+				id: 8,
+				name: "Bangumi 番组计划",
+				url: "https://bgm.tv/",
+				description: "专注于动漫、音乐、游戏领域，帮助你分享、发现与结识同好的ACG网络。里面除了动漫、轻小说之外，还有大量的 Galgame 相关的评分与介绍，部分 Galgame 条目需要注册之后有一定的等级才可以查看。",
+				category: "news",
+				categoryName: "评分站",
+				tags: ["评分","记录"],
+				icon: "https://bgm.tv/img/favicon.ico"
+			},
+			{
+				id: 9,
+				name: "批评空间",
+				url: "https://erogamescape.dyndns.org",
+				description: "日本一个知名的评分网站",
+				category: "news",
+				categoryName: "评分站",
+				tags: ["评分", "日语"],
+				icon: "https://erogamescape.dyndns.org/favicon.ico"
+			},
+			{
+				id: 10,
+				name: "悠久Galgame",
+				url: "https://www.yjgalgame.com/",
+				description: "专业的Gal攻略网站",
+				category: "cg",
+				categoryName: "攻略站",
+				tags: ["攻略", "中文"],
+				icon: "https://www.yjgalgame.com/favicon.ico"
+			},
+			{
+				id: 11,
+				name: "Relko-Gal攻略站",
+				url: "https://galgame.reiko.my/",
+				description: "Galgame攻略 - 提供纯粹的中文攻略",
+				category: "guide",
+				categoryName: "攻略站",
+				tags: ["攻略","可能需要🔮"],
+				icon: "https://ts1.tc.mm.bing.net/th/id/ODF.cCVc_O0ouPassyXTBj_Cqw?w=32&h=32&qlt=96&pcl=fffffa&o=6&pid=1.2"
+			},
+			{
+				id: 12,
+				name: "鸟白岛演绎厅",
+				url: "https://www.summerpockets.com/",
+				description: "鸟白岛演绎厅-音乐爱好者的社区",
+				category: "music",
+				categoryName: "音乐站",
+				tags: ["音乐","论坛"],
+				icon: "https://www.summerpockets.com/wp-content/uploads/2022/12/cropped-d4390e1a-56a2-4758-8038-c919851fff84-192x192.png"
+			},
+			{
+				id: 13,
+				name: "YukiHub社区",
+				url: "https://yukihub.zh.kg/community/",
+				description: "YukiHub社区，为gal玩家提供的一个游戏论坛",
+				category: "forum",
+				categoryName: "论坛站",
+				tags: ["游戏库","论坛"],
+				icon: "https://raw.gitcode.com/xm486/YukiHub/files/main/screenshots/icon_new.png"
+			},
+		];
+
+		// 初始化变量
+		let searchTerm = '';
+
+		// 主题切换功能
+		const themeToggle = document.getElementById('themeToggle');
+		const themeIcon = document.getElementById('themeIcon');
+		const html = document.documentElement;
+
+		// 从localStorage加载主题设置
+		function loadTheme() {
+			const savedTheme = localStorage.getItem('theme') || 'light';
+			html.setAttribute('data-theme', savedTheme);
+			updateThemeIcon(savedTheme);
+		}
+
+		// 更新图标
+		function updateThemeIcon(theme) {
+			themeIcon.textContent = theme === 'dark' ? '🌙' : '☀️';
+		}
+
+		// 切换主题
+		function toggleTheme() {
+			const currentTheme = html.getAttribute('data-theme');
+			const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+			
+			html.setAttribute('data-theme', newTheme);
+			localStorage.setItem('theme', newTheme);
+			updateThemeIcon(newTheme);
+			
+			// 添加切换动画
+			themeToggle.style.transform = 'scale(1.1) rotate(180deg)';
+			setTimeout(() => {
+				themeToggle.style.transform = '';
+			}, 300);
+		}
+
+		// 返回顶部功能
+		const backToTopButton = document.getElementById('backToTop');
+
+		function toggleBackToTop() {
+			if (window.pageYOffset > 300) {
+				backToTopButton.classList.add('visible');
+			} else {
+				backToTopButton.classList.remove('visible');
+			}
+		}
+
+		function scrollToTop() {
+			window.scrollTo({
+				top: 0,
+				behavior: 'smooth'
+			});
+		}
+
+		// 创建粒子背景
+		function createParticles() {
+			const particlesContainer = document.getElementById('particles');
+			const particleCount = 30;
+			
+			for (let i = 0; i < particleCount; i++) {
+				const particle = document.createElement('div');
+				particle.classList.add('particle');
+				
+				const size = Math.random() * 4 + 2;
+				const posX = Math.random() * 100;
+				const posY = Math.random() * 100 + 100;
+				const delay = Math.random() * 15;
+				const duration = Math.random() * 10 + 10;
+				
+				particle.style.width = `${size}px`;
+				particle.style.height = `${size}px`;
+				particle.style.left = `${posX}%`;
+				particle.style.top = `${posY}%`;
+				particle.style.animationDelay = `${delay}s`;
+				particle.style.animationDuration = `${duration}s`;
+				particle.style.opacity = Math.random() * 0.3 + 0.1;
+				
+				particlesContainer.appendChild(particle);
+			}
+		}
+
+		// 渲染卡片
+		function renderCards() {
+			const container = document.getElementById('cardsContainer');
+			const loading = document.getElementById('loading');
+			
+			// 过滤数据
+			let filteredData = websiteData.filter(item => {
+				return searchTerm === '' || 
+					item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+					item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+					item.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+			});
+
+			// 隐藏加载提示
+			loading.style.display = 'none';
+			
+			// 清空容器
+			container.innerHTML = '';
+			
+			// 渲染卡片（移除动画延迟）
+			filteredData.forEach((item) => {
+				const card = document.createElement('div');
+				card.className = 'card';
+				
+				card.innerHTML = `
+					<div class="card-inner">
+						<img class="card-avatar" src="${item.icon}" alt="${item.name}" loading="lazy">
+						<div class="card-content">
+							<div class="card-header">
+								<h3 class="card-title">${item.name}</h3>
+								<span class="card-site-type">${item.categoryName}</span>
+							</div>
+							<p class="card-description">${item.description}</p>
+							<div class="card-tags">
+								${item.tags.map(tag => `<span class="card-tag">${tag}</span>`).join('')}
+							</div>
+						</div>
+						<button class="visit-button" onclick="visitWebsite('${item.url}')">
+							访问 →
+						</button>
+					</div>
+				`;
+				
+				container.appendChild(card);
+			});
+
+			// 如果没有结果
+			if (filteredData.length === 0) {
+				container.innerHTML = '<div class="loading">没有找到匹配的网站</div>';
+			}
+		}
+
+		// 访问网站
+		function visitWebsite(url) {
+			window.open(url, '_blank', 'noopener,noreferrer');
+		}
+
+		// 搜索功能
+		const searchInput = document.getElementById('searchInput');
+		let searchTimeout;
+
+		searchInput.addEventListener('input', function() {
+			clearTimeout(searchTimeout);
+			searchTimeout = setTimeout(() => {
+				searchTerm = this.value;
+				renderCards();
+			}, 300);
+		});
+
+		// 键盘快捷键
+		document.addEventListener('keydown', function(e) {
+			if (e.ctrlKey && e.key === 'f') {
+				e.preventDefault();
+				searchInput.focus();
+			}
+			if (e.key === 'Escape') {
+				searchInput.value = '';
+				searchTerm = '';
+				renderCards();
+			}
+		});
+
+		// 页面加载完成后初始化
+		document.addEventListener('DOMContentLoaded', function() {
+			loadTheme();
+			createParticles();
+			setTimeout(renderCards, 300);
+		});
+
+		// 主题切换事件
+		themeToggle.addEventListener('click', toggleTheme);
+
+		// 返回顶部事件
+		backToTopButton.addEventListener('click', scrollToTop);
+		window.addEventListener('scroll', toggleBackToTop);
+
+		// 鼠标移动视差效果（可选，如果影响性能可以移除）
+		document.addEventListener('mousemove', function(e) {
+			const cards = document.querySelectorAll('.card');
+			const mouseX = e.clientX / window.innerWidth;
+			const mouseY = e.clientY / window.innerHeight;
+			
+			cards.forEach((card, index) => {
+				const speed = (index % 3 + 1) * 0.5;
+				const x = (mouseX - 0.5) * speed;
+				const y = (mouseY - 0.5) * speed;
+				
+				if (window.innerWidth > 768) {
+					card.style.transform = `translate(${x}px, ${y}px)`;
+				}
+			});
+		});
+	</script>
+</body>
+</html>

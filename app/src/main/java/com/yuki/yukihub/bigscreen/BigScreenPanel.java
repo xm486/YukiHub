@@ -22,7 +22,7 @@ import java.util.List;
  * 通用浮层菜单（对应 spec §S4 游戏操作菜单 / §S5 主菜单 / §S8 选择器）。
  *
  * <p>面板从右侧滑入，自带焦点（↑↓ 移动、Ⓐ 确认、Ⓑ 关闭），
- * 支持分隔线与右侧附加文案。所有列表项都是 {@link Item}，动作由调用方以 Runnable 提供。
+ * 支持分隔线与标题下方的辅助说明。所有列表项都是 {@link Item}，动作由调用方以 Runnable 提供。
  */
 public class BigScreenPanel {
 
@@ -154,6 +154,7 @@ public class BigScreenPanel {
     /** M16：是否显示触摸专用 UI（关闭按钮）—— 手柄玩家不需要 */
     public void setTouchUi(boolean touch) {
         if (closeBtn != null) { closeBtn.setVisibility(touch ? View.VISIBLE : View.GONE); }
+        if (visible) { applyPanelHeight(); }
     }
 
     /**
@@ -166,14 +167,21 @@ public class BigScreenPanel {
                 : container.getResources().getDisplayMetrics().heightPixels;
         int maxH = Math.round(avail * 0.86f);
         int widthPx = panelWidthPx > 0 ? panelWidthPx : dp(404);
-        int wSpec = View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.AT_MOST);
+        int wSpec = View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY);
         int hSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED);
         titleView.measure(wSpec, hSpec);
         listView.measure(wSpec, hSpec);
-        int needed = titleView.getMeasuredHeight() + listView.getMeasuredHeight() + dp(32);
+        int closeHeight = 0;
+        if (closeBtn.getVisibility() != View.GONE) {
+            closeBtn.measure(wSpec, hSpec);
+            closeHeight = closeBtn.getMeasuredHeight();
+        }
+        int fixedHeight = titleView.getMeasuredHeight() + closeHeight
+                + panel.getPaddingTop() + panel.getPaddingBottom();
+        int needed = fixedHeight + listView.getMeasuredHeight();
         ViewGroup.LayoutParams sp = scroller.getLayoutParams();
         int target = needed > maxH
-                ? Math.max(dp(80), maxH - titleView.getMeasuredHeight() - dp(32))
+                ? Math.max(dp(50), maxH - fixedHeight)
                 : ViewGroup.LayoutParams.WRAP_CONTENT;
         if (sp != null && sp.height != target) {
             sp.height = target;
@@ -248,10 +256,11 @@ public class BigScreenPanel {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            row.setMinimumHeight(dp(50));
             rowLp.setMargins(dp(12), 0, dp(12), dp(2));
             row.setLayoutParams(rowLp);
-            row.setPadding(dp(14), 0, dp(14), 0);
+            row.setPadding(dp(14), dp(8), dp(14), dp(8));
             row.setClickable(true);
             row.setOnClickListener(v -> {
                 BigScreenSound.confirm();   // M12：触摸条目也要有音效
@@ -270,21 +279,34 @@ public class BigScreenPanel {
                 row.addView(icon);
             }
 
+            // 标题与说明共用一个受宽度约束的纵向区域。
+            // 旧版说明横向 wrap_content，会把 weight 标题挤到 0 宽。
+            LinearLayout textColumn = new LinearLayout(container.getContext());
+            textColumn.setOrientation(LinearLayout.VERTICAL);
+            textColumn.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(textColumn);
+
             TextView label = new TextView(container.getContext());
-            LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            label.setLayoutParams(labelLp);
             label.setText(item.label);
             label.setTextSize(15.5f);
             label.setTextColor(Color.parseColor("#D5DCF0"));
-            row.addView(label);
+            label.setMaxLines(2);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            textColumn.addView(label, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             if (item.sub != null && !item.sub.isEmpty()) {
                 TextView sub = new TextView(container.getContext());
                 sub.setText(item.sub);
-                sub.setTextSize(12.5f);
-                sub.setTextColor(Color.parseColor("#6E7BA0"));
-                row.addView(sub);
+                sub.setTextSize(11.5f);
+                sub.setTextColor(Color.parseColor("#98A6C9"));
+                sub.setMaxLines(3);
+                sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                subLp.topMargin = dp(3);
+                textColumn.addView(sub, subLp);
             }
 
             listView.addView(row);
@@ -308,9 +330,17 @@ public class BigScreenPanel {
                 LinearLayout row = (LinearLayout) v;
                 for (int c = 0; c < row.getChildCount(); c++) {
                     View child = row.getChildAt(c);
-                    if (child instanceof TextView) {
-                        ((TextView) child).setTextColor(Color.parseColor(
-                                focused ? "#FFFFFF" : "#D5DCF0"));
+                    if (child instanceof LinearLayout) {
+                        LinearLayout textColumn = (LinearLayout) child;
+                        for (int t = 0; t < textColumn.getChildCount(); t++) {
+                            View text = textColumn.getChildAt(t);
+                            if (text instanceof TextView) {
+                                // 主操作始终更醒目，选中时说明也不抢标题层级。
+                                ((TextView) text).setTextColor(Color.parseColor(t == 0
+                                        ? (focused ? "#FFFFFF" : "#D5DCF0")
+                                        : (focused ? "#B8C5E4" : "#98A6C9")));
+                            }
+                        }
                     } else if (child instanceof ImageView) {
                         ((ImageView) child).setColorFilter(ContextCompat.getColor(
                                 container.getContext(),

@@ -51,6 +51,15 @@ const BOB_AMP = 0.032;                 // 走动时头部微摆幅度（米）
 const FPS_STEPS = [0, 60, 90, 30];
 const FPS_LABELS = { 0: '不限', 90: '90', 60: '60', 30: '30' };
 const SCALE_STEPS = [1.0, 1.5, 2.0, 2.5, 3.0];
+const LOOK_STEPS = [1.0, 1.6];
+const LOOK_LABELS = ['标准', '高'];
+const LOOK_STORAGE_KEY = 'yukihub_offline_look_scale';
+function savedLookScale() {
+    try {
+        const value = Number(localStorage.getItem(LOOK_STORAGE_KEY));
+        return LOOK_STEPS.includes(value) ? value : 1.0;
+    } catch (e) { return 1.0; }
+}
 
 /* ==================== DOM ==================== */
 
@@ -70,8 +79,9 @@ const dom = {
     ovTitle: $('ov-title'),
     ovDesc: $('ov-desc'),
     ovCode: $('ov-code'),
-    btnScale: $('btn-scale'),
-    btnFps: $('btn-fps'),
+    btnSettings: $('btn-settings'),
+    btnSettingsClose: $('btn-settings-close'),
+    settingsDismiss: $('settings-dismiss'),
     btnDetail: $('btn-detail'),
     btnSound: $('btn-sound'),
     btnJump: $('btn-jump'),
@@ -97,6 +107,7 @@ window.addEventListener('error', (e) => {
 
 const state = {
     scaleIndex: 2,               // 默认 1.5x（实测 2.0x 都能稳 90fps，取 1.5x 兼顾清晰与省电）
+    lookScale: savedLookScale(),
     fpsIndex: 1,                 // 帧率上限档（默认 60 —— 设备会发烫，别默认跑满）
     detail: true,
 
@@ -620,6 +631,10 @@ function bindInput() {
     // --- 键盘（外接键盘 / 桌面调试）
     window.addEventListener('keydown', (e) => {
         if (e.repeat) return;
+        if (e.code === 'Escape' && settingsOpen()) {
+            e.preventDefault(); setSettingsOpen(false); dom.btnSettings.focus(); return;
+        }
+        if (settingsOpen()) return;
         audio.start();   // 首次按键即启动音频（WebAudio 需要用户手势）
         switch (e.code) {
             case 'KeyW': case 'ArrowUp': state.keyForward = 1; break;
@@ -651,6 +666,7 @@ function bindInput() {
     // --- 触摸：左半屏按下 → 摇杆浮现并跟手；右半屏拖动 → 转视角
     //     鼠标：拖动即为转视角（移动交给键盘）
     el.addEventListener('pointerdown', (e) => {
+        if (settingsOpen()) return;
         el.setPointerCapture && el.setPointerCapture(e.pointerId);
         audio.start();   // 首次触摸即启动音频（WebAudio 需要用户手势）
         const isMouse = e.pointerType === 'mouse';
@@ -681,7 +697,7 @@ function bindInput() {
             const dy = e.clientY - p.lastY;
             p.lastX = e.clientX; p.lastY = e.clientY;
             p.moved = (p.moved || 0) + Math.abs(dx) + Math.abs(dy);
-            const sens = (e.pointerType === 'mouse') ? LOOK_SENS_MOUSE : LOOK_SENS_TOUCH;
+            const sens = ((e.pointerType === 'mouse') ? LOOK_SENS_MOUSE : LOOK_SENS_TOUCH) * state.lookScale;
             state.yaw -= dx * sens;
             state.pitch -= dy * sens;
             clampPitch();
@@ -741,6 +757,7 @@ function updateMovement(dt) {
     const pad = state.pad || { moveX: 0, moveY: 0 };
     let forward = state.keyForward + state.stickForward - pad.moveY;
     let strafe = state.keyStrafe + state.stickStrafe + pad.moveX;
+    if (settingsOpen()) { forward = 0; strafe = 0; }
 
     // 归一化，避免斜向加速
     const mag = Math.hypot(forward, strafe);
@@ -918,30 +935,20 @@ function updateHud() {
 
 /* ==================== UI 交互 ==================== */
 
-function cycleScale() {
-    state.scaleIndex = (state.scaleIndex + 1) % SCALE_STEPS.length;
-    const r = SCALE_STEPS[state.scaleIndex];
-    renderer.setPixelRatio(r);
-    onResize();
-    resetPerf();
-    dom.btnScale.textContent = `渲染倍率 ${r.toFixed(2)}x`;
-    dom.btnScale.classList.toggle('on', r !== 1.0);
+function setScale(value) {
+    const i = SCALE_STEPS.indexOf(value);
+    if (i < 0) return;
+    state.scaleIndex = i;
+    renderer.setPixelRatio(value); onResize(); resetPerf(); updateSettingsUi();
 }
-
-/**
- * 帧率上限循环切换：不限 → 90 → 60 → 30。
- * 目的：省电 / 降温 / 避免"设备跑不满高刷反而抖动"。
- */
-function cycleFps() {
-    state.fpsIndex = (state.fpsIndex + 1) % FPS_STEPS.length;
-    const cap = FPS_STEPS[state.fpsIndex];
-    dom.btnFps.textContent = `帧率上限：${FPS_LABELS[cap]}`;
-    dom.btnFps.classList.toggle('on', cap !== 0);
-    // 重置限帧游标：否则切档后可能苦等旧的 nextAt，表现为"切了没反应"
-    perf.nextAt = 0;
-    perf.lastT = 0;
-    resetPerf();   // 重算帧率统计，免得旧数据干扰判断
+function cycleScale() { setScale(SCALE_STEPS[(state.scaleIndex + 1) % SCALE_STEPS.length]); }
+function setFps(value) {
+    const i = FPS_STEPS.indexOf(value);
+    if (i < 0) return;
+    state.fpsIndex = i;
+    perf.nextAt = 0; perf.lastT = 0; resetPerf(); updateSettingsUi();
 }
+function cycleFps() { setFps(FPS_STEPS[(state.fpsIndex + 1) % FPS_STEPS.length]); }
 
 /**
  * 渲染倍率循环切换。
@@ -951,7 +958,8 @@ function cycleFps() {
 function toggleDetail() {
     state.detail = !state.detail;
     dom.detail.style.display = state.detail ? '' : 'none';
-    dom.btnDetail.textContent = `详细数据：${state.detail ? '开' : '关'}`;
+    dom.btnDetail.textContent = state.detail ? '开' : '关';
+    dom.btnDetail.setAttribute('aria-pressed', String(state.detail));
     dom.btnDetail.classList.toggle('on', state.detail);
 }
 
@@ -959,17 +967,61 @@ function toggleDetail() {
 function toggleSound() {
     const muted = audio.toggle();
     if (dom.btnSound) {
-        dom.btnSound.textContent = '声音：' + (muted ? '关' : '开');
+        dom.btnSound.textContent = muted ? '关' : '开';
+        dom.btnSound.setAttribute('aria-pressed', String(!muted));
         dom.btnSound.classList.toggle('on', !muted);
     }
     // M5-d：音乐播放器跟着"声音开关"走（用 gain 节点控，不是 el.volume）
     if (music) music.setMuted(muted);
 }
 
+function updateLookUi() {
+    dom.debug.querySelectorAll('[data-look]').forEach(b => {
+        const on = Number(b.dataset.look) === state.lookScale;
+        b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+    });
+}
+function setLook(value) {
+    if (!LOOK_STEPS.includes(value)) return;
+    state.lookScale = value;
+    try { localStorage.setItem(LOOK_STORAGE_KEY, String(value)); } catch (e) { }
+    updateLookUi();
+}
+function updateSettingsUi() {
+    for (const [attr, value] of [['scale', SCALE_STEPS[state.scaleIndex]], ['fps', FPS_STEPS[state.fpsIndex]]]) {
+        dom.debug.querySelectorAll('[data-' + attr + ']').forEach(b => {
+            const on = Number(b.dataset[attr]) === value;
+            b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+        });
+    }
+    updateLookUi();
+}
+function settingsOpen() { return !!dom.debug && !dom.debug.hidden; }
+function setSettingsOpen(open) {
+    if (!dom.debug) return;
+    dom.debug.hidden = !open; dom.settingsDismiss.hidden = !open;
+    dom.btnSettings.setAttribute('aria-expanded', String(open));
+    if (open) {
+        // Stop stale joystick/keyboard movement before touching the settings panel.
+        pointers.clear(); joy.pointerId = null; joyHide();
+        state.keyForward = state.keyStrafe = state.stickForward = state.stickStrafe = 0;
+        state.vel.set(0, 0, 0); setRunning(false);
+        updateSettingsUi();
+    }
+}
 function bindUi() {
-    dom.btnScale.addEventListener('click', cycleScale);
-    if (dom.btnFps) dom.btnFps.addEventListener('click', cycleFps);
-    // dom.btnStress.addEventListener(...)：压力测试已移除
+    dom.btnSettings.addEventListener('click', () => setSettingsOpen(!settingsOpen()));
+    dom.btnSettingsClose.addEventListener('click', () => {
+        setSettingsOpen(false); dom.btnSettings.focus();
+    });
+    // Consume this gesture; closing the panel must not also pick a 3D exhibit.
+    dom.settingsDismiss.addEventListener('pointerdown', e => {
+        e.preventDefault(); e.stopPropagation(); setSettingsOpen(false);
+    }, { passive: false });
+    dom.debug.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click', () => setScale(Number(b.dataset.scale))));
+    dom.debug.querySelectorAll('[data-fps]').forEach(b => b.addEventListener('click', () => setFps(Number(b.dataset.fps))));
+    dom.debug.querySelectorAll('[data-look]').forEach(b => b.addEventListener('click', () => setLook(Number(b.dataset.look))));
+    updateSettingsUi();
     dom.btnDetail.addEventListener('click', toggleDetail);
     if (dom.btnSound) dom.btnSound.addEventListener('click', toggleSound);
 
@@ -991,9 +1043,10 @@ function bindUi() {
     bindAction(dom.btnCrouch, toggleCrouch);
     bindAction(dom.btnRun, () => setRunning(!state.running));
 
-    dom.btnScale.classList.toggle('on', SCALE_STEPS[state.scaleIndex] !== 1.0);
     if (dom.btnSound) dom.btnSound.classList.add('on');
-    dom.btnDetail.classList.add('on');
+    dom.btnDetail.classList.toggle('on', state.detail);
+    dom.btnDetail.setAttribute('aria-pressed', String(state.detail));
+    dom.btnSound?.setAttribute('aria-pressed', 'true');
 }
 
 /* ==================== 个人收藏馆：数据接入 ==================== */
@@ -1117,9 +1170,12 @@ function applyPadActions(pad) {
     //    否则 poll() 把 act.run 归零后，下面那句 setRunning(false) 会每帧执行，
     //    把键盘 Shift / 触摸奔跑键设的 true 立刻改回 false —— 表现为"奔跑完全失灵"。
     if (!pad || !pad.connected) return;
+    // Start uses the same opening/closing path as the gear button.
+    if (pad.act.menu) setSettingsOpen(!settingsOpen());
+    if (settingsOpen()) return;
 
     // ---- 视角：右摇杆（模拟量 → 逐帧累积，和触屏拖动同一条路径）----
-    const LOOK = 2.4;               // 弧度/秒（满推时）
+    const LOOK = 2.4 * state.lookScale;               // 弧度/秒（满推时）
     if (pad.lookX) state.yaw -= pad.lookX * LOOK * (1 / 60);
     if (pad.lookY) state.pitch -= pad.lookY * LOOK * (1 / 60);
     clampPitch();
@@ -1156,11 +1212,7 @@ function applyPadActions(pad) {
         }
     }
 
-    // ---- Start：调试面板 ----
-    if (pad.act.menu) {
-        const d = document.getElementById('debug');
-        if (d) d.hidden = !d.hidden;
-    }
+
 }
 
 /** 屏幕中心射线交互（手柄十字准星） */
@@ -1296,7 +1348,8 @@ function boot() {
 
         dom.loading.classList.add('hide');
         dom.hud.hidden = false;
-        dom.debug.hidden = false;
+        setSettingsOpen(false);
+        dom.btnSettings.hidden = false;
         dom.actions.hidden = false;
         dom.hint.hidden = false;
 

@@ -172,6 +172,19 @@
                     <TextView android:id="@+id/homeGreeting" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="欢迎回来，Yuki" android:textColor="#D9FFFFFF" android:textSize="9sp" />
                 </LinearLayout>
 
+                <!-- Gal 工具箱：图标由原 favicon.ico 无损转为 PNG，不加 tint -->
+                <FrameLayout
+                    android:id="@+id/homeGalToolbox"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginEnd="7dp"
+                    android:background="@drawable/bg_home_glass"
+                    android:contentDescription="Gal工具箱"
+                    android:clickable="true"
+                    android:focusable="true">
+                    <ImageView android:layout_width="26dp" android:layout_height="26dp" android:layout_gravity="center" android:contentDescription="Gal工具箱" android:scaleType="fitCenter" android:src="@drawable/ic_galtoolbox" />
+                </FrameLayout>
+
                 <!-- M0：3D 展厅入口（离线个人展厅 / 在线多人展厅） -->
                 <FrameLayout
                     android:id="@+id/homeExhibition"
