@@ -85,7 +85,7 @@ public final class GamepadFocus {
     /** 焦点视觉：描边前景 + 轻微放大 + 抬高层级 + 滚进可视区 */
     private static void highlight(View v) {
         try {
-            if (isTextInput(v)) { return; }   // 输入框有光标，不需要额外描边
+            if (isTextInput(v) || v instanceof android.webkit.WebView) { return; }   // 输入框有光标，不需要额外描边
             v.setForeground(androidx.core.content.ContextCompat.getDrawable(
                     v.getContext(), R.drawable.fg_focus_highlight));
             float scale = scaleOf(isSmallControl(v) ? SCALE_SMALL : SCALE_CARD);
@@ -101,7 +101,7 @@ public final class GamepadFocus {
 
     private static void clear(View v) {
         try {
-            if (isTextInput(v)) { return; }
+            if (isTextInput(v) || v instanceof android.webkit.WebView) { return; }
             v.setForeground(null);
             v.animate().cancel();
             v.animate().scaleX(1f).scaleY(1f)
@@ -125,6 +125,11 @@ public final class GamepadFocus {
      */
     public static void makeFocusableTree(View v) {
         if (v == null) { return; }
+        // 网页输入属于 WebView 内部，不是原生 EditText；不要遍历/重设它的内部焦点策略。
+        if (v instanceof android.webkit.WebView) {
+            makeFocusable(v);
+            return;
+        }
         if (v instanceof RecyclerView || v instanceof AdapterView) {
             makeFocusable(v);
             return;
@@ -146,7 +151,9 @@ public final class GamepadFocus {
         if (v == null) { return; }
         try {
             v.setFocusable(true);
-            v.setFocusableInTouchMode(false);   // 触摸时不抢焦点，只服务手柄/键盘
+            // EditText 必须能在触摸模式获得焦点，否则点搜索框/输入框不会弹键盘。
+            // 普通按钮仍仅在手柄/键盘导航时获取焦点。
+            v.setFocusableInTouchMode(isTextInput(v) || v instanceof android.webkit.WebView);
             if (v.getDefaultFocusHighlightEnabled()) {
                 // 关掉系统那层几乎看不见的默认高亮，避免和我们的描边叠加
                 v.setDefaultFocusHighlightEnabled(false);

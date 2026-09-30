@@ -2,8 +2,6 @@
  * YukiHub 离线展厅 · 程序化音频（M2）
  * =========================================================
  * 全部用 WebAudio **现场合成**，不引入任何外部音频素材：
- *   · 环境垫音：三个低音正弦（55 / 82.5 / 110 Hz）过低通，极缓慢起伏
- *   · 房间底噪：极低音量的带通噪声，让"安静"有质感
  *   · 偶发风铃：随机间隔的小铃音（五声音阶），像远处展馆的提示音
  *   · 脚步：噪声脉冲过带通，音量/音色随速度与蹲姿变化
  *   · 交互音：轻点展品的短促提示音
@@ -75,51 +73,6 @@ export function createAudio() {
         if (!ensure()) return;
         started = true;
         if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) { } }
-
-        // ---------- 环境垫音 ----------
-        const pad = ctx.createGain();
-        pad.gain.value = 0.055;
-        const lp = ctx.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.frequency.value = 360;
-        lp.Q.value = 0.4;
-        lp.connect(pad);
-        pad.connect(master);
-
-        [55, 82.5, 110].forEach((f, i) => {
-            const o = ctx.createOscillator();
-            o.type = (i === 2) ? 'triangle' : 'sine';
-            o.frequency.value = f;
-            const g = ctx.createGain();
-            g.gain.value = (i === 0) ? 0.5 : 0.22;
-            o.connect(g);
-            g.connect(lp);
-            try { o.start(); } catch (e) { }
-        });
-
-        // 极缓慢的起伏（LFO 加在 pad 的音量上）
-        const lfo = ctx.createOscillator();
-        lfo.frequency.value = 0.045;
-        const lfoGain = ctx.createGain();
-        lfoGain.gain.value = 0.022;
-        lfo.connect(lfoGain);
-        lfoGain.connect(pad.gain);
-        try { lfo.start(); } catch (e) { }
-
-        // ---------- 房间底噪 ----------
-        const rt = ctx.createBufferSource();
-        rt.buffer = noiseBuffer(4);
-        rt.loop = true;
-        const rtF = ctx.createBiquadFilter();
-        rtF.type = 'bandpass';
-        rtF.frequency.value = 240;
-        rtF.Q.value = 0.5;
-        const rtG = ctx.createGain();
-        rtG.gain.value = 0.016;
-        rt.connect(rtF);
-        rtF.connect(rtG);
-        rtG.connect(master);
-        try { rt.start(); } catch (e) { }
 
         // ---------- 总音量淡入 ----------
         const t = ctx.currentTime;

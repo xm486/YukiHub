@@ -1,0 +1,726 @@
+* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+			font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+		}
+		body {
+			background: #f8f9fa;
+			color: #333;
+			padding-top: 4.5rem;
+			line-height: 1.6;
+		}
+
+		/* 顶部导航栏 */
+		.top-nav {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 4.5rem;
+			background: #2d3436;
+			color: white;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 1.3rem;
+			font-weight: 500;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+			z-index: 999;
+			text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+		}
+
+		/* 主容器 */
+		.container {
+			max-width: 700px;
+			margin: 0 auto;
+			padding: 1.5rem 1rem;
+		}
+
+		/* 板块标题 */
+		.section-title {
+			font-size: 1.2rem;
+			font-weight: 500;
+			margin-bottom: 1.2rem;
+			color: #2d3436;
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+		}
+	
+		.section-title::before {
+			content: "";
+			width: 0.3rem;
+			height: 1.2rem;
+			background: #6c5ce7;
+			border-radius: 3px;
+		}
+
+		/* vndb查询板块 */
+		.vndb-tool {
+			background: white;
+			border-radius: 12px;
+			padding: 1.5rem;
+			box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+			margin-bottom: 2rem;
+		}
+		/* 输入区域 */
+		.input-area {
+			display: flex;
+			gap: 0.5rem;
+			margin-bottom: 1.5rem;
+			width: 100%;
+			flex-wrap: wrap;
+		}
+		#gameInput {
+			flex: 1;
+			padding: 0.7rem 1rem;
+			border: 1px solid #e0e0e0;
+			border-radius: 8px;
+			font-size: 0.95rem;
+			max-width: 100%;
+			min-width: 0;
+		}
+		.btn {
+			padding: 0.7rem 1.2rem;
+			background: #6c5ce7;
+			color: white;
+			border: none;
+			border-radius: 8px;
+			font-size: 0.95rem;
+			cursor: pointer;
+			transition: background 0.2s ease, transform 0.1s ease;
+		}
+		.btn:active {
+			transform: scale(0.98);
+		}
+		.btn:hover {
+			background: #5b4ed6;
+		}
+		.reset-btn {
+			background: #95a5a6;
+		}
+		.reset-btn:hover {
+			background: #7f8c8d;
+		}
+
+		/* 结果展示区域 */
+		.result-area {
+			padding: 1rem;
+			border: 1px solid #e0e0e0;
+			border-radius: 8px;
+			min-height: 8rem;
+			margin-bottom: 1.5rem;
+			overflow-x: hidden;
+			display: none;
+			animation: fadeIn 0.5s ease forwards;
+		}
+		@keyframes fadeIn {
+			from { opacity: 0; transform: translateY(10px); }
+			to { opacity: 1; transform: translateY(0); }
+		}
+		.loading {
+			color: #666;
+			font-style: italic;
+			text-align: center;
+			padding: 1rem 0;
+		}
+		.error {
+			color: #e74c3c;
+			text-align: center;
+			padding: 1rem 0;
+		}
+		.search-result {
+			margin-bottom: 1rem;
+		}
+		.result-count {
+			font-weight: 500;
+			margin-bottom: 1rem;
+			color: #2d3436;
+		}
+		.game-list {
+			display: flex;
+			flex-direction: column;
+			gap: 0.8rem;
+			max-height: 300px;
+			overflow-y: auto;
+			padding-right: 0.5rem;
+		}
+		.game-list::-webkit-scrollbar {
+			width: 6px;
+		}
+		.game-list::-webkit-scrollbar-thumb {
+			background: #e0e0e0;
+			border-radius: 3px;
+		}
+		/* 修复：移除可能导致内容隐藏的动画默认状态 */
+		.game-item {
+			padding: 0.8rem;
+			background: #f5f5f5;
+			border-radius: 8px;
+			cursor: pointer;
+			transition: background 0.2s ease, transform 0.2s ease;
+			/* 取消默认opacity和transform，改为通过JS控制动画 */
+		}
+		.game-item:hover {
+			background: #ebebeb;
+			transform: translateY(-2px);
+		}
+		.game-id {
+			font-size: 0.85rem;
+			color: #666;
+			margin-bottom: 0.2rem;
+		}
+		.game-name {
+			font-size: 0.95rem;
+			font-weight: 500;
+			color: #6c5ce7;
+		}
+
+		/* 加载动画 */
+		.spin-loading {
+			display: inline-block;
+			width: 1rem;
+			height: 1rem;
+			border: 2px solid #e0e0e0;
+			border-top-color: #6c5ce7;
+			border-radius: 50%;
+			animation: spin 1s linear infinite;
+		}
+		@keyframes spin {
+			to { transform: rotate(360deg); }
+		}
+		.loading-wrapper {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: #666;
+			gap: 0.5rem;
+		}
+
+		/* 详情展示区域 */
+		.detail-area {
+			padding: 1.5rem;
+			border: 1px solid #e0e0e0;
+			border-radius: 8px;
+			display: none;
+			animation: fadeIn 0.5s ease forwards;
+		}
+		.detail-header {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			margin-bottom: 1.2rem;
+		}
+		.game-cover {
+			width: 160px;
+			height: auto;
+			border-radius: 8px;
+			margin-bottom: 0.8rem;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+			cursor: zoom-in;
+			transition: transform 0.2s ease;
+			object-fit: cover;
+		}
+		.game-cover:hover {
+			transform: scale(1.02);
+		}
+		.detail-title {
+			font-size: 1.3rem;
+			font-weight: 600;
+			margin-bottom: 0.3rem;
+			text-align: center;
+			color: #2d3436;
+		}
+		.detail-original {
+			font-size: 0.9rem;
+			color: #666;
+			margin-bottom: 0.5rem;
+			text-align: center;
+		}
+		.detail-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+			gap: 0.8rem;
+			margin-bottom: 1.2rem;
+		}
+		.detail-item {
+			background: #f5f5f5;
+			padding: 0.7rem;
+			border-radius: 8px;
+			transition: background 0.2s ease;
+		}
+		.detail-item:hover {
+			background: #ebebeb;
+		}
+		.detail-label {
+			font-size: 0.85rem;
+			color: #666;
+			margin-bottom: 0.2rem;
+		}
+		.detail-value {
+			font-size: 0.95rem;
+			font-weight: 500;
+			min-height: 1.2rem;
+		}
+		.detail-item .detail-value {
+			max-height: 200px;
+			overflow-y: auto;
+		}
+		.detail-item .detail-value::-webkit-scrollbar {
+			width: 4px;
+		}
+		.detail-item .detail-value::-webkit-scrollbar-thumb {
+			background: #e0e0e0;
+			border-radius: 2px;
+		}
+		.search-time {
+			font-size: 0.85rem;
+			color: #666;
+			text-align: right;
+			margin-top: 0.5rem;
+			padding: 0.3rem 0;
+		}
+
+		/* 封面放大遮罩层 */
+		.cover-modal {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background: rgba(0,0,0,0.85);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 9999;
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.3s ease;
+		}
+		.cover-modal.active {
+			opacity: 1;
+			pointer-events: auto;
+		}
+		.modal-content {
+			max-width: 90%;
+			max-height: 80%;
+			border-radius: 8px;
+			box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+		}
+		.close-modal {
+			position: absolute;
+			top: 1.5rem;
+			right: 1.5rem;
+			color: white;
+			font-size: 1.5rem;
+			cursor: pointer;
+			background: transparent;
+			border: none;
+			transition: transform 0.2s ease;
+		}
+		.close-modal:hover {
+			transform: scale(1.1);
+		}
+
+		/* 链接分享卡片 */
+		.links-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+			gap: 1rem;
+			margin-bottom: 2rem;
+		}
+		.link-card {
+			background: white;
+			border-radius: 12px;
+			padding: 1.2rem;
+			box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+			transition: transform 0.2s ease, box-shadow 0.2s ease;
+		}
+		.link-card:hover {
+			transform: translateY(-3px);
+			box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+		}
+		.link-icon {
+			width: 40px;
+			height: 40px;
+			border-radius: 8px;
+			background: #6699ff;
+			color: white;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 1.2rem;
+			margin-bottom: 0.8rem;
+		}
+		.link-title {
+			font-size: 1.1rem;
+			font-weight: 500;
+			margin-bottom: 0.5rem;
+		}
+		.link-desc {
+			font-size: 0.9rem;
+			color: #666;
+			margin-bottom: 1rem;
+		}
+		.link-btn {
+			display: inline-block;
+			padding: 0.5rem 1rem;
+			background: #6c5ce7;
+			color: white;
+			border-radius: 8px;
+			font-size: 0.9rem;
+			text-decoration: none;
+			transition: background 0.2s ease, transform 0.1s ease;
+		}
+		.link-btn:active {
+			transform: scale(0.98);
+		}
+		.link-btn:hover {
+			background: #5b4ed6;
+		}
+
+		.friend-link-entry {
+			text-align: center;
+			margin: 0.4rem 0 1rem;
+		}
+
+		.friend-link-toggle {
+			padding: 0.35rem 0.9rem;
+			border: 1px solid #d8d2ff;
+			border-radius: 999px;
+			background: #fff;
+			color: #6c5ce7;
+			font-size: 0.85rem;
+			cursor: pointer;
+			box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+		}
+
+		.friend-link-modal {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background: rgba(0,0,0,0.45);
+			display: none;
+			align-items: center;
+			justify-content: center;
+			z-index: 10001;
+			padding: 1rem;
+		}
+
+		.friend-link-modal.active {
+			display: flex;
+		}
+
+		.friend-link-dialog {
+			position: relative;
+			width: min(86vw, 320px);
+			background: #fff;
+			border-radius: 14px;
+			padding: 1rem;
+			box-shadow: 0 8px 28px rgba(0,0,0,0.22);
+		}
+
+		.friend-link-close {
+			position: absolute;
+			top: 0.45rem;
+			right: 0.6rem;
+			border: none;
+			background: transparent;
+			font-size: 1.4rem;
+			line-height: 1;
+			color: #999;
+			cursor: pointer;
+		}
+
+		.friend-link-modal-title {
+			font-size: 1rem;
+			font-weight: 600;
+			color: #2d3436;
+			margin-bottom: 0.8rem;
+			padding-right: 1.5rem;
+		}
+
+		.friend-link-item {
+			display: flex;
+			align-items: center;
+			gap: 0.6rem;
+			padding: 0.65rem;
+			border-radius: 10px;
+			color: #333;
+			text-decoration: none;
+			transition: background 0.2s ease;
+		}
+
+		.friend-link-item:hover {
+			background: #f4f1ff;
+		}
+
+		.friend-link-icon {
+			width: 28px;
+			height: 28px;
+			border-radius: 7px;
+			object-fit: cover;
+			flex-shrink: 0;
+			border: 1px solid #e0e0e0;
+			background: #fff;
+		}
+
+		/* 底部说明 */
+		.footer {
+			text-align: center;
+			font-size: 0.9rem;
+			color: #666;
+			padding: 1rem 0;
+			margin-top: 1rem;
+			border-top: 1px solid #e0e0e0;
+		}
+
+		/* 移动端适配 */
+		@media (max-width: 400px) {
+			.input-area {
+				flex-direction: column;
+			}
+			.btn {
+				width: 100%;
+			}
+			.detail-grid {
+				grid-template-columns: 1fr;
+			}
+			.game-cover {
+				width: 140px;
+			}
+			.detail-title {
+				font-size: 1.2rem;
+			}
+			.detail-value {
+				font-size: 0.9rem;
+			}
+			.detail-item .detail-value {
+				max-height: 180px;
+			}
+			.links-grid {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		/* 新增：游戏列表项动画类（由JS控制） */
+		.item-animate {
+			opacity: 0;
+			transform: translateY(5px);
+			animation: itemFadeIn 0.3s ease forwards;
+		}
+		@keyframes itemFadeIn {
+			to { opacity: 1; transform: translateY(0); }
+		}
+		/* 雪花css */
+		.snowflake {
+	position: absolute;
+	width: 10px;
+	height: 10px;
+	/* 选择以下任一颜色方案 */
+	background: #e0f7fa; /* 浅蓝色 */
+	/* background: #f5f5f5; /* 浅灰色 */
+	/* background: rgba(255, 255, 255, 0.5); /* 半透明白色 */
+	border-radius: 50%;
+	filter: blur(1px);
+	animation: fall linear infinite;
+}
+		@keyframes fall {
+			0% { transform: translateY(0) rotate(0deg); }
+			100% { transform: translateY(100vh) rotate(360deg); }
+		}
+		#snow-container {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			pointer-events: none;
+			z-index: 9999;
+		}
+		/* 顶部搜索栏样式 */
+.top-search {
+	padding: 1rem;
+	background: white;
+	box-shadow: 0px 2px 8px rgba(0,0,0,0.1);
+	margin-bottom: 1.5rem;
+	border-radius: 8px;
+   width: 100%;
+	   
+}
+/* 伸缩式文字播放器 */
+/* 优化后的悬浮音乐播放器 */
+.player-container {
+  position: fixed;
+  bottom: 2.5rem;
+  right: 2.5rem;
+  width: 52px; /* 收缩尺寸 */
+  height: 52px;
+  border-radius: 50%; /* 收缩为圆形 */
+  background: linear-gradient(135deg, #ff79c6 0%, #bd93f9 100%); /* Gal风格粉紫渐变 */
+  box-shadow: 0 4px 16px rgba(255, 121, 198, 0.4);
+  z-index: 10000;
+  overflow: hidden;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1.2rem; /* 展开后内边距 */
+}
+/* 展开状态：变宽+圆角矩形 */
+.player-container.active {
+  width: 300px; /* 展开宽度 */
+  border-radius: 30px;
+  box-shadow: 0 6px 20px rgba(255, 121, 198, 0.5);
+}
+/* 播放器图标（收缩时显示） */
+.player-icon {
+  font-size: 1.4rem;
+  color: white;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+}
+/* 播放状态动画：图标微缩+发光 */
+.player-container.playing .player-icon {
+  transform: scale(0.9);
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+/* 展开时隐藏图标 */
+.player-container.active .player-icon {
+  opacity: 0;
+}
+/* 播放信息文本（展开时显示） */
+.player-text {
+  font-size: 0.95rem;
+  color: white;
+  font-weight: 500;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease 0.1s; /* 延迟显示 */
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+/* 展开时显示文本 */
+.player-container.active .player-text {
+  opacity: 1;
+}
+/* 音乐标题高亮 */
+.player-title {
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+/* 隐藏原生audio控件 */
+#floatPlayer {
+  display: none;
+}
+
+/* 游戏标签容器 */
+/* 游戏标签容器（修复超出） */
+/* 游戏标签容器（彻底解决溢出） */
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  max-width: 100%; /* 强制容器宽度不超过父元素 */
+  padding-right: 0.2rem; /* 预留一点边距 */
+}
+/* 标签样式（调整适配移动端） */
+.tag-item {
+  padding: 0.3rem 0.6rem; /* 缩小内边距，减少占用空间 */
+  background: #f0e9ff;
+  color: #6c5ce7;
+  border-radius: 20px;
+	  border: 1px solid #242424;
+  font-size: 0.75rem; /* 缩小字体，适配移动端 */
+  line-height: 1.2; /* 调整行高，避免文字挤压 */
+	  transition: background 0.2s ease;
+	  max-width: 100%; /* 强制容器宽度不超过父元素 */
+}
+/* 标签提示文字（同步缩小） */
+.tag-note {
+  font-size: 0.7rem;
+  color: #999;
+  margin-top: 0.3rem;
+}
+/* 留言板标题（替代 <一一一留言板一一一> 的装饰线版本） */
+.msg-board-wrapper {
+	background: rgba(122, 236, 219, 0.3);
+	width: 70%;
+	margin: 0 auto;
+	border-radius: 15px;
+}
+
+.msg-board-title {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.6rem;
+	font-size: 17px;
+	letter-spacing: 1px;
+	line-height: 1.4;
+	color: #3366ff;
+	text-align: center;
+	padding: 0.6rem 1rem;
+}
+
+.msg-board-title > span {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+.msg-board-title::before,
+.msg-board-title::after {
+	content: "";
+	flex: 1 1 auto;
+	min-width: 10px;
+	max-width: 64px;
+	height: 2px;
+	border-radius: 2px;
+}
+
+.msg-board-title::before {
+	background: linear-gradient(90deg, transparent, #3366ff);
+}
+
+.msg-board-title::after {
+	background: linear-gradient(90deg, #3366ff, transparent);
+}
+
+.tag-item:hover {
+  background: #e0d4ff;
+}
+
+/* AI聊天板块：动图背景改用 <video>（原 690KB GIF -> 58KB VP9） */
+.ai-chat-panel {
+	position: relative;
+	overflow: hidden;
+}
+
+.ai-chat-panel-bg {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: auto;
+	z-index: 0;
+	pointer-events: none;
+}
+
+.ai-chat-panel > img,
+.ai-chat-panel > form {
+	position: relative;
+	z-index: 1;
+}

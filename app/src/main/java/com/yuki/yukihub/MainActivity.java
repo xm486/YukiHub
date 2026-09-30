@@ -257,6 +257,9 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private static final String SCAN_MODE_LEGACY = "legacy";
     private static final String KEY_CHECK_UPDATE_ON_STARTUP = "check_update_on_startup";
     private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
+    private static final String KEY_UPDATE_SOURCE = "update_source";
+    private static final String UPDATE_SOURCE_GITCODE = "gitcode";
+    private static final String UPDATE_SOURCE_GITHUB = "github";
     private static final long UPDATE_AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
     private static final String UPDATE_GITHUB_API_URL = "https://api.github.com/repos/xm486/YukiHub/releases/latest";
     private static final String UPDATE_GITHUB_REPO_URL = "https://github.com/xm486/YukiHub";
@@ -2030,7 +2033,9 @@ if (profilePanel != null) {
         setupStatusToggle();
 bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "LOCAL");
         updateFilterSelection();
-        ((EditText)findViewById(R.id.etSearch)).addTextChangedListener(new TextWatcher() {
+        EditText searchInput = findViewById(R.id.etSearch);
+        searchInput.setFocusableInTouchMode(true); // 搜索输入必须允许触摸获取焦点
+        searchInput.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             public void onTextChanged(CharSequence s, int st, int b, int c) { query = s.toString(); applyFilter(); }
             public void afterTextChanged(Editable e) {}
@@ -6511,6 +6516,45 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(updateButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
         root.addView(updateOnStartupCheck);
 
+        TextView updateSourceTitle = new TextView(this);
+        updateSourceTitle.setText("更新源（单选，切换立即生效）");
+        updateSourceTitle.setTextColor(getColorCompat(R.color.yh_text));
+        updateSourceTitle.setTextSize(12);
+        updateSourceTitle.setPadding(0, dp(8), 0, dp(4));
+        root.addView(updateSourceTitle);
+        android.widget.RadioGroup updateSourceGroup = new android.widget.RadioGroup(this);
+        updateSourceGroup.setOrientation(LinearLayout.HORIZONTAL);
+        android.widget.RadioButton gitcodeSource = new android.widget.RadioButton(this);
+        gitcodeSource.setId(View.generateViewId());
+        gitcodeSource.setText("GitCode（默认）");
+        gitcodeSource.setTextColor(getColorCompat(R.color.yh_text));
+        gitcodeSource.setTextSize(12);
+        android.widget.RadioButton githubSource = new android.widget.RadioButton(this);
+        githubSource.setId(View.generateViewId());
+        githubSource.setText("GitHub");
+        githubSource.setTextColor(getColorCompat(R.color.yh_text));
+        githubSource.setTextSize(12);
+        DynamicTheme updateTheme = DynamicTheme.getInstance();
+        int updateAccent = updateTheme.isEnabled() && updateTheme.getColors() != null
+                ? updateTheme.getColors().primary : getColorCompat(R.color.yh_primary);
+        android.content.res.ColorStateList updateTint = new android.content.res.ColorStateList(
+                new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+                new int[]{updateAccent, getColorCompat(R.color.yh_text_muted)});
+        gitcodeSource.setButtonTintList(updateTint);
+        githubSource.setButtonTintList(updateTint);
+        updateSourceGroup.addView(gitcodeSource, new android.widget.RadioGroup.LayoutParams(0, dp(44), 1f));
+        updateSourceGroup.addView(githubSource, new android.widget.RadioGroup.LayoutParams(0, dp(44), 1f));
+        updateSourceGroup.check(UPDATE_SOURCE_GITHUB.equals(updateSource()) ? githubSource.getId() : gitcodeSource.getId());
+        updateSourceGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            if (checkedId == -1 || prefs == null) { return; }
+            String selected = checkedId == githubSource.getId() ? UPDATE_SOURCE_GITHUB : UPDATE_SOURCE_GITCODE;
+            if (!selected.equals(updateSource())) {
+                // 换源后不沿用另一源的 12 小时自动检查限流时间。
+                prefs.edit().putString(KEY_UPDATE_SOURCE, selected).remove(KEY_LAST_UPDATE_CHECK_AT).apply();
+            }
+        });
+        root.addView(updateSourceGroup, new LinearLayout.LayoutParams(-1, -2));
+
         LinearLayout githubButton = linkCardButton("GitHub 仓库", R.drawable.ic_github);
         LinearLayout gitcodeButton = linkCardButton("GitCode 仓库", R.drawable.ic_gitcode);
         LinearLayout websiteButton = linkCardButton("官方网站", android.R.drawable.ic_menu_view);
@@ -7620,15 +7664,16 @@ private void checkUpdateOnStartupIfEnabled() {
     }
 
     private void checkUpdateManually() {
-        Toast.makeText(MainActivity.this, "正在检查更新...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(MainActivity.this, "正在通过 " + (UPDATE_SOURCE_GITHUB.equals(updateSource()) ? "GitHub" : "GitCode") + " 检查更新...", Toast.LENGTH_SHORT).show();
         checkUpdate(true);
     }
 
     private void checkUpdate(boolean manual) {
+        final String selectedSource = updateSource(); // 本次请求固定来源，设置切换不影响在途请求
         AppExecutors.runOnIo(() -> {
             try {
-                UpdateInfo info = fetchLatestRelease();
-                if (prefs != null) prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, System.currentTimeMillis()).apply();
+                UpdateInfo info = fetchLatestRelease(selectedSource);
+                if (prefs != null && selectedSource.equals(updateSource())) prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, System.currentTimeMillis()).apply();
                 String current = getCurrentVersionName();
                 boolean newer = info != null && isNewerVersion(info.version, current);
                 runOnUiThread(() -> {
@@ -7647,38 +7692,40 @@ private void checkUpdateOnStartupIfEnabled() {
         });
     }
 
-    private UpdateInfo fetchLatestRelease() throws Exception {
-        UpdateSource[] sources = new UpdateSource[]{
-                new UpdateSource("GitHub", UPDATE_GITHUB_API_URL, UPDATE_GITHUB_REPO_URL, "application/vnd.github+json"),
-                new UpdateSource("GitCode", UPDATE_GITCODE_API_URL, UPDATE_GITCODE_REPO_URL, "application/json")
-        };
-        Exception lastError = null;
-        for (UpdateSource source : sources) {
-            try {
-                return fetchLatestReleaseFrom(source);
-            } catch (Exception e) {
-                lastError = e;
-                Log.w("YukiHub", "update check source failed: " + source.name, e);
-            }
-        }
-        throw lastError == null ? new RuntimeException("所有更新源均不可用") : lastError;
+    private String updateSource() {
+        String saved = prefs == null ? UPDATE_SOURCE_GITCODE : prefs.getString(KEY_UPDATE_SOURCE, UPDATE_SOURCE_GITCODE);
+        return UPDATE_SOURCE_GITHUB.equals(saved) ? UPDATE_SOURCE_GITHUB : UPDATE_SOURCE_GITCODE;
+    }
+
+    private UpdateInfo fetchLatestRelease(String selectedSource) throws Exception {
+        UpdateSource source = UPDATE_SOURCE_GITHUB.equals(selectedSource)
+                ? new UpdateSource("GitHub", UPDATE_GITHUB_API_URL, UPDATE_GITHUB_REPO_URL, "application/vnd.github+json")
+                : new UpdateSource("GitCode", UPDATE_GITCODE_API_URL, UPDATE_GITCODE_REPO_URL, "application/json");
+        // 尊重单选来源；失败时提示用户换源，不静默回退到另一站点。
+        try { return fetchLatestReleaseFrom(source); }
+        catch (Exception e) { throw new RuntimeException(source.name + " 更新源不可用，可在设置中切换更新源", e); }
     }
 
     private UpdateInfo fetchLatestReleaseFrom(UpdateSource source) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(source.apiUrl).openConnection();
-        c.setRequestMethod("GET");
-        c.setInstanceFollowRedirects(true);
-        c.setConnectTimeout(12000);
-        c.setReadTimeout(15000);
-        c.setRequestProperty("Accept", source.accept);
-        c.setRequestProperty("User-Agent", "YukiHub-Android/" + getCurrentVersionName());
-        int code = c.getResponseCode();
-        String text = readSmallText(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
-        if (code < 200 || code >= 300) throw new RuntimeException(source.name + " HTTP " + code + ": " + trimForDialog(text, 160));
-        JSONObject o = new JSONObject(text == null ? "{}" : text);
-        UpdateInfo info = parseReleaseInfo(o, source);
-        if (info.version == null || info.version.isEmpty()) throw new RuntimeException(source.name + " 未返回有效版本号");
-        return info;
+        try {
+            c.setRequestMethod("GET");
+            c.setInstanceFollowRedirects(true);
+            c.setConnectTimeout(12000);
+            c.setReadTimeout(15000);
+            c.setRequestProperty("Accept", source.accept);
+            c.setRequestProperty("User-Agent", "YukiHub-Android/" + getCurrentVersionName());
+            int code = c.getResponseCode();
+            String text;
+            try (InputStream stream = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream()) {
+                text = readSmallText(stream);
+            }
+            if (code < 200 || code >= 300) throw new RuntimeException(source.name + " HTTP " + code + ": " + trimForDialog(text, 160));
+            JSONObject o = new JSONObject(text == null ? "{}" : text);
+            UpdateInfo info = parseReleaseInfo(o, source);
+            if (info.version == null || info.version.isEmpty()) throw new RuntimeException(source.name + " 未返回有效版本号");
+            return info;
+        } finally { c.disconnect(); }
     }
 
     private UpdateInfo parseReleaseInfo(JSONObject o, UpdateSource source) {
@@ -7689,7 +7736,10 @@ private void checkUpdateOnStartupIfEnabled() {
         info.version = normalizeVersion(info.tagName);
         info.name = o.optString("name", info.tagName);
         info.body = o.optString("body", "");
-        info.releaseUrl = o.optString("html_url", source.repoUrl + "/releases");
+        info.releaseUrl = o.optString("html_url", "");
+        if (info.releaseUrl.trim().isEmpty()) {
+            info.releaseUrl = source.repoUrl + "/releases" + (info.tagName.isEmpty() ? "" : "/tag/" + Uri.encode(info.tagName));
+        }
         JSONArray assets = o.optJSONArray("assets");
         if (assets != null) {
             for (int i = 0; i < assets.length(); i++) {
@@ -7774,7 +7824,7 @@ private void checkUpdateOnStartupIfEnabled() {
                 .setTitle("发现新版本 " + emptyText(latestLabel, ""))
                 .setMessage(msg.toString())
                 .setPositiveButton("前往下载", (d, w) -> openExternalUrl(emptyText(info.apkUrl, info.releaseUrl)))
-                .setNeutralButton("发布页", (d, w) -> openExternalUrl(emptyText(info.releaseUrl, emptyText(info.repoUrl, UPDATE_GITHUB_REPO_URL) + "/releases")))
+                .setNeutralButton("发布页", (d, w) -> openExternalUrl(emptyText(info.releaseUrl, emptyText(info.repoUrl, UPDATE_GITCODE_REPO_URL) + "/releases")))
                 .setNegativeButton("稍后", null)
                 .show();
         styleAlertDialogDark(dialog);

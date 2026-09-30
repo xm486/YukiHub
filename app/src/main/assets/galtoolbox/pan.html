@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>网盘转换+Base64+兽音译者(最终版)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+body{max-width:700px;margin:50px auto;padding:0 20px;background:#f5f7fa}
+.container{background:#fff;padding:30px;border-radius:12px;box-shadow:0 2px 15px rgba(0,0,0,0.08)}
+h2{text-align:center;margin-bottom:25px;color:#333}
+textarea{width:100%;height:80px;padding:12px 15px;border:1px solid #ddd;border-radius:8px;font-size:15px;resize:none;margin-bottom:15px}
+.btn-group{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+button{padding:10px 16px;border:none;border-radius:8px;background:#2d8cf0;color:#fff;font-size:14px;cursor:pointer;flex:1;min-width:120px}
+button:hover{opacity:.9}
+.btn-123{background:#00c853}
+.btn-quark{background:#4f46e5}
+.btn-base64{background:#6366f1}
+.btn-roar{background:#ec4899}
+.result-box{padding:15px;background:#f8f9fa;border-radius:8px;word-break:break-all;min-height:50px;margin-bottom:15px;border:1px solid #eee}
+.copy-open{display:flex;gap:10px}
+.tab{display:flex;gap:10px;margin-bottom:20px}
+.tab button{flex:1;background:#e2e8f0;color:#333}
+.tab button.active{background:#2d8cf0;color:#fff}
+.page{display:none}
+.page.active{display:block}
+.dict-input{display:flex;gap:8px;margin-bottom:15px}
+.dict-input input{width:25%;padding:8px;text-align:center;font-size:16px;border:1px solid #ddd;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>网盘转换 & 解加密工具</h2>
+
+  <div class="tab">
+	<button class="tab-btn active" onclick="goTab('pan', this)">网盘转换</button>
+	<button class="tab-btn" onclick="goTab('base64', this)">Base64</button>
+	<button class="tab-btn" onclick="goTab('roar', this)">兽音译者</button>
+  </div>
+
+  <!-- 网盘 -->
+  <div id="pan" class="page active">
+	<textarea id="input-pan" placeholder="请输入网盘后缀：132vSs1UGjdSuQ4nM-hNzNg?pwd=2dq1"></textarea>
+	<div class="btn-group">
+	  <button onclick="toBaidu()">百度网盘</button>
+	  <button class="btn-123" onclick="to123()">123网盘</button>
+	  <button class="btn-quark" onclick="toQuark()">夸克网盘</button>
+	</div>
+	<div class="result-box" id="result-pan"></div>
+	<div class="copy-open">
+	  <button onclick="copy('pan')">复制链接</button>
+	  <button onclick="openLink()">直接打开</button>
+	</div>
+  </div>
+
+  <!-- Base64 -->
+  <div id="base64" class="page">
+	<textarea id="input-base64" placeholder="输入文字或Base64密文"></textarea>
+	<div class="btn-group">
+	  <button class="btn-base64" onclick="base64Enc()">Base64 加密</button>
+	  <button class="btn-base64" onclick="base64Dec()">Base64 解密</button>
+	</div>
+	<div class="result-box" id="result-base64"></div>
+	<button onclick="copy('base64')">复制结果</button>
+  </div>
+
+  <!-- 兽音译者（你最终版规则 + 自定义字符） -->
+  <div id="roar" class="page">
+	<div class="dict-input">
+	  <input type="text" id="c0" value="嗷" maxlength="2">
+	  <input type="text" id="c1" value="呜" maxlength="2">
+	  <input type="text" id="c2" value="啊" maxlength="2">
+	  <input type="text" id="c3" value="~" maxlength="2">
+	</div>
+	<textarea id="input-roar" placeholder="输入文字：老吾，你高你高你高"></textarea>
+	<div class="btn-group">
+	  <button class="btn-roar" onclick="doEncode()">文字 → 兽音</button>
+	  <button class="btn-roar" onclick="doDecode()">兽音 → 文字</button>
+	</div>
+	<div class="result-box" id="result-roar"></div>
+	<button onclick="copy('roar')">复制结果</button>
+	<br><br>
+	<p>功能不全请前往<a href="https://roar.iiilab.com/">兽音译者官网</a></p>
+  </div>
+</div>
+
+<script>
+let current = { pan: "", base64: "", roar: "" }
+
+// 标签页切换
+function goTab(id, btn) {
+  document.querySelectorAll('.page').forEach(e => e.classList.remove('active'))
+  document.querySelectorAll('.tab-btn').forEach(e => e.classList.remove('active'))
+  document.getElementById(id).classList.add('active')
+  if (btn) btn.classList.add('active')
+}
+
+// ================== 网盘转换 ==================
+function toBaidu() {
+  const v = document.getElementById('input-pan').value.trim()
+  if (!v) return alert('请输入内容')
+  current.pan = `https://pan.baidu.com/s/${v}`
+  document.getElementById('result-pan').innerText = current.pan
+}
+function to123() {
+  const v = document.getElementById('input-pan').value.trim()
+  if (!v) return alert('请输入内容')
+  current.pan = `https://www.123pan.com/s/${v}`
+  document.getElementById('result-pan').innerText = current.pan
+}
+function toQuark() {
+  const v = document.getElementById('input-pan').value.trim()
+  if (!v) return alert('请输入内容')
+  current.pan = `https://pan.quark.cn/s/${v}`
+  document.getElementById('result-pan').innerText = current.pan
+}
+function openLink() {
+  if (!current.pan) return alert('请先生成链接')
+  window.open(current.pan, '_blank')
+}
+
+// ================== Base64 ==================
+function base64Enc() {
+  const v = document.getElementById('input-base64').value
+  current.base64 = btoa(unescape(encodeURIComponent(v)))
+  document.getElementById('result-base64').innerText = current.base64
+}
+function base64Dec() {
+  try {
+	const v = document.getElementById('input-base64').value
+	current.base64 = decodeURIComponent(escape(atob(v)))
+	document.getElementById('result-base64').innerText = current.base64
+  } catch (e) {
+	alert('Base64格式不正确')
+  }
+}
+
+// ================== 你最终版兽音算法 ==================
+function getBeastDictArr() {
+  return [
+	document.getElementById('c0').value.trim() || '嗷',
+	document.getElementById('c1').value.trim() || '呜',
+	document.getElementById('c2').value.trim() || '啊',
+	document.getElementById('c3').value.trim() || '~'
+  ]
+}
+
+// 加密：自动加 ~呜嗷 开头 + 啊 结尾
+function toBeast(rawStr, beastDictArr) {
+  let charArr = rawStr.split("")
+  let unicodeHexStr = ""
+  for (let i = 0; i < charArr.length; i++) {
+	let charHexStr = charArr[i].charCodeAt(0).toString(16)
+	while (charHexStr.length < 4) {
+	  charHexStr = "0" + charHexStr
+	}
+	unicodeHexStr += charHexStr
+  }
+  let k = 0
+  let unicodeHexStrArr = unicodeHexStr.split("")
+  let beastStr = ""
+  for (let i = 0; i < unicodeHexStrArr.length; i++) {
+	let unicodeHexCharValue = parseInt("0x" + unicodeHexStrArr[i])
+	k = unicodeHexCharValue + (i % 0x10)
+	if (k >= 0x10) {
+	  k = k - 0x10
+	}
+	beastStr += beastDictArr[parseInt(k / 4)] + beastDictArr[(k % 4)]
+  }
+  return "~呜嗷" + beastStr + "啊"
+}
+
+// 解密：自动去掉前3位、后1位
+function fromBeast(decoratedBeastStr, beastDictArr) {
+  let beastStr = decoratedBeastStr.substring(3, decoratedBeastStr.length - 1)
+  let unicodeHexStr = ""
+  let beastStrArr = beastStr.split("")
+  for (let i = 0; i <= (beastStr.length - 2); i += 2) {
+	let beastCharStr = ""
+	let pos1 = 0
+	beastCharStr = beastStrArr[i]
+	for (; pos1 <= 3; pos1++) {
+	  if (beastCharStr == beastDictArr[pos1]) {
+		break
+	  }
+	}
+	let pos2 = 0
+	beastCharStr = beastStrArr[i + 1]
+	for (; pos2 <= 3; pos2++) {
+	  if (beastCharStr == beastDictArr[pos2]) {
+		break
+	  }
+	}
+	let k = (pos1 * 4) + pos2
+	let unicodeHexCharValue = k - (parseInt(i / 2) % 0x10)
+	if (unicodeHexCharValue < 0) {
+	  unicodeHexCharValue += 0x10
+	}
+	unicodeHexStr += unicodeHexCharValue.toString(16)
+  }
+  let rawStr = ""
+  let start = 0
+  let end = 4
+  while (end <= unicodeHexStr.length) {
+	let charHexStr = unicodeHexStr.substring(start, end)
+	let charStr = String.fromCharCode(parseInt("0x" + charHexStr))
+	rawStr += charStr
+	start += 4
+	end += 4
+  }
+  return rawStr
+}
+
+// 界面调用
+function doEncode() {
+  const txt = document.getElementById('input-roar').value
+  if (!txt) return alert('请输入文字')
+  const dict = getBeastDictArr()
+  current.roar = toBeast(txt, dict)
+  document.getElementById('result-roar').innerText = current.roar
+}
+function doDecode() {
+  const txt = document.getElementById('input-roar').value
+  if (!txt) return alert('请输入兽音')
+  const dict = getBeastDictArr()
+  try {
+	current.roar = fromBeast(txt, dict)
+  } catch (e) {
+	current.roar = '解码失败'
+  }
+  document.getElementById('result-roar').innerText = current.roar
+}
+
+// ================== 复制 ==================
+function copy(which) {
+  const txt = current[which]
+  if (!txt) return alert('无内容可复制')
+  // 某些 Android WebView / 非安全上下文不提供 navigator.clipboard，回退到用户点击触发的 execCommand。
+  const fallback = () => {
+    const input = document.createElement('textarea')
+    input.value = txt
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.appendChild(input)
+    input.select()
+    let ok = false
+    try { ok = document.execCommand('copy') } catch (e) { }
+    input.remove()
+    alert(ok ? '复制成功！' : '复制失败，请长按结果手动复制')
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(() => alert('复制成功！')).catch(fallback)
+  } else fallback()
+}
+</script>
+</body>
+</html>

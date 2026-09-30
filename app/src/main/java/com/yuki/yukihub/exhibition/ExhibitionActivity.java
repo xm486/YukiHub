@@ -80,10 +80,10 @@ public class ExhibitionActivity extends AppCompatActivity {
     private static final String ONLINE_URL = "https://yukihub.zh.kg/community/exhibition/";
     /**
      * 在线展厅是否已就绪。
-     * M0 阶段服务器页面还没做，置 false 显示占位说明；
-     * M2 上线后把这里改成 true 即可（一行）。
+     * M2 上线后置 true（在线页面已可加载：大场景 + 化身 + 博物馆 + 在线人数）。
+     * 此前为 false 显示占位说明。
      */
-    private static final boolean ONLINE_READY = false;
+    private static final boolean ONLINE_READY = true;
 
     private WebView webView;
     private int mode = MODE_LOCAL;

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+	<meta charset="utf-8"/>
+	<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+	<title>Gal工具箱–实用工具推荐</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+			background: #f5f5f5;
+			color: #333;
+			line-height: 1.6;
+			min-height: 100vh;
+			display: flex;
+			flex-direction: column;
+		}
+
+		header {
+			background: #2c3e50;
+			color: white;
+			padding: 2rem 0;
+			text-align: center;
+			box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+		}
+
+		h1 {
+			font-size: 2rem;
+			font-weight: 400;
+			letter-spacing: 2px;
+		}
+
+		.subtitle {
+			margin-top: 0.5rem;
+			opacity: 0.8;
+			font-size: 0.9rem;
+		}
+
+		main {
+			flex: 1;
+			max-width: 1200px;
+			margin: 2rem auto;
+			padding: 0 1rem;
+			width: 100%;
+		}
+
+		.tools-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+			gap: 1.5rem;
+		}
+
+		.tool-card {
+			background: white;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+			padding: 1.5rem;
+			transition: all 0.3s ease;
+			border-radius: 4%;
+		}
+
+		.tool-card:hover {
+			border-color: #3498db;
+			box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+			transform: translateY(-3px);
+		}
+
+		.tool-icon {
+			width: 48px;
+			height: 48px;
+			background: #ecf0f1;
+			border-radius: 4px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 1.5rem;
+			margin-bottom: 1rem;
+		}
+
+		.tool-title {
+			font-size: 1.1rem;
+			font-weight: 500;
+			margin-bottom: 0.5rem;
+		}
+
+		.tool-desc {
+			font-size: 0.9rem;
+			color: #666;
+			margin-bottom: 1rem;
+		}
+
+		.tool-btn {
+			background: #3498db;
+			color: white;
+			border: none;
+			padding: 0.5rem 1rem;
+			border-radius: 3px;
+			cursor: pointer;
+			font-size: 0.85rem;
+			transition: background 0.2s;
+			text-decoration: none;
+			display: inline-block;
+				margin-left:68%;
+		}
+
+		.tool-btn:hover {
+			background: #2980b9;
+		}
+
+		footer {
+			background: #34495e;
+			color: white;
+			text-align: center;
+			padding: 1.5rem;
+			margin-top: auto;
+		}
+
+		.footer-text {
+			font-size: 0.85rem;
+			opacity: 0.7;
+		}
+
+		@media (max-width: 768px) {
+			h1 {
+				font-size: 1.5rem;
+			}
+			
+			.tools-grid {
+				grid-template-columns: 1fr;
+			}
+		}
+		
+		.a1{
+		color: red;
+		}
+		
+	</style>
+	<link rel="icon" href="/favicon.ico" type="image/x-icon">
+</head>
+<body>
+<!-- Default Statcounter code for index web https://xm486.github.io/ -->
+<script type="text/javascript">
+var sc_project=13206107; 
+var sc_invisible=1; 
+var sc_security="ac6d25b6"; 
+</script>
+<script type="text/javascript"
+src="https://www.statcounter.com/counter/counter.js" async></script>
+<noscript><div class="statcounter"><a title="web statistics"
+href="https://statcounter.com/" target="_blank"><img loading="lazy" class="statcounter"
+src="https://c.statcounter.com/13206107/0/ac6d25b6/1/" alt="web statistics"
+referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
+<!-- End of Statcounter Code -->
+	<header>
+		<h1>GAL TOOLBOX</h1>
+		<p class="subtitle">一些实用工具推荐</p>
+	</header>
+
+	<main>
+		<div class="tools-grid">
+		    <div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://raw.gitcode.com/xm486/YukiHub/files/main/screenshots/icon_new.png" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">YukiHub</h3>
+				<p class="tool-desc">一个移动端的gal管理器工具，并且又着类steam的社交系统，和类小黑盒的社区。</p>
+				<p>⭐推荐理由:站长制作，必冲(bushi)，自己用的也挺舒服的。</p>
+				<a class="tool-btn" href="https://gitcode.com/xm486/YukiHub/releases" target="_blank">立即下载</a>
+			</div>
+			
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://wstoolbox.cn/wstoolbox.png" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">WSToolbox</h3>
+				<p class="tool-desc">让您的Android设备变身服务器支持多种服务，轻松监控系统资源，管理配置文件，适合开发者和服务器爱好者。</p>
+				<p>⭐推荐理由:支持html，php，mysql，功能挺全面的，很方便，想学习前端的必入!</p>
+				<a class="tool-btn" href="https://wstoolbox.cn/" target="_blank">立即下载</a>
+			</div>
+			
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://pic.qqans.com/up/2024-3/20243281549516897.png" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">LocalSend</h3>
+				<p class="tool-desc">将文件分享到附近的设备。免费、开源、跨平台。</p>
+				<p>⭐推荐理由:好用，多设备互传</p>
+				<a class="tool-btn" href="https://localsend.org/zh-CN" target="_blank">立即下载</a>
+			</div>
+
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://img.ddooo.com/logo/20240807/a3fb34969e5fb58b44b808e1572e4130.png" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">1DM</h3>
+				<p class="tool-desc">1DM是一款非常方便好用的手机下载工具，完美兼容多款浏览器，多线程下载、bt功能，种子、压缩文件、文档、视频、程序等，还支持设置下载任务，可以设置开始下载和结束下载的时间，下载速度也是非常的快，节省你的时间，让下载变得更加轻松简单，是十分实用的下载神器。</p>
+				<p>⭐推荐理由:手机上的下载神器</p>
+				<a class="tool-btn" href="https://m.ddooo.com/softdown/211721.htm" target="_blank">立即下载</a>
+			</div>
+
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://www.dircleaner.com/logo.png" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">清浊</h3>
+				<p class="tool-desc">简洁实用的清理工具。</p>
+				<p>⭐推荐理由:up一直在用的，还行，不赖</p>
+				<a class="tool-btn" href="https://www.dircleaner.com/" target="_blank">立即下载</a>
+			</div>
+			
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://www.moeyg.cn/image/me.jpg" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">萌鸢阁–永远追随的小站</h3>
+				<p class="tool-desc">你想要的生活和你想过的生活</p>
+				<p class="tool-desc">☛萌鸢阁–探索二次元美好瞬间☚</p>
+				<img loading="lazy" src="https://www.moeyg.cn/images/1.gif" alt="图片描述">
+				<p>⭐推荐理由:一个相当好用的导航站，集合了非常多的acg二次元网站，且不止二次元</p>
+				<a class="tool-btn" href="https://www.moeyg.cn/" target="_blank">立即访问</a>
+			</div>
+			
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://shionlib.com/_next/image?url=https%3A%2F%2Fwww.uuznav.com%2Ffavicon.ico&w=96&q=75" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">UUZ导航 | ACG导航站</h3>
+				<p class="tool-desc">一个简约美观实用的导航网站，这里收录着超100个优秀优质的网站！</p>
+				<p>⭐推荐理由:也是一个相当不错的ACG导航站</p>
+				<a class="tool-btn" href="https://www.uuznav.com/" target="_blank">立即访问</a>
+			</div>
+			
+			<div class="tool-card">
+				<div class="tool-icon" style="overflow: hidden; border-radius:25%; border: 2px solid pink;"><img loading="lazy" src="https://img.ddooo.com/logo/20251119/b11cb597bf439aac8ff0529eea392afb.png" alt="图片描述" style="width: 100%; overflow: hidden;"></div>
+				<h3 class="tool-title">萌娘助手</h3>
+				<p class="tool-desc">萌娘助手App是一款专为网盘用户打造的免费高速下载工具，聚焦解决主流网盘限速痛点。该应用深度整合百度网盘、夸克网盘、123网盘等各大网盘平台，通过智能解析技术生成高速直链，突破官方下载速度限制，实现文件全速传输。同时萌娘助手App支持单文件最高150GB的超大容量下载，并针对大文件优化断点续传与网络波动补偿算法，确保传输稳定性。除基础的高速下载外，萌娘助手App还提供批量解析、失效链接自动检测、Cookie自定义等进阶服务，有需要的用户可以在本站免费下载使用，目前夸克网盘链接解析功能是可以全部免费使用的。</p>
+				<p>⭐推荐理由:夸克不限速下载，不赖，链接是视频地址，可以去评论区下</p>
+				<a class="tool-btn" href="https://b23.tv/pZw1pXw" target="_blank">立即访问</a>
+			</div>
+			
+			<div class="tool-card a1">
+				<h3>一些问题(雾)</h3>
+				<p>-站长站长，流量不够用了怎么办呀</p>
+				<p>-站长站长，最近换新手机了，旧手机怎么处理呀</p>
+				<p>-站长站长，最近熬夜长痘痘了怎么办呀</p>
+				<p>-站长站长，点外卖太贵了怎么办呀</p>
+				<h2 style="color:#3399ff;">对于这些，站长只能表示，站长暂时还不知道哦</h2>
+			</div>
+			
+		</div>
+		
+	</main>
+
+	<footer>
+		<p class="footer-text">© 2025 GalToolbox | 专注于简洁与实用</p>
+	</footer>
+
+</body></html>

@@ -53,31 +53,42 @@
         white-space: pre;
     }
 
-    /* ==================== 右上：调试面板 ==================== */
+    /* 右上设置：与在线展厅相同的齿轮入口 + 收起式面板 */
+    #btn-settings {
+        position: fixed; right: max(14px, env(safe-area-inset-right));
+        top: max(12px, env(safe-area-inset-top)); z-index: 35;
+        width: 44px; height: 44px; padding: 0; border-radius: 11px;
+        border: 1px solid var(--hud-line); background: var(--hud-bg);
+        color: var(--hud-fg); font-size: 22px; touch-action: manipulation;
+    }
+    #btn-settings[hidden], #debug[hidden], #settings-dismiss[hidden] { display: none; }
+    #settings-dismiss { position: fixed; inset: 0; z-index: 31; background: transparent; touch-action: none; }
     #debug {
-        position: fixed; top: 9px; right: 10px;
-        display: flex; flex-direction: column; gap: 6px;
-        align-items: flex-end;
-        z-index: 30;
+        position: fixed; right: max(14px, env(safe-area-inset-right));
+        top: calc(max(12px, env(safe-area-inset-top)) + 52px); z-index: 36;
+        width: min(280px, calc(100vw - 28px)); padding: 12px;
+        max-height: calc(100vh - max(12px, env(safe-area-inset-top)) - 68px - env(safe-area-inset-bottom));
+        max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - 68px - env(safe-area-inset-bottom));
+        overflow-y: auto; overscroll-behavior: contain;
+        border: 1px solid rgba(170,205,255,.28); border-radius: 14px;
+        background: rgba(10,16,28,.92); box-shadow: 0 12px 34px rgba(0,0,0,.32);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     }
-    .btn {
-        min-width: 84px;
-        padding: 7px 11px;
-        border-radius: 10px;
-        border: 1px solid var(--hud-line);
-        background: var(--hud-bg);
-        color: var(--hud-fg);
-        font-size: 11px; font-weight: 600;
-        text-align: center;
-        backdrop-filter: blur(9px);
-        -webkit-backdrop-filter: blur(9px);
-        touch-action: manipulation;
+    .set-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .set-title { margin: 0; color: var(--hud-fg); font-size: 13px; font-weight: 700; }
+    .set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(170,205,255,.1);
+        color: var(--hud-dim); font-size: 12px; }
+    .set-row > span { flex-shrink: 0; }
+    .set-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+    .set-btn { min-height: 44px; min-width: 44px; padding: 6px 8px; border-radius: 8px;
+        border: 1px solid rgba(170,205,255,.2); background: rgba(255,255,255,.06);
+        color: #C8D6E8; font: inherit; font-size: 12px; touch-action: manipulation; }
+    .set-btn:active, #btn-settings:active { transform: scale(.96); }
+    .set-btn.on, #btn-settings[aria-expanded="true"] {
+        border-color: #7FC4FF; background: rgba(127,196,255,.22); color: #FFF;
     }
-    .btn:active { transform: scale(.96); }
-    .btn.on {
-        border-color: rgba(127,196,255,.75);
-        box-shadow: 0 0 0 1px rgba(127,196,255,.35) inset, 0 0 14px rgba(127,196,255,.22);
-    }
+    .set-btn:focus-visible, #btn-settings:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     /* ==================== 动态摇杆（左半屏按下处浮现） ==================== */
     #joystick {
@@ -294,12 +305,31 @@
 <div id="pad-hint" hidden>
     <span class="pad-icon">🎮</span> 手柄已连接
 </div>
-<div id="debug" hidden>
-    <div class="btn" id="btn-scale">渲染倍率 1.50x</div>
-    <div class="btn on" id="btn-fps">帧率上限：60</div>
-    <div class="btn" id="btn-detail">详细数据：开</div>
-    <div class="btn" id="btn-sound">声音：开</div>
-</div>
+<button id="btn-settings" type="button" aria-label="展厅设置" aria-controls="debug" aria-expanded="false" hidden>⚙</button>
+<div id="settings-dismiss" hidden aria-hidden="true"></div>
+<section id="debug" hidden aria-labelledby="settings-title">
+    <div class="set-head"><h2 id="settings-title" class="set-title">展厅设置</h2>
+        <button id="btn-settings-close" class="set-btn" type="button" aria-label="关闭设置">×</button></div>
+    <div class="set-row"><span>画质倍率</span><div class="set-buttons" role="group" aria-label="画质倍率">
+        <button class="set-btn" type="button" data-scale="1">1.0x</button>
+        <button class="set-btn" type="button" data-scale="1.5">1.5x</button>
+        <button class="set-btn" type="button" data-scale="2">2.0x</button>
+        <button class="set-btn" type="button" data-scale="2.5">2.5x</button>
+        <button class="set-btn" type="button" data-scale="3">3.0x</button>
+    </div></div>
+    <div class="set-row"><span>帧率上限</span><div class="set-buttons" role="group" aria-label="帧率上限">
+        <button class="set-btn" type="button" data-fps="30">30</button>
+        <button class="set-btn" type="button" data-fps="60">60</button>
+        <button class="set-btn" type="button" data-fps="90">90</button>
+        <button class="set-btn" type="button" data-fps="0">不限</button>
+    </div></div>
+    <div class="set-row"><span>视角灵敏度</span><div class="set-buttons" role="group" aria-label="视角灵敏度">
+        <button class="set-btn" type="button" data-look="1">标准</button>
+        <button class="set-btn" type="button" data-look="1.6">高</button>
+    </div></div>
+    <div class="set-row"><span>性能详情</span><button class="set-btn" type="button" id="btn-detail">开</button></div>
+    <div class="set-row"><span>声音</span><button class="set-btn" type="button" id="btn-sound">开</button></div>
+</section>
 
 <div id="joystick"><div id="joy-knob"></div></div>
 
@@ -388,7 +418,7 @@
     /* 选品浮层：全屏遮罩 + 居中面板 */
     /* ---------- 手柄连接提示（Q4） ---------- */
     #pad-hint {
-        position: fixed; top: 14px; right: 16px; z-index: 40;
+        position: fixed; top: max(14px, env(safe-area-inset-top)); right: calc(max(14px, env(safe-area-inset-right)) + 52px); z-index: 30;
         padding: 7px 13px; border-radius: 999px;
         background: rgba(20, 28, 42, .82);
         border: 1px solid rgba(120, 220, 190, .45);

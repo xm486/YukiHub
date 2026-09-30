@@ -125,6 +125,15 @@
             android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|layoutDirection" />
 
+        <!-- 新网页版 Gal 工具箱独立宿主；网页随 APK 打包，外部站点交给浏览器。 -->
+        <activity
+            android:name=".galtoolbox.GalToolboxActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden|navigation|uiMode" />
+
         <activity
             android:name=".HomeActivity"
             android:exported="false"
