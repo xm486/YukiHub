@@ -256,7 +256,7 @@
                                 <TextView android:id="@+id/homeHeroSubtitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="从游戏库添加或选择一个游戏" android:textColor="#E8FFFFFF" android:textSize="9sp" />
                             </LinearLayout>
 
-                            <TextView android:id="@+id/homeHeroAction" android:layout_width="108dp" android:layout_height="40dp" android:background="@drawable/bg_home_primary_pill" android:clickable="true" android:focusable="true" android:gravity="center" android:text="继续游戏" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/homeHeroAction" android:layout_width="108dp" android:layout_height="40dp" android:background="@drawable/bg_home_action_glass" android:clickable="true" android:focusable="true" android:gravity="center" android:text="继续游戏" android:textColor="#FFFFFFFF" android:textSize="10sp" android:textStyle="bold" />
                         </LinearLayout>
                     </FrameLayout>
 

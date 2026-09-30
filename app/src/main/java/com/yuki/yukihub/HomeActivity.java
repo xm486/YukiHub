@@ -237,11 +237,13 @@ public class HomeActivity extends AppCompatActivity {
         homeNewsLoading = findViewById(R.id.homeNewsLoading);
         homeNewsDots = findViewById(R.id.homeNewsDots);
         homeNewsRefresh = findViewById(R.id.homeNewsRefresh);
-        // hero 主按钮的播放图标（布局里只留文字，图标在此内联，保证与文字紧贴居中）
-        View heroActionView = findViewById(R.id.homeHeroAction);
-        if (heroActionView instanceof TextView) {
-            com.yuki.yukihub.util.IconedText.set((TextView) heroActionView,
-                    R.drawable.ic_btn_play, " 继续游戏", 10f, 0xFFFFFFFF);
+        // 首页专用半透明紫色胶囊：不复用游戏库实色背景，图标与文字统一白色。
+        TextView heroActionView = findViewById(R.id.homeHeroAction);
+        if (heroActionView != null) {
+            heroActionView.setBackgroundResource(R.drawable.bg_home_action_glass);
+            heroActionView.setTextColor(Color.WHITE);
+            com.yuki.yukihub.util.IconedText.set(heroActionView,
+                    R.drawable.ic_btn_play, " 继续游戏", 10f, Color.WHITE);
         }
 
         // 题图区四角圆角裁切（画框式）。遮罩用无圆角版 bg_home_news_overlay：
@@ -1621,12 +1623,14 @@ long difference = today - yesterday;
         card.addView(title, new LinearLayout.LayoutParams(dp(62), dp(14)));
 
         TextView button = new TextView(this);
-        com.yuki.yukihub.util.IconedText.set(button, R.drawable.ic_btn_play, " 启动", 7f, Color.WHITE);
         button.setGravity(android.view.Gravity.CENTER);
-        button.setTextColor(Color.WHITE);
         button.setTextSize(7);
         button.setTypeface(null, android.graphics.Typeface.BOLD);
-        button.setBackgroundResource(R.drawable.bg_home_primary_pill);
+        // 首页快捷启动：约 18% 白底 + 淡白边，整张卡片仍可启动游戏。
+        button.setBackgroundResource(R.drawable.bg_home_quick_action_glass);
+        button.setTextColor(Color.WHITE);
+        com.yuki.yukihub.util.IconedText.set(button, R.drawable.ic_btn_play, " 启动", 7f, Color.WHITE);
+        button.setDuplicateParentStateEnabled(true);
         card.addView(button, new LinearLayout.LayoutParams(dp(62), dp(16)));
 
         card.setOnClickListener(v -> {
