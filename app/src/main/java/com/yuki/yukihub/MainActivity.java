@@ -1,5 +1,7 @@
 package com.yuki.yukihub;
 
+import com.yuki.yukihub.util.ActionButtonStyle;
+
 import android.Manifest;
 import android.animation.ObjectAnimator;
 import android.app.AlertDialog;
@@ -1258,24 +1260,11 @@ private void scheduleVideoThemeExtraction() {
         sideScreenshot2.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_cover_placeholder) : tintCoverPlaceholder(colors));
     }
 
-    // Launch button (background only)
-    TextView sideBtnLaunch = findViewById(R.id.sideBtnLaunch);
-    if (sideBtnLaunch != null) {
-        sideBtnLaunch.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
-    }
-    // Options button (background only)
+    // 次级选项仍沿用输入框风格；主/工具按钮在通用主题处理后统一刷新。
     TextView sideBtnOptions = findViewById(R.id.sideBtnOptions);
     if (sideBtnOptions != null) {
         sideBtnOptions.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_input) : tintInput(colors));
     }
-
-    // Top bar buttons (background only)
-    View btnScan = findViewById(R.id.btnScan);
-    if (btnScan != null) btnScan.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
-    TextView btnAdd = findViewById(R.id.btnAdd);
-    if (btnAdd != null) btnAdd.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
-    View btnSettings = findViewById(R.id.btnSettings);
-    if (btnSettings != null) btnSettings.setBackground(resetting ? ContextCompat.getDrawable(this, R.drawable.bg_yuki_button) : tintButton(colors));
 
     // Nav buttons (background only)
     int[] navIds = {R.id.navHome, R.id.navLibrary, R.id.navBigScreen, R.id.navChat};
@@ -1367,6 +1356,9 @@ private void scheduleVideoThemeExtraction() {
     if (mainRoot instanceof ViewGroup) {
         tintMainTextColors((ViewGroup) mainRoot, resetting ? null : colors);
     }
+    // 通用主题递归之后恢复按钮层级，同时重建 ImageSpan 的 tint。
+    refreshLibraryActionStyles(resetting ? null : colors);
+    updateFilterSelection();
 }
 
 /** Recursively tint text colors in the main layout for dynamic theme. */
@@ -1470,6 +1462,51 @@ private void tintMainTextColors(ViewGroup root, ThemeColorExtractor.ThemeColors 
         }
         return d;
     }
+
+/** 工具与主按钮共享刷新入口，避免背景更新后 ImageSpan 仍保持旧颜色。 */
+private void refreshLibraryActionStyles(ThemeColorExtractor.ThemeColors colors) {
+    View scan = findViewById(R.id.btnScan);
+    ActionButtonStyle.apply(scan, ActionButtonStyle.TOOL, colors);
+    styleIconAction(findViewById(R.id.tvScanLabel), ActionButtonStyle.TOOL,
+            R.drawable.ic_st_search, " 扫描", colors);
+    styleIconAction(findViewById(R.id.btnAdd), ActionButtonStyle.TOOL,
+            R.drawable.ic_st_plus, " 添加", colors);
+    styleIconAction(findViewById(R.id.btnSettings), ActionButtonStyle.TOOL,
+            R.drawable.ic_btn_settings, " 设置", colors);
+    styleIconAction(findViewById(R.id.sideBtnLaunch), ActionButtonStyle.PRIMARY,
+            R.drawable.ic_btn_play, " 开始", colors);
+}
+
+private void styleIconAction(TextView view, int role, int icon, String label,
+                             ThemeColorExtractor.ThemeColors colors) {
+    if (view == null) return;
+    // 扫描标签属于 FrameLayout，不给它再画一层按钮背景。
+    if (view.getId() != R.id.tvScanLabel) ActionButtonStyle.apply(view, role, colors);
+    int fg = ActionButtonStyle.foreground(this, role, colors);
+    view.setTextColor(fg);
+    com.yuki.yukihub.util.IconedText.set(view, icon, label, 9f, fg);
+}
+
+private boolean applyTaggedActionStyle(View view, ThemeColorExtractor.ThemeColors colors) {
+    Object tag = view.getTag();
+    int role;
+    if (ActionButtonStyle.TAG_TOOL.equals(tag)) role = ActionButtonStyle.TOOL;
+    else if (ActionButtonStyle.TAG_PRIMARY.equals(tag)) role = ActionButtonStyle.PRIMARY;
+    else if (ActionButtonStyle.TAG_FILTER.equals(tag)) {
+        role = view.isSelected() ? ActionButtonStyle.FILTER : ActionButtonStyle.TOOL;
+    } else return false;
+    ActionButtonStyle.apply(view, role, colors);
+    return true;
+}
+
+private void styleGameEditActions(ViewGroup root, ThemeColorExtractor.ThemeColors colors) {
+    if (root == null) return;
+    for (int i = 0; i < root.getChildCount(); i++) {
+        View child = root.getChildAt(i);
+        applyTaggedActionStyle(child, colors);
+        if (child instanceof ViewGroup) styleGameEditActions((ViewGroup) child, colors);
+    }
+}
 
 /** Create a primary action button background with dynamic colors.
      * 渐变模式时使用真正的渐变色 c1→c2。 */
@@ -1594,6 +1631,9 @@ private void tintDialogChildren(ViewGroup root, ThemeColorExtractor.ThemeColors 
         if (child instanceof ViewGroup) {
             tintDialogChildren((ViewGroup) child, colors);
         }
+
+        // 编辑弹窗按钮按明确的语义处理，不再靠文字深浅猜按钮类型。
+        if (applyTaggedActionStyle(child, colors)) continue;
 
         // ViewGroup with bg_dialog background → replace with tintDialog
         if (child instanceof ViewGroup && !(child instanceof RecyclerView) && !(child instanceof FrameLayout)
@@ -1933,7 +1973,7 @@ sideBtnLaunch = findViewById(R.id.sideBtnLaunch);
         prepareManualClickFeedback(sideDescToggle);
         prepareManualClickFeedback(sideTranslateToggle);
         // 用 ImageSpan 把开始/选项图标紧贴文字并垂直居中（不走 drawableStart，避免图标与文字分离）
-        setIconedText(sideBtnLaunch, R.drawable.ic_btn_play, " 开始", 0xFF071221);
+        setIconedText(sideBtnLaunch, R.drawable.ic_btn_play, " 开始", getColorCompat(R.color.yh_action_primary_text));
         setIconedText(sideBtnOptions, R.drawable.ic_btn_settings, " 选项", -1);
         sideBtnLaunch.setOnClickListener(v -> { clickFeedback(v); if (selectedGame != null) launchGame(selectedGame); });
         sideBtnOptions.setOnClickListener(v -> { clickFeedback(v); if (selectedGame != null) showSideOptions(selectedGame); });
@@ -1976,15 +2016,15 @@ adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
         ensureMultiSelectBar();
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
-        // 顶栏按钮的内联图标（深色文字底，图标同色）
+        // 顶栏深色工具按钮：浅色文字，图标同色
         if (addButton instanceof TextView) {
             com.yuki.yukihub.util.IconedText.set((TextView) addButton,
-                    R.drawable.ic_st_plus, " 添加", 9f, 0xFF000000);
+                    R.drawable.ic_st_plus, " 添加", 9f, getColorCompat(R.color.yh_action_tool_text));
         }
         TextView scanLabel = findViewById(R.id.tvScanLabel);
         if (scanLabel != null) {
             com.yuki.yukihub.util.IconedText.set(scanLabel,
-                    R.drawable.ic_st_search, " 扫描", 9f, 0xFF000000);
+                    R.drawable.ic_st_search, " 扫描", 9f, getColorCompat(R.color.yh_action_tool_text));
         }
         ivScanLoading = findViewById(R.id.ivScanLoading);
         applyTopActionFeedback(addButton);
@@ -2001,10 +2041,11 @@ if (settingsButton != null) {
     prepareManualClickFeedback(settingsButton);
     // 用 ImageSpan 将小图标紧贴文字并垂直居中（不走 drawableStart，避免图标与文字分离）
     if (settingsButton instanceof android.widget.TextView) {
-        setIconedText((android.widget.TextView) settingsButton, R.drawable.ic_btn_settings, " 设置", 0xFF071221);
+        setIconedText((android.widget.TextView) settingsButton, R.drawable.ic_btn_settings, " 设置", getColorCompat(R.color.yh_action_tool_text));
     }
     settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
 }
+refreshLibraryActionStyles(ActionButtonStyle.activeColors());
 // 通知按钮
 View btnNotice = findViewById(R.id.btnNotice);
 if (btnNotice != null) {
@@ -4646,8 +4687,8 @@ private void updateStatusFilterSelection() {
         TextView tv = (TextView) child;
         child.setAlpha(selected ? 1f : 0.82f);
         // 文字色变化时图标 tint 必须一起重建：ImageSpan 持有的是已着色的 Drawable，
-        // 只改 setTextColor 不会传导到图标，选中态（浅蓝底深字）下图标会看不见。
-        int fg = selected ? 0xFF071221 : getColorCompat(R.color.yh_text);
+        // 只改 setTextColor 不会传导到图标，选中态下图标必须与文字一起着色。
+        int fg = selected ? ActionButtonStyle.foreground(this, ActionButtonStyle.FILTER) : getColorCompat(R.color.yh_text);
         String label = value.isEmpty() ? "全部"
                 : com.yuki.yukihub.util.IconedText.labelForStatus(
                         value.toLowerCase(java.util.Locale.ROOT));
@@ -4656,7 +4697,7 @@ private void updateStatusFilterSelection() {
                 label, 8f, fg));
         tv.setTextColor(fg);
         if (selected) {
-            child.setBackgroundResource(R.drawable.bg_yuki_button);
+            ActionButtonStyle.apply(child, ActionButtonStyle.FILTER);
         } else {
             child.setBackgroundResource(R.drawable.bg_input);
         }
@@ -4743,8 +4784,8 @@ private void updateDeveloperFilterSelection() {
         TextView tv = (TextView) child;
         child.setAlpha(selected ? 1f : 0.82f);
         if (selected) {
-            child.setBackgroundResource(R.drawable.bg_yuki_button);
-            tv.setTextColor(0xFF071221);
+            ActionButtonStyle.apply(child, ActionButtonStyle.FILTER);
+            tv.setTextColor(ActionButtonStyle.foreground(this, ActionButtonStyle.FILTER));
         } else {
             child.setBackgroundResource(R.drawable.bg_input);
             tv.setTextColor(getColorCompat(R.color.yh_text));
@@ -4788,13 +4829,14 @@ private void bindFilter(int id, String value) {
         view.setAlpha(selected ? 1f : 0.82f);
         if (view instanceof TextView) {
             TextView tv = (TextView) view;
-            int fg = selected ? 0xFF071221 : getColorCompat(R.color.yh_text);
+            int fg = selected ? ActionButtonStyle.foreground(this, ActionButtonStyle.FILTER) : getColorCompat(R.color.yh_text);
             // 收藏项带心形图标；文字色随选中态变化，图标 tint 必须同步重建
             if (id == R.id.filterFavorite) {
                 com.yuki.yukihub.util.IconedText.set(tv, R.drawable.ic_st_heart, " 收藏", 8f, fg);
             }
             tv.setTextColor(fg);
-            view.setBackgroundResource(selected ? R.drawable.bg_yuki_button : R.drawable.bg_input);
+            if (selected) ActionButtonStyle.apply(view, ActionButtonStyle.FILTER);
+            else view.setBackgroundResource(R.drawable.bg_input);
             tv.setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         }
     }
@@ -8806,6 +8848,7 @@ private String displayPath(String value) {
         Dialog d = new Dialog(this); pendingEditDialog = d;
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         d.setContentView(R.layout.dialog_game_edit);
+        styleGameEditActions((ViewGroup) d.findViewById(android.R.id.content), ActionButtonStyle.activeColors());
         // Apply dynamic theme to the dialog's root ScrollView
         View dialogRoot = d.findViewById(R.id.editDialogTitle);
         if (dialogRoot != null) {
@@ -9166,6 +9209,9 @@ compatV2.setSelected(isV2);
         std.setAlpha(std.isSelected() ? 1f : 0.55f);
         compat.setAlpha(compat.isSelected() ? 1f : 0.55f);
         compatV2.setAlpha(compatV2.isSelected() ? 1f : 0.55f);
+        for (Button button : new Button[]{auto, std, compat, compatV2}) {
+            ActionButtonStyle.apply(button, button.isSelected() ? ActionButtonStyle.FILTER : ActionButtonStyle.TOOL);
+        }
     }
 
     private String normalizeArtemisPackage(String value) {

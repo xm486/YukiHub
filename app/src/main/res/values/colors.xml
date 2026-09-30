@@ -12,4 +12,8 @@
     <color name="yh_line">#2D3658</color>
     <color name="yh_success">#34C759</color>
     <color name="yh_warning">#FFCC00</color>
+    <!-- 按钮层级：工具 / 筛选选中 / 主操作 -->
+    <color name="yh_action_tool_text">#E5EAF4</color>
+    <color name="yh_action_selected_text">#E1DCFF</color>
+    <color name="yh_action_primary_text">#F5F4FF</color>
 </resources>

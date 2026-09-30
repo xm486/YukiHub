@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 首页快捷启动专用：约 18% 白底 + 淡白边，状态跟随整张快捷卡片。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#14FFFFFF" />
+            <stroke android:width="1dp" android:color="#1CFFFFFF" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#42FFFFFF" />
+            <stroke android:width="1dp" android:color="#59FFFFFF" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#38FFFFFF" />
+            <stroke android:width="1dp" android:color="#59FFFFFF" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#2EFFFFFF" />
+            <stroke android:width="1dp" android:color="#38FFFFFF" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+</selector>

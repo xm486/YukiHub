@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 首页专用：半透明紫色胶囊。与已确认的 HTML 方案保持同色，不使用模糊/外发光。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#4D5B4B8F" />
+            <stroke android:width="1dp" android:color="#2EFFFFFF" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#BB5B4B8F" />
+            <stroke android:width="1dp" android:color="#80FFFFFF" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#AA5B4B8F" />
+            <stroke android:width="1dp" android:color="#80FFFFFF" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#995B4B8F" />
+            <stroke android:width="1dp" android:color="#59FFFFFF" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+</selector>
