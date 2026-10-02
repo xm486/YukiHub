@@ -3262,13 +3262,12 @@ private void performAuthRequest(boolean register, String email, String password,
     AppExecutors.runOnIo(() -> {
         try {
             String endpoint = register ? "/auth/register" : "/auth/login";
-            String params = "email=" + java.net.URLEncoder.encode(email, "UTF-8")
-                    + "&password=" + java.net.URLEncoder.encode(password, "UTF-8");
-            if (register) {
-                params += "&nickname=" + java.net.URLEncoder.encode(nickname, "UTF-8");
-            }
-            String url = base + endpoint + "?" + params;
-            JSONObject resp = getJson(url);
+            // 登录/注册改用 POST + JSON body，密码不再进入 URL 与访问日志（见 AuthActivity 同步修改）。
+            JSONObject body = new JSONObject();
+            body.put("email", email);
+            body.put("password", password);
+            if (register) body.put("nickname", nickname);
+            JSONObject resp = postJson(base + endpoint, body, null);
 
             saveAuthSession(resp, email, nickname);
             runOnUiThread(() -> {
