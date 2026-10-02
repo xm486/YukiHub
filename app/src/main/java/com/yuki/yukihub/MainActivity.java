@@ -315,6 +315,7 @@ private static final String KEY_KUN_OAUTH_STATE = "kun_oauth_state";
     private static final String KUN_OAUTH_MODE_BIND = "bind";
     private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
     // M19-1：账号中心迁移 —— oauth.kungal.com → account.nextmoe.com（同 AuthActivity）
+    // M19-2：用户可见品牌更名「NextMoe·未萌」（原「鲲 Galgame」）；KUN_*/kungal 为历史命名，保留勿改。
     private static final String KUN_OAUTH_AUTHORIZE_URL = "https://account.nextmoe.com/api/v1/oauth/authorize";
     private static final String KUN_OAUTH_REDIRECT_URI = "yukihub://oauth/callback";
     private static final String KUN_OAUTH_SCOPE = "openid profile email";
@@ -2328,12 +2329,12 @@ private void showProfileDialog() {
     iconLp.setMargins(0, 0, dp(6), 0);
     kunRow.addView(kunIcon, iconLp);
     TextView kunStatus = new TextView(this);
-    kunStatus.setText(kungalBound() ? "鲲 Galgame · 已绑定" : "鲲 Galgame · 未绑定");
+    kunStatus.setText(kungalBound() ? "NextMoe · 已绑定" : "NextMoe · 未绑定");
     kunStatus.setTextColor(kungalBound() ? 0xFFE8FFE9 : getColorCompat(R.color.yh_text_muted));
     kunStatus.setTextSize(12);
     kunStatus.setGravity(android.view.Gravity.CENTER_VERTICAL);
     kunRow.addView(kunStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-    Button kunBindBtn = krButton(kungalBound() ? "已绑定" : "绑定鲲账号");
+    Button kunBindBtn = krButton(kungalBound() ? "已绑定" : "绑定 NextMoe");
     kunBindBtn.setTextColor(kungalBound() ? getColorCompat(R.color.yh_text_muted) : primaryTextColor());
     kunBindBtn.setEnabled(isLoggedIn() && !kungalBound());
     kunBindBtn.setOnClickListener(v -> startKungalBindOAuth());
@@ -2641,7 +2642,7 @@ private void startKungalBindOAuth() {
                 .build();
         startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE));
     } catch (Throwable t) {
-        Toast.makeText(this, "无法打开鲲站绑定页面：" + emptyText(t.getMessage(), "请检查浏览器"), Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "无法打开 NextMoe·未萌 绑定页面：" + emptyText(t.getMessage(), "请检查浏览器"), Toast.LENGTH_LONG).show();
     }
 }
 
@@ -6523,7 +6524,7 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(disclaimerTitle);
         TextView disclaimerInfo = new TextView(this);
         disclaimerInfo.setText("本应用为开源项目，旨在帮助用户管理与启动自己拥有权限的游戏/应用资源。" +
-                "使用者需自行确认所添加内容、账号、第三方登录（鲲 / Hikarinagi）、同步服务及第三方组件的合法性与可用性。\n\n" +
+                "使用者需自行确认所添加内容、账号、第三方登录（NextMoe·未萌 / Hikarinagi）、同步服务及第三方组件的合法性与可用性。\n\n" +
                 "程序不提供任何游戏资源、破解资源或绕过授权的能力；Shizuku、GameHub、WebDAV、VNDB、Bangumi、月幕 Gal、Hikarinagi、KIRIKIRI2、Tyranno、Winlator 等第三方服务/应用均由其各自规则与可用性决定。\n\n" +
                 "若你不同意上述内容，请不要继续使用相关功能。" );
         disclaimerInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
@@ -6624,14 +6625,14 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(sourceTitle);
 
         Spinner sourceSpinner = new Spinner(this);
-        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）", "NextMoe（鲲站授权）"});
+        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "NextMoe（推荐 · 未萌授权）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
-        if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(1);
-else if (MetadataController.SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(2);
-else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
-else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(4);
-else if (MetadataController.SOURCE_NEXTMOE.equals(currentSource)) sourceSpinner.setSelection(5);
+        if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(2);
+else if (MetadataController.SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(3);
+else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(4);
+else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(5);
+else if (MetadataController.SOURCE_NEXTMOE.equals(currentSource)) sourceSpinner.setSelection(1);
 else sourceSpinner.setSelection(0);
         root.addView(sourceSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
@@ -6680,7 +6681,7 @@ else sourceSpinner.setSelection(0);
         root.addView(nextmoeButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         TextView nextmoeHint = new TextView(this);
-        nextmoeHint.setText("NextMoe 会打开系统浏览器跳转鲲站授权，完成后自动回到本页。\n令牌加密存储在设备内，断开即全部清除。");
+        nextmoeHint.setText("NextMoe 会打开系统浏览器跳转未萌授权，完成后自动回到本页。\n令牌加密存储在设备内，断开即全部清除。");
         nextmoeHint.setTextColor(getColorCompat(R.color.yh_text_muted));
         nextmoeHint.setTextSize(10);
         nextmoeHint.setPadding(0, dp(4), 0, dp(4));
@@ -6980,11 +6981,11 @@ else sourceSpinner.setSelection(0);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             int sourceSelection = sourceSpinner.getSelectedItemPosition();
-            boolean bangumi = sourceSelection == 1;
-            boolean bangumiMirror = sourceSelection == 2;
-            boolean ymgal = sourceSelection == 3;
-            boolean hikarinagi = sourceSelection == 4;
-            boolean nextmoe = sourceSelection == 5;
+            boolean bangumi = sourceSelection == 2;
+            boolean bangumiMirror = sourceSelection == 3;
+            boolean ymgal = sourceSelection == 4;
+            boolean hikarinagi = sourceSelection == 5;
+            boolean nextmoe = sourceSelection == 1;
             String selectedMetadataSource = nextmoe ? MetadataController.SOURCE_NEXTMOE : (hikarinagi ? MetadataController.SOURCE_HIKARINAGI : (ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB))));
             String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
             if ((bangumi || bangumiMirror) && token.isEmpty()) {
@@ -7918,7 +7919,7 @@ private void checkUpdateOnStartupIfEnabled() {
         String text = "免责声明\n\n" +
                 "1. 本应用为开源项目，仅用于管理、整理和启动用户本人有权使用的游戏与应用，不提供任何游戏本体、破解资源、绕过授权或规避版权/平台规则的能力。\n\n" +
                 "2. 用户应自行确保所添加资源、账号、同步内容、社区内容以及第三方服务的合法性、完整性与可用性；因使用这些内容产生的责任由用户自行承担。\n\n" +
-                "3. 第三方登录（鲲 Galgame、Hikarinagi 等账号体系）仅用于身份关联与云同步，账号数据、头像与资料由其对应平台的规则决定；请妥善保管你的账号与授权，避免在不可信设备上登录。\n\n" +
+                "3. 第三方登录（NextMoe·未萌、Hikarinagi 等账号体系）仅用于身份关联与云同步，账号数据、头像与资料由其对应平台的规则决定；请妥善保管你的账号与授权，避免在不可信设备上登录。\n\n" +
                 "4. 云同步（WebDAV / 服务器）、好友聊天、在线状态与社区功能依赖外部服务与网络环境，可能因服务变更、网络状况或账号状态而不可用或产生数据差异。\n\n" +
                 "5. 游戏启动依赖 KIRIKIRI2、Tyranno、Artemis、ONScripter、Winlator、盖世等第三方引擎与应用；启动文件的自动选择、快速/兼容扫描模式等仅提供尽力而为的适配，不保证所有资源均可正确启动。\n\n" +
                 "6. 游戏资料刮削（VNDB、Bangumi、月幕 Gal、Hikarinagi 等）获取的封面、简介与标签来自第三方元数据服务，可能不准确或不完整，仅供整理与参考。\n\n" +

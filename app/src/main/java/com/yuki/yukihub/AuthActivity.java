@@ -58,6 +58,7 @@ public class AuthActivity extends AppCompatActivity {
     private static final String BROWSER_UA = "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36";
 
     // KUN quick login. Fill KUN_ANDROID_CLIENT_ID after the OAuth app is issued.
+    // 内部命名说明：KUN_* / kungal 为历史命名，对应用户可见品牌「NextMoe·未萌」（原「鲲 Galgame」，M19-2 品牌更名）。
     private static final String KUN_ANDROID_CLIENT_ID = "16cc006913d6b666c6b1a1a115f644de";
     // M19-1：账号中心迁移 —— 原「鲲 Galgame」oauth.kungal.com → account.nextmoe.com
     // 旧域名虽 308 跳转，但跨域跳转会丢 Authorization 头（userinfo 必 401），必须换。
@@ -179,7 +180,7 @@ protected void onDestroy() {
     btnAuthClose = findViewById(R.id.btnAuthClose);
     btnKungalLogin = findViewById(R.id.btnKungalLogin);
     btnHikarinagiLogin = findViewById(R.id.btnHikarinagiLogin);
-    // 限制鲲站图标尺寸，防止撑满按钮
+    // 限制 NextMoe·未萌 图标尺寸，防止撑满按钮
     if (btnKungalLogin != null) {
         Drawable[] drawables = btnKungalLogin.getCompoundDrawablesRelative();
         if (drawables[0] != null) {
@@ -468,7 +469,7 @@ private String extractServerError(Throwable t) {
 
 private void startKungalQuickLogin() {
     if (KUN_ANDROID_CLIENT_ID.startsWith("TODO_")) {
-        showStatus("鲲站快捷登录还没有配置 client_id，稍后在 AuthActivity.java 中填写", 0xFFFF9500);
+        showStatus("NextMoe·未萌 快捷登录还没有配置 client_id，稍后在 AuthActivity.java 中填写", 0xFFFF9500);
         return;
     }
     try {
@@ -492,13 +493,13 @@ private void startKungalQuickLogin() {
                 .appendQueryParameter("code_challenge_method", "S256")
                 .build();
 
-        showStatus("正在打开鲲站授权页面...", 0xFF8E9AB5);
+        showStatus("正在打开 NextMoe·未萌 授权页面...", 0xFF8E9AB5);
         Intent i = new Intent(Intent.ACTION_VIEW, uri);
         i.addCategory(Intent.CATEGORY_BROWSABLE);
         startActivity(i);
     } catch (Throwable t) {
         Log.w("YukiHub", "start KUN quick login failed", t);
-        showStatus("无法打开鲲站快捷登录：" + (t.getMessage() == null ? "请检查浏览器" : t.getMessage()), 0xFFFF3B30);
+        showStatus("无法打开 NextMoe·未萌 快捷登录：" + (t.getMessage() == null ? "请检查浏览器" : t.getMessage()), 0xFFFF3B30);
     }
 }
 
