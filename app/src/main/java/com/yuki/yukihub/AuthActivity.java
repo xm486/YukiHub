@@ -598,17 +598,19 @@ private void testApiConnection() {
     new Thread(() -> {
         try {
             JSONObject resp;
-            
-            // 注册和登录都用 GET 方式
+
+            // 登录/注册改用 POST + JSON body：密码不能出现在 query string 里，
+            // 否则会被服务器访问日志与中间代理原文记录。服务端两种方式都支持，
+            // 这里统一走 POST；服务端未来强制 POST 后无需再改。
             String endpoint = registerMode ? "/auth/register" : "/auth/login";
-            String params = "email=" + java.net.URLEncoder.encode(email, "UTF-8")
-                    + "&password=" + java.net.URLEncoder.encode(password, "UTF-8");
+            JSONObject body = new JSONObject();
+            body.put("email", email);
+            body.put("password", password);
             if (registerMode) {
-                params += "&nickname=" + java.net.URLEncoder.encode(nickname, "UTF-8");
-                params += "&code=" + java.net.URLEncoder.encode(verifyCode, "UTF-8");
+                body.put("nickname", nickname);
+                body.put("code", verifyCode);
             }
-            String url = AUTH_BASE_URL + endpoint + "?" + params;
-            resp = getJson(url);
+            resp = postJson(AUTH_BASE_URL + endpoint, body);
             
             saveSession(resp, email, nickname);
 
