@@ -653,7 +653,7 @@ public class MetadataController {
             return;
         }
         if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
-            delegate.setSideDescription("NextMoe 尚未连接。\n\n请在「设置 → 右侧资料源」下方点击「连接 NextMoe 账号」，\n用鲲站账号授权后即可使用本源（按你的账号计配额）。");
+            delegate.setSideDescription("NextMoe 尚未连接。\n\n请在「设置 → 右侧资料源」下方点击「连接 NextMoe 账号」，\n用未萌账号授权后即可使用本源（按你的账号计配额）。");
             return;
         }
         delegate.setSideDescription("正在从 NextMoe 获取资料…");

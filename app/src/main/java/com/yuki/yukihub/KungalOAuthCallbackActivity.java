@@ -21,7 +21,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Receives yukihub://oauth/callback from KUN OAuth and converts it into a normal YukiHub session.
+ * Receives yukihub://oauth/callback from the NextMoe·未萌 account center (formerly 鲲 Galgame).
+ * Note: kungal/KUN identifiers are kept as historical names; user-visible brand is now 「NextMoe·未萌」.
  * This is an additive third-party quick-login path; the existing email login/register flow is untouched.
  */
 public class KungalOAuthCallbackActivity extends AppCompatActivity {
@@ -62,7 +63,7 @@ public class KungalOAuthCallbackActivity extends AppCompatActivity {
         status.setGravity(Gravity.CENTER);
         status.setTextColor(0xFFEAF7FF);
         status.setTextSize(15);
-        status.setText("正在完成鲲站快捷登录...");
+        status.setText("正在完成 NextMoe·未萌 快捷登录...");
         status.setBackgroundColor(0xFF0B1020);
         setContentView(status);
 
@@ -76,7 +77,7 @@ public class KungalOAuthCallbackActivity extends AppCompatActivity {
         }
         String error = uri.getQueryParameter("error");
         if (error != null && !error.trim().isEmpty()) {
-            fail("鲲站登录取消或失败：" + error);
+            fail("NextMoe·未萌 登录取消或失败：" + error);
             return;
         }
         String code = uri.getQueryParameter("code");
@@ -126,16 +127,16 @@ public class KungalOAuthCallbackActivity extends AppCompatActivity {
                     prefs.edit().putBoolean(KEY_KUN_BOUND, true).apply();
                 }
                 clearPendingOAuth();
-                runOnUiThread(() -> openProfile("鲲站账号绑定成功"));
+                runOnUiThread(() -> openProfile("NextMoe·未萌 账号绑定成功"));
             } else {
                 JSONObject resp = postJson(AUTH_BASE_URL + "/auth/kungal/android_callback", body, null);
                 saveSession(resp);
                 clearPendingOAuth();
-                runOnUiThread(() -> openProfile("鲲站快捷登录成功"));
+                runOnUiThread(() -> openProfile("NextMoe·未萌 快捷登录成功"));
             }
         } catch (Throwable t) {
             String mode = prefs == null ? "" : prefs.getString(KEY_KUN_OAUTH_MODE, "");
-            runOnUiThread(() -> fail((KUN_OAUTH_MODE_BIND.equals(mode) ? "鲲站账号绑定失败：" : "鲲站快捷登录失败：") + readableError(t)));
+            runOnUiThread(() -> fail((KUN_OAUTH_MODE_BIND.equals(mode) ? "NextMoe·未萌 账号绑定失败：" : "NextMoe·未萌 快捷登录失败：") + readableError(t)));
         }
     }
 

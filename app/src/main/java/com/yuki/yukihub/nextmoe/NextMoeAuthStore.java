@@ -57,7 +57,7 @@ public final class NextMoeAuthStore {
         return prefs().getLong(KEY_ACCESS_EXP, 0L);
     }
 
-    /** 授权页/同意页上展示的账号标识（鲲站登录名），未连接时为空。 */
+    /** 授权页/同意页上展示的账号标识（NextMoe·未萌 登录名），未连接时为空。 */
     public static String getAccountLabel() {
         return prefs().getString(KEY_ACCOUNT_LABEL, "");
     }

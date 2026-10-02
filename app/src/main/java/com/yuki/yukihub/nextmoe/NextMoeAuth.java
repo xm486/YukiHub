@@ -39,8 +39,8 @@ public final class NextMoeAuth {
     public static final String CALLBACK_HOST = "http://127.0.0.1";
     public static final String CALLBACK_PATH = "/callback";
     /**
-     * OAuth client id。复用 YukiHub 现役的「YukiHub Android」客户端（与鲲站快捷登录同一 client）：
-     * 该 client 在鲲 OAuth 后台由站主配置 redirect_uris / allowed_scopes / grants，
+     * OAuth client id。复用 YukiHub 现役的「YukiHub Android」客户端（与 NextMoe·未萌 快捷登录同一 client）：
+     * 该 client 在 NextMoe·未萌 OAuth 后台由站主配置 redirect_uris / allowed_scopes / grants，
      * 已追加环回回调 http://127.0.0.1/callback 并勾选 catalog:read。
      * client_id 是公开标识，非机密；public client 走 PKCE，无 client_secret。
      */
@@ -186,7 +186,7 @@ public final class NextMoeAuth {
         String text = readAll(http >= 200 && http < 300 ? c.getInputStream() : c.getErrorStream());
         try { c.disconnect(); } catch (Throwable ignored) { }
 
-        // 5xx 是服务端瞬态故障（鲲文档 #13：保留会话并重试），不清凭据
+        // 5xx 是服务端瞬态故障（NextMoe·未萌 文档 #13：保留会话并重试），不清凭据
         if (http >= 500) throw new OAuthException("OAuth 服务暂时不可用（HTTP " + http + "），请稍后重试", true);
         if (http >= 400) throw parseErrorStandard(text, http);
         return unwrap(text, http);
@@ -206,7 +206,7 @@ public final class NextMoeAuth {
     }
 
     /**
-     * 标准格式解析（裸 RFC 6749）。鲲站线格式已于 2026-09 前完成信封→标准的切换
+     * 标准格式解析（裸 RFC 6749）。NextMoe·未萌 线上格式已于 2026-09 前完成信封→标准的切换
      * （docs-kungal.nextmoe.dev #13；实测 /oauth/token 错误返回 {error, error_description}）。
      */
     private static JSONObject unwrap(String body, int http) throws Exception {
