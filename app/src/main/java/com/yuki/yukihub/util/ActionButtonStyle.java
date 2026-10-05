@@ -112,7 +112,11 @@ public final class ActionButtonStyle {
         if (role == PRIMARY) {
             // 高亮最多轻微变亮，不破坏白字可读性。
             int changed = ColorUtils.blendARGB(fill, pressed ? Color.BLACK : Color.WHITE, pressed ? 0.14f : 0.04f);
-            return ColorUtils.calculateContrast(0xFFF5F4FF, changed) >= 4.5 ? changed : fill;
+            // calculateContrast 的背景色必须完全不透明（alpha=255），否则直接抛
+            // IllegalArgumentException——0.3「自定义主题颜色」闪退的根因
+            //（取色器存下的颜色带 alpha，如 #FE516890，实时预览/开屏应用主题时炸）。
+            // 这里对喂进去的背景强制补 opaque，彻底封死。
+            return ColorUtils.calculateContrast(0xFFF5F4FF, opaque(changed)) >= 4.5 ? changed : fill;
         }
         return withAlpha(ColorUtils.blendARGB(opaque(fill), Color.WHITE, pressed ? 0.08f : 0.05f), 0xEE);
     }
@@ -120,7 +124,7 @@ public final class ActionButtonStyle {
     private static int readablePrimary(int accent, int bg) {
         int result = ColorUtils.blendARGB(opaque(bg), accent, 0.68f);
         // 自定义色可能是亮黄/白色，收低明度而不改成黑字；保留主操作白色图标。
-        for (int i = 0; i < 20 && ColorUtils.calculateContrast(0xFFF5F4FF, result) < 4.5; i++) {
+        for (int i = 0; i < 20 && ColorUtils.calculateContrast(0xFFF5F4FF, opaque(result)) < 4.5; i++) {
             result = ColorUtils.blendARGB(result, Color.BLACK, 0.08f);
         }
         return result;
