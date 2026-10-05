@@ -1157,6 +1157,30 @@ private void scheduleVideoThemeExtraction() {
 
 /** Apply dynamic theme colors to all UI components. Pass null to reset to defaults. */
     private void applyDynamicTheme(ThemeColorExtractor.ThemeColors colors) {
+        // 主题应用绝不允许把异常抛出去：0.3 的自定义主题色闪退就是
+        // 「半透明色喂给 calculateContrast → 炸 → 颜色已存盘 → 每次开屏必崩」的闪退循环。
+        // 这里兜底：任何异常都降级为默认主题并停用自定义颜色，下次启动自愈。
+        try {
+            applyDynamicThemeInner(colors);
+        } catch (Throwable t) {
+            android.util.Log.e("YukiTheme", "applyDynamicTheme failed, fallback to default theme", t);
+            try {
+                DynamicTheme dt = DynamicTheme.getInstance();
+                dt.setCustomColorEnabled(false);
+                dt.setEnabled(false);
+                dt.saveCustomColorSettings(this);
+                prefs.edit().putBoolean(DynamicTheme.KEY_BG_THEME_ENABLED, false).apply();
+            } catch (Throwable ignored) { }
+            try {
+                applyDynamicThemeInner(null);
+            } catch (Throwable ignored) { }
+            try {
+                Toast.makeText(this, "主题颜色异常，已恢复默认主题", Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) { }
+        }
+    }
+
+    private void applyDynamicThemeInner(ThemeColorExtractor.ThemeColors colors) {
         DynamicTheme dt = DynamicTheme.getInstance();
         boolean resetting = (colors == null);
         if (resetting) {
