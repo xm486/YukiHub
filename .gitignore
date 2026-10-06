@@ -92,3 +92,6 @@ lint/outputs/
 lint/tmp/
 # lint/reports/
 log/
+
+# AndroidIDE local editor state
+.androidide/

@@ -1,0 +1,85 @@
+name: Build librfvp (YukiHub text-scale patch)
+
+# 手动触发的 librfvp.so 构建流水线：
+#   拉取 rfvp 源码 → 应用 YukiHub 文字缩放补丁 → cargo 交叉编译 aarch64 → 上传 so
+# 补丁脚本与本 workflow 放在同一个仓库根目录。
+on:
+  workflow_dispatch:
+    inputs:
+      rfvp_repo:
+        description: "rfvp 源码仓库（owner/name）"
+        required: true
+        default: "xmoezzz/rfvp"
+      rfvp_ref:
+        description: "rfvp 分支 / tag / commit"
+        required: true
+        default: "main"
+      android_api:
+        description: "Android API level（链接器 minSdk）"
+        required: true
+        default: "24"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ github.workspace }}/ndk-toolchain/bin/aarch64-linux-android${{ github.event.inputs.android_api }}-clang
+      CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: ${{ github.workspace }}/ndk-toolchain/bin/llvm-ar
+    steps:
+      - name: Checkout build scripts (this repo)
+        uses: actions/checkout@v4
+
+      - name: Checkout rfvp source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.rfvp_repo }}
+          ref: ${{ github.event.inputs.rfvp_ref }}
+          path: rfvp
+
+      - name: Apply YukiHub text-scale patch (fail loudly on mismatch)
+        run: |
+          cp rfvp-build/apply_text_scale_patch.py rfvp/
+          cd rfvp
+          python3 apply_text_scale_patch.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Link NDK into expected path
+        run: |
+          ln -s "${{ steps.ndk.outputs.ndk-path }}" "${{ github.workspace }}/ndk-toolchain"
+          "${{ github.workspace }}/ndk-toolchain/bin/aarch64-linux-android${{ github.event.inputs.android_api }}-clang" --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rfvp
+          key: ${{ github.event.inputs.rfvp_repo }}@${{ github.event.inputs.rfvp_ref }}
+
+      - name: Build librfvp.so (aarch64, release)
+        working-directory: rfvp
+        run: cargo build --release --lib --target aarch64-linux-android -p rfvp
+
+      - name: Verify exports
+        run: |
+          SO=rfvp/target/aarch64-linux-android/release/librfvp.so
+          test -f "$SO"
+          "${{ github.workspace }}/ndk-toolchain/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)' 
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: librfvp-textscale-aarch64
+          path: rfvp/target/aarch64-linux-android/release/librfvp.so
+          if-no-files-found: error
