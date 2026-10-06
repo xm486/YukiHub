@@ -138,6 +138,7 @@ import com.yuki.yukihub.data.MetadataRepository;
 import com.yuki.yukihub.gamecursor.GameCursorConfig;
 import com.yuki.yukihub.gamecursor.GameCursorIconRenderer;
 import com.yuki.yukihub.launcher.EmulatorLauncher;
+import com.yuki.yukihub.launcher.PcLaunchPrefs;
 import com.yuki.yukihub.launcher.WinlatorPcLauncher;
 import com.yuki.yukihub.metadata.BangumiClient;
 import com.yuki.yukihub.metadata.MetadataController;
@@ -5730,7 +5731,7 @@ String rematchItem = "重新匹配" + sourceLabel;
         String nsfwBlurItem = nsfwBlurLabel + "：" + (nsfwBlurGameOn ? "开启" : "关闭");
         java.util.List<String> itemList = new java.util.ArrayList<>(java.util.Arrays.asList(
                 "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
-        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS) itemList.add("引擎设置");
+        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC) itemList.add("引擎设置");
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS) itemList.add("虚拟鼠标");
         // 桌面快捷方式：部分启动器（含部分定制 ROM）不支持固定快捷方式，不支持时不显示该项
         boolean shortcutSupported = com.yuki.yukihub.shortcut.GameShortcutManager.isSupported(this);
@@ -5785,7 +5786,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                     Toast.makeText(this, "NSFW 封面模糊：" + (newVal ? "开启" : "关闭"), Toast.LENGTH_SHORT).show();
                     loadGames();
                 }
-                else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game); }
+                else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else if (game.engine == EngineType.PC) showPcSettingsDialog(game); else showKrSettingsDialog(game); }
                 else if ("虚拟鼠标".equals(chosen)) showGameCursorDialog(game);
                 else if (shortcutItem.equals(chosen)) requestGameShortcut(game);
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
@@ -5991,6 +5992,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 .setMessage("确定删除 “" + game.title + "”？不会删除本体文件。")
                 .setPositiveButton("删除", (x,w)->{
                     com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id);
+                    PcLaunchPrefs.clear(this, game.id);
                     repository.delete(game.id); selectedGame = null; loadGames(); })
                 .setNegativeButton("取消", null)
                 .show();
@@ -8108,12 +8110,14 @@ private void showDetailDialog(Game game) {
         }
         d.findViewById(R.id.btnStatus).setOnClickListener(v -> showPlayStatusDialog(game, d));
         d.findViewById(R.id.btnEdit).setOnClickListener(v -> { d.dismiss(); showEditDialog(game); });
-        boolean hasEngineSettings = game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS;
+        boolean hasEngineSettings = game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC;
         d.findViewById(R.id.btnKrSettings).setVisibility(hasEngineSettings ? View.VISIBLE : View.GONE);
         d.findViewById(R.id.btnKrSettings).setOnClickListener(v -> {
-            if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game);
+            if (game.engine == EngineType.ONS) showOnsSettingsDialog(game);
+            else if (game.engine == EngineType.PC) showPcSettingsDialog(game);
+            else showKrSettingsDialog(game);
         });
-        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id); repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
+        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id); PcLaunchPrefs.clear(this, game.id); repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
         d.findViewById(R.id.btnLaunch).setOnClickListener(v -> launchGame(game));
         d.show();
         applyImmersiveToWindow(d.getWindow());
@@ -10490,6 +10494,149 @@ private void showEditPlayTimeDialog(Game game) {
     }
 
     /**
+     * PC 引擎设置：winlator-cn 外置启动的单游戏覆盖参数。
+     *
+     * <p>每项默认「跟随容器配置」（不下发该参数，由 Winlator 按容器自身配置处理）。
+     * 只做单游戏覆盖，不做全局设置——全局调优的正确入口是 Winlator 容器设置本身。
+     */
+    private void showPcSettingsDialog(Game game) {
+        if (game == null || game.id <= 0) return;
+        PcLaunchPrefs prefs = PcLaunchPrefs.load(this, game.id);
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(getColorCompat(com.yuki.yukihub.R.color.yh_card));
+        int pad = (int) (18 * getResources().getDisplayMetrics().density);
+        panel.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText("PC 引擎设置（Winlator）");
+        title.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+        title.setTextSize(22);
+        title.setPadding(0, 0, 0, pad / 2);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+
+        EditText containerId = krEdit("留空 = 跟随容器配置（如 1）", prefs.containerId);
+        containerId.setInputType(InputType.TYPE_CLASS_NUMBER);
+        EditText containerName = krEdit("留空 = 跟随容器配置（如 容器-1）", prefs.containerName);
+        // 下拉：展示中文标签，保存时映射回协议值；回显用「值 → 标签」反查
+        android.widget.Spinner graphicsDriver = krSpinner(
+                PcLaunchPrefs.GRAPHICS_DRIVER_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.GRAPHICS_DRIVER_LABELS, PcLaunchPrefs.GRAPHICS_DRIVER_VALUES, prefs.graphicsDriver));
+        android.widget.Spinner dxwrapper = krSpinner(
+                PcLaunchPrefs.DXWRAPPER_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.DXWRAPPER_LABELS, PcLaunchPrefs.DXWRAPPER_VALUES, prefs.dxwrapper));
+        android.widget.Spinner screenSize = krSpinner(
+                PcLaunchPrefs.SCREEN_SIZE_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.SCREEN_SIZE_LABELS, PcLaunchPrefs.SCREEN_SIZE_VALUES, prefs.screenSize));
+        android.widget.Spinner lcAll = krSpinner(
+                PcLaunchPrefs.LC_ALL_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.LC_ALL_LABELS, PcLaunchPrefs.LC_ALL_VALUES, prefs.lcAll));
+        android.widget.Spinner box64 = krSpinner(
+                PcLaunchPrefs.BOX64_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.BOX64_LABELS, PcLaunchPrefs.BOX64_VALUES, prefs.box64Preset));
+        android.widget.Spinner screenOrientation = krSpinner(
+                PcLaunchPrefs.ORIENTATION_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.ORIENTATION_LABELS, PcLaunchPrefs.ORIENTATION_VALUES, prefs.screenOrientation));
+        android.widget.Spinner swapResolution = krSpinner(
+                PcLaunchPrefs.SWAP_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.SWAP_LABELS, PcLaunchPrefs.SWAP_VALUES, prefs.swapResolution));
+        android.widget.Spinner forceFullscreen = krSpinner(
+                PcLaunchPrefs.BOOL10_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.BOOL10_LABELS, PcLaunchPrefs.BOOL10_VALUES, prefs.forceFullscreen));
+        android.widget.Spinner toggleFullscreen = krSpinner(
+                PcLaunchPrefs.BOOL10_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.BOOL10_LABELS, PcLaunchPrefs.BOOL10_VALUES, prefs.toggleFullscreen));
+        android.widget.Spinner audioDriver = krSpinner(
+                PcLaunchPrefs.AUDIO_LABELS,
+                PcLaunchPrefs.labelOfValue(PcLaunchPrefs.AUDIO_LABELS, PcLaunchPrefs.AUDIO_VALUES, prefs.audioDriver));
+        EditText envVars = krEdit("如 WINEDLLOVERRIDES=d3d9=n,b（空格分隔，留空跟随）", prefs.envVars);
+        EditText execArgs = krEdit("如 -windowed（追加启动参数，留空跟随）", prefs.execArgs);
+        CheckBox saveToContainer = krCheckBox("把本次覆盖写入容器配置（持久化到容器）", prefs.save);
+
+        root.addView(krLabel("容器 ID（数字，优先于容器名；留空跟随容器配置）"));
+        root.addView(containerId);
+        root.addView(krLabel("容器名（支持中文，大小写不敏感）"));
+        root.addView(containerName);
+        root.addView(krLabel("图形驱动"));
+        root.addView(graphicsDriver);
+        root.addView(krLabel("图形加速"));
+        root.addView(dxwrapper);
+        root.addView(krLabel("分辨率"));
+        root.addView(screenSize);
+        root.addView(krLabel("语言环境（LC_ALL）"));
+        root.addView(lcAll);
+        root.addView(krLabel("Box64 预设"));
+        root.addView(box64);
+        root.addView(krLabel("屏幕方向"));
+        root.addView(screenOrientation);
+        root.addView(krLabel("交换宽高"));
+        root.addView(swapResolution);
+        root.addView(krLabel("强制全屏"));
+        root.addView(forceFullscreen);
+        root.addView(krLabel("可切换全屏"));
+        root.addView(toggleFullscreen);
+        root.addView(krLabel("音频驱动"));
+        root.addView(audioDriver);
+        root.addView(krLabel("环境变量（高级）"));
+        root.addView(envVars);
+        root.addView(krLabel("追加启动参数（会话级，不写入容器）"));
+        root.addView(execArgs);
+        root.addView(saveToContainer);
+
+        TextView tip = krLabel("说明：留空或「跟随容器配置」表示不下发该参数，交由 Winlator 按容器自身配置处理（想全局调整请直接改容器设置）。环境变量格式不合法时会自动忽略（不下发）；需要改时区可在环境变量里填 TZ=Asia/Tokyo。修改后下次启动生效。");
+        tip.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        root.addView(tip);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, pad / 2, 0, 0);
+        Button cancel = krButton("取消");
+        Button save = krButton("保存");
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, (int) (44 * getResources().getDisplayMetrics().density), 1));
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(0, (int) (44 * getResources().getDisplayMetrics().density), 1);
+        saveLp.leftMargin = pad / 2;
+        actions.addView(save, saveLp);
+
+        scroll.addView(root);
+        panel.addView(title);
+        panel.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        panel.addView(actions);
+        dialog.setContentView(panel);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> {
+            prefs.containerId = containerId.getText().toString();
+            prefs.containerName = containerName.getText().toString();
+            prefs.graphicsDriver = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.GRAPHICS_DRIVER_LABELS, PcLaunchPrefs.GRAPHICS_DRIVER_VALUES, String.valueOf(graphicsDriver.getSelectedItem()));
+            prefs.dxwrapper = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.DXWRAPPER_LABELS, PcLaunchPrefs.DXWRAPPER_VALUES, String.valueOf(dxwrapper.getSelectedItem()));
+            prefs.screenSize = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.SCREEN_SIZE_LABELS, PcLaunchPrefs.SCREEN_SIZE_VALUES, String.valueOf(screenSize.getSelectedItem()));
+            prefs.lcAll = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.LC_ALL_LABELS, PcLaunchPrefs.LC_ALL_VALUES, String.valueOf(lcAll.getSelectedItem()));
+            prefs.box64Preset = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.BOX64_LABELS, PcLaunchPrefs.BOX64_VALUES, String.valueOf(box64.getSelectedItem()));
+            prefs.screenOrientation = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.ORIENTATION_LABELS, PcLaunchPrefs.ORIENTATION_VALUES, String.valueOf(screenOrientation.getSelectedItem()));
+            prefs.swapResolution = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.SWAP_LABELS, PcLaunchPrefs.SWAP_VALUES, String.valueOf(swapResolution.getSelectedItem()));
+            prefs.forceFullscreen = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.BOOL10_LABELS, PcLaunchPrefs.BOOL10_VALUES, String.valueOf(forceFullscreen.getSelectedItem()));
+            prefs.toggleFullscreen = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.BOOL10_LABELS, PcLaunchPrefs.BOOL10_VALUES, String.valueOf(toggleFullscreen.getSelectedItem()));
+            prefs.audioDriver = PcLaunchPrefs.valueOfLabel(PcLaunchPrefs.AUDIO_LABELS, PcLaunchPrefs.AUDIO_VALUES, String.valueOf(audioDriver.getSelectedItem()));
+            prefs.envVars = envVars.getText().toString();
+            prefs.execArgs = execArgs.getText().toString();
+            prefs.save = saveToContainer.isChecked();
+            prefs.save(this, game.id);
+            Toast.makeText(MainActivity.this, "PC 引擎设置已保存", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+        dialog.show();
+        Window shownWindow = dialog.getWindow();
+        if (shownWindow != null) {
+            shownWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            shownWindow.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.72f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
+        }
+    }
+
+    /**
      * 虚拟按键当前配置的一句话摘要，显示在设置项下方。
      */
     private String onsLayoutSummary() {
@@ -11633,7 +11780,8 @@ return startActivitySafely(intent);
             return EmulatorLauncher.launch(this, pkg);
         }
         if (game.engine == EngineType.PC) {
-            WinlatorPcLauncher.Result result = WinlatorPcLauncher.launch(this, game.rootUri, launchTarget);
+            WinlatorPcLauncher.Result result = WinlatorPcLauncher.launch(
+                    this, game.rootUri, launchTarget, PcLaunchPrefs.load(this, game.id));
             if (!result.success) {
                 // 具体原因写入 lastLaunchFailReason，由外层 doLaunchGame 统一弹一条，避免双 Toast
                 if (WinlatorPcLauncher.CODE_PACKAGE_NOT_INSTALLED.equals(result.code)) {
