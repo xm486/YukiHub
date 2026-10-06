@@ -25,6 +25,8 @@
         <package android:name="com.xiaoji.egggamz" />
         <package android:name="com.akira.tyranoemu" />
         <package android:name="org.tvp.kirikiri2" />
+        <!-- PC 引擎：winlator-cn 外置启动协议（ExternalLaunchActivity） -->
+        <package android:name="com.winlator" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

@@ -138,6 +138,7 @@ import com.yuki.yukihub.data.MetadataRepository;
 import com.yuki.yukihub.gamecursor.GameCursorConfig;
 import com.yuki.yukihub.gamecursor.GameCursorIconRenderer;
 import com.yuki.yukihub.launcher.EmulatorLauncher;
+import com.yuki.yukihub.launcher.WinlatorPcLauncher;
 import com.yuki.yukihub.metadata.BangumiClient;
 import com.yuki.yukihub.metadata.MetadataController;
 import com.yuki.yukihub.metadata.VndbClient;
@@ -4691,7 +4692,7 @@ private boolean isEngineFilter(String value) {
     if (value == null) return false;
     switch (value) {
         case "KIRIKIRI": case "ONS": case "TYRANO": case "ARTEMIS":
-        case "WINLATOR": case "GAMEHUB": case "PSP": case "ANDROID":
+        case "WINLATOR": case "PC": case "GAMEHUB": case "PSP": case "ANDROID":
         case "UNKNOWN":
             return true;
         default:
@@ -4929,6 +4930,7 @@ scanMissingCoversIfNeeded();
         if ("TYRANO".equals(filter) && g.engine != EngineType.TYRANO) continue;
         if ("ARTEMIS".equals(filter) && g.engine != EngineType.ARTEMIS) continue;
         if ("WINLATOR".equals(filter) && g.engine != EngineType.WINLATOR) continue;
+        if ("PC".equals(filter) && g.engine != EngineType.PC) continue;
         if ("GAMEHUB".equals(filter) && g.engine != EngineType.GAMEHUB) continue;
         if ("PSP".equals(filter) && g.engine != EngineType.PSP) continue;
         if ("ANDROID".equals(filter) && g.engine != EngineType.ANDROID) continue;
@@ -8921,7 +8923,8 @@ private String displayPath(String value) {
         pkg.setOnClickListener(v -> showInstalledAppPicker(pkg, title));
         Runnable updateWinlatorAdvanced = () -> {
             String engine = sp.getSelectedItem() == null ? "" : sp.getSelectedItem().toString();
-            boolean isWinlator = "WINLATOR".equals(engine) || isWinlatorPackageName(pkg.getText() == null ? "" : pkg.getText().toString());
+            // PC 引擎走 winlator-cn 外置启动协议，不消费 winlatorLaunchMode，隐藏旧引擎的高级选项
+            boolean isWinlator = !"PC".equals(engine) && ("WINLATOR".equals(engine) || isWinlatorPackageName(pkg.getText() == null ? "" : pkg.getText().toString()));
             winlatorAdvancedLayout.setVisibility(isWinlator ? View.VISIBLE : View.GONE);
             gamehubLaunchLayout.setVisibility("GAMEHUB".equals(engine) ? View.VISIBLE : View.GONE);
         };
@@ -8950,7 +8953,7 @@ private String displayPath(String value) {
             public void onTextChanged(CharSequence s, int st, int b, int c) { updateWinlatorAdvanced.run(); }
             public void afterTextChanged(Editable e) {}
         });
-        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "GAMEHUB", "PSP", "ANDROID", "UNKNOWN"});
+        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "PC", "GAMEHUB", "PSP", "ANDROID", "UNKNOWN"});
         sp.setAdapter(spAdapter);
         ArrayAdapter<String> winlatorModeAdapter = krSpinnerAdapter(new String[]{"启动到游戏", "启动到程序"});
         winlatorModeSp.setAdapter(winlatorModeAdapter);
@@ -8998,6 +9001,8 @@ private String displayPath(String value) {
                     pkg.setText("internal.artemis");
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "WINLATOR".equals(engine)) {
                     pkg.setText(guessInstalledWinlatorPackage());
+                } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "PC".equals(engine)) {
+                    pkg.setText(WinlatorPcLauncher.PACKAGE_NAME);
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && isGameHub) {
                     pkg.setText(guessInstalledGameHubPackage());
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "PSP".equals(engine)) {
@@ -9065,6 +9070,7 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
             }
             if (g.engine == EngineType.ONS && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = "internal.ons";
             if (g.engine == EngineType.WINLATOR && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = guessInstalledWinlatorPackage();
+            if (g.engine == EngineType.PC && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = WinlatorPcLauncher.PACKAGE_NAME;
             if (g.engine == EngineType.GAMEHUB && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = guessInstalledGameHubPackage();
             if (g.engine == EngineType.PSP && (g.emulatorPackage == null || g.emulatorPackage.trim().isEmpty())) g.emulatorPackage = "org.ppsspp.ppsspp";
             if (g.engine != EngineType.GAMEHUB) g.gamehubLocalGameId = "";
@@ -9075,7 +9081,7 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
                 g.winlatorLaunchMode = "game";
                 g.gamehubLaunchMode = "game";
             }
-            g.winlatorLaunchMode = (g.engine == EngineType.WINLATOR || isWinlatorPackageName(g.emulatorPackage)) ? winlatorModeValue(winlatorModeSp.getSelectedItemPosition()) : "game";
+            g.winlatorLaunchMode = (g.engine == EngineType.WINLATOR || (g.engine != EngineType.PC && isWinlatorPackageName(g.emulatorPackage))) ? winlatorModeValue(winlatorModeSp.getSelectedItemPosition()) : "game";
             g.gamehubLaunchMode = g.engine == EngineType.GAMEHUB ? gamehubModeValue(gamehubModeSp.getSelectedItemPosition()) : "game";
             String selectedLaunchTarget = (String) launchSp.getSelectedItem();
             if (g.engine == EngineType.ANDROID) selectedLaunchTarget = "";
@@ -9215,6 +9221,7 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
         if ("ONS".equals(e)) return "internal.ons";
         if ("ARTEMIS".equals(e)) return "internal.artemis";
         if ("WINLATOR".equals(e)) return guessInstalledWinlatorPackage();
+        if ("PC".equals(e)) return WinlatorPcLauncher.PACKAGE_NAME;
         if ("GAMEHUB".equals(e)) return guessInstalledGameHubPackage();
         return "";
     }
@@ -9506,7 +9513,7 @@ private void showEditPlayTimeDialog(Game game) {
         return hours + "h" + remain + "m";
     }
 
-    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.GAMEHUB) return 6; if (e == EngineType.PSP) return 7; if (e == EngineType.ANDROID) return 8; if (e == EngineType.UNKNOWN) return 9; return 0; }
+    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.PC) return 6; if (e == EngineType.GAMEHUB) return 7; if (e == EngineType.PSP) return 8; if (e == EngineType.ANDROID) return 9; if (e == EngineType.UNKNOWN) return 10; return 0; }
 
     private boolean isWinlatorPackageName(String pkg) {
         if (pkg == null) return false;
@@ -11072,6 +11079,8 @@ try {
 
     private View launchLoadingOverlay = null;
     private int launchLoadingTipIndex = -1;
+    /** PC 引擎等启动链写入的具体失败原因；doLaunchGame 弹错时优先显示，弹后清空。其余引擎恒为 null，走原有通用文案。 */
+    private String lastLaunchFailReason = null;
 
     private boolean shouldShowLaunchLoadingOverlay(Game game) {
         if (game == null) return false;
@@ -11137,6 +11146,7 @@ try {
         if (emulatorPackage.isEmpty() && game.engine == EngineType.ONS) emulatorPackage = "internal.ons";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.TYRANO) emulatorPackage = "internal.tyrano";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.WINLATOR) emulatorPackage = guessInstalledWinlatorPackage();
+        if (emulatorPackage.isEmpty() && game.engine == EngineType.PC) emulatorPackage = WinlatorPcLauncher.PACKAGE_NAME;
         if (emulatorPackage.isEmpty() && game.engine == EngineType.GAMEHUB) emulatorPackage = guessInstalledGameHubPackage();
         if (emulatorPackage.isEmpty() && game.engine == EngineType.PSP) emulatorPackage = "org.ppsspp.ppsspp";
         if (game.engine == EngineType.ARTEMIS) {
@@ -11178,7 +11188,8 @@ try {
                     com.yuki.yukihub.social.PresenceService.refresh(this);
                 }
             } catch (Throwable ignored) {}
-            Toast.makeText(this, "启动失败：未找到该模拟器，或该模拟器不接受当前启动目标", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, lastLaunchFailReason != null ? lastLaunchFailReason : "启动失败：未找到该模拟器，或该模拟器不接受当前启动目标", Toast.LENGTH_LONG).show();
+            lastLaunchFailReason = null;
         }
     }
 
@@ -11596,6 +11607,25 @@ return startActivitySafely(intent);
         }
         if (game.engine == EngineType.ANDROID) {
             return EmulatorLauncher.launch(this, pkg);
+        }
+        if (game.engine == EngineType.PC) {
+            WinlatorPcLauncher.Result result = WinlatorPcLauncher.launch(this, game.rootUri, launchTarget);
+            if (!result.success) {
+                // 具体原因写入 lastLaunchFailReason，由外层 doLaunchGame 统一弹一条，避免双 Toast
+                if (WinlatorPcLauncher.CODE_PACKAGE_NOT_INSTALLED.equals(result.code)) {
+                    lastLaunchFailReason = "PC 游戏需要安装 Winlator（winlator-cn 版）才能启动";
+                } else if (WinlatorPcLauncher.CODE_EXTERNAL_LAUNCH_UNSUPPORTED.equals(result.code)) {
+                    lastLaunchFailReason = "当前 Winlator 不支持外置启动协议，请安装最新版 winlator-cn";
+                } else if (WinlatorPcLauncher.CODE_DIR_UNRESOLVED.equals(result.code)) {
+                    lastLaunchFailReason = "PC 引擎无法定位游戏目录（SAF 目录不支持外置启动），请重新选择本地真实路径";
+                } else if (WinlatorPcLauncher.CODE_EXE_UNRESOLVED.equals(result.code)) {
+                    lastLaunchFailReason = "未找到可启动的 exe，请在编辑中重新选择启动目标";
+                } else {
+                    lastLaunchFailReason = "PC 引擎启动失败，请检查 Winlator 安装状态";
+                }
+                return false;
+            }
+            return true;
         }
         return EmulatorLauncher.launchGame(this, emulatorPackage, game.rootUri, launchTarget, game.winlatorLaunchMode, game.gamehubLaunchMode, game.gamehubLocalGameId);
     }
