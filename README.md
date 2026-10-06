@@ -329,6 +329,9 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 - <a href="https://github.com/YuriSizuku/OnscripterYuri">OnscripterYuri</a>
 - <a href="https://github.com/hrydgard/ppsspp">ppsspp</a>
 - <a href="https://github.com/murangogo/MoeTranslate">MoeTranslate(萌译)</a>
+- <a href="https://github.com/hostei33/winlator-cn">winlator-cn</a>
+- <a href="https://github.com/Weiss-UltimateSavior/Tyranor-Next">Tyranor-Next</a>
+- <a href="https://github.com/xmoezzz/rfvp">rfvp</a>
 
 也感谢所有参与测试、反馈和建议的用户。
 
