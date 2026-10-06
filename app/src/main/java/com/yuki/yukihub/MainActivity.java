@@ -10988,22 +10988,46 @@ if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size
         return "com.xiaoji.egggamz";
     }
 
+/** guessInstalledWinlatorPackage 的进程内缓存（null=未扫描过）。全量枚举+loadLabel 在主线程代价高，扫描一次后复用。 */
+    private static volatile String sCachedWinlatorPackage = null;
+    private static volatile long sCachedWinlatorPackageAt = 0L;
+    /** 缓存有效期：5 分钟。装了新的 Winlator 改版后最多 5 分钟内猜测结果会刷新（也可手动改包名）。 */
+    private static final long WINLATOR_GUESS_CACHE_MS = 5L * 60L * 1000L;
+
 private String guessInstalledWinlatorPackage() {
-try {
+ try {
+            long now = System.currentTimeMillis();
+            if (sCachedWinlatorPackage != null && now - sCachedWinlatorPackageAt < WINLATOR_GUESS_CACHE_MS) {
+                return sCachedWinlatorPackage;
+            }
             PackageManager pm = getPackageManager();
-            List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            // GET_META_DATA 无必要（只匹配包名/应用名），去掉可避免解析全部 meta
+            List<ApplicationInfo> apps = pm.getInstalledApplications(0);
             String fallback = "";
+            // 第一轮：仅按包名匹配（零 APK 资源加载，主流改版包名都含关键词，绝大多数在这里命中）
             for (ApplicationInfo app : apps) {
                 if (app == null || app.packageName == null) continue;
                 String pkg = app.packageName.toLowerCase(Locale.ROOT);
-                String label = "";
-                try { label = String.valueOf(pm.getApplicationLabel(app)).toLowerCase(Locale.ROOT); } catch (Throwable ignored) { }
-                boolean hit = pkg.contains("winlator") || label.contains("winlator") || pkg.contains("glibc") || pkg.contains("proot");
-                if (!hit) continue;
+                boolean pkgHit = pkg.contains("winlator") || pkg.contains("glibc") || pkg.contains("proot");
+                if (!pkgHit) continue;
                 if (pm.getLaunchIntentForPackage(app.packageName) == null) continue;
-                if (pkg.contains("cmod")) return app.packageName;
+                if (pkg.contains("cmod")) { sCachedWinlatorPackage = app.packageName; sCachedWinlatorPackageAt = now; return app.packageName; }
                 if (fallback.isEmpty()) fallback = app.packageName;
             }
+            if (!fallback.isEmpty()) { sCachedWinlatorPackage = fallback; sCachedWinlatorPackageAt = now; return fallback; }
+            // 第二轮兜底：仅当包名全部未命中时，才做应用名匹配（loadLabel 要打开每个 APK 的资源，
+            // 几百个应用在主线程代价极高——logcat 里成片的 ApkAssets Deleting 就是它）
+            for (ApplicationInfo app : apps) {
+                if (app == null || app.packageName == null) continue;
+                String label;
+                try { label = String.valueOf(pm.getApplicationLabel(app)).toLowerCase(Locale.ROOT); } catch (Throwable ignored) { continue; }
+                if (!label.contains("winlator")) continue;
+                if (pm.getLaunchIntentForPackage(app.packageName) == null) continue;
+                fallback = app.packageName;
+                break;
+            }
+            sCachedWinlatorPackage = fallback;
+            sCachedWinlatorPackageAt = now;
             return fallback;
         } catch (Throwable ignored) {
             return "";
