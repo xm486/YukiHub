@@ -1358,7 +1358,8 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         return path;
     }
 
-    private static String uriToFilePath(String uriText) {
+    /** public 供 WinlatorPcLauncher 复用（SAF/file URI → 真实路径；content:// 解析失败时原样返回）。 */
+    public static String uriToFilePath(String uriText) {
         if (uriText == null || uriText.trim().isEmpty()) return uriText;
         if (uriText.startsWith("/")) return uriText;
         try {

@@ -152,6 +152,8 @@ public final class BigScreenLauncher {
 
         // 这两个引擎依赖"扫描已安装应用"和 localGameId 校验 —— 交给游戏库更稳妥
         if (e == EngineType.WINLATOR && pkg.isEmpty()) { return null; }
+        // PC 引擎走 winlator-cn 外置启动协议，包名固定，不依赖扫描
+        if (e == EngineType.PC && pkg.isEmpty()) { pkg = com.yuki.yukihub.launcher.WinlatorPcLauncher.PACKAGE_NAME; }
         if (e == EngineType.GAMEHUB) {
             String mode = game.gamehubLaunchMode == null ? "game"
                     : game.gamehubLaunchMode.trim().toLowerCase(java.util.Locale.ROOT);
@@ -214,6 +216,10 @@ public final class BigScreenLauncher {
         }
         if (game.engine == EngineType.ANDROID) {
             return EmulatorLauncher.launch(act, pkg);
+        }
+        // PC 引擎：winlator-cn 外置启动协议（目录临时挂载 + 相对 exe 启动）
+        if (game.engine == EngineType.PC) {
+            return com.yuki.yukihub.launcher.WinlatorPcLauncher.launch(act, game.rootUri, target).success;
         }
         // 外部模拟器（Winlator / GameHub / 其它）
         return EmulatorLauncher.launchGame(act, pkg, game.rootUri, target,

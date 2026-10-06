@@ -1579,6 +1579,7 @@ public class BigScreenActivity extends AppCompatActivity
             case TYRANO:   return "TYRANO";
             case ARTEMIS:  return "ARTEMIS";
             case WINLATOR: return "WINLATOR";
+            case PC:       return "PC";
             case GAMEHUB:  return "GAMEHUB";
             case PSP:      return "PSP";
             case ANDROID:  return "Android";

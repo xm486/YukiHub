@@ -7,6 +7,7 @@ public enum EngineType {
     TYRANO("Tyrano"),
     ARTEMIS("Artemis"),
     WINLATOR("Winlator"),
+    PC("PC"),
     GAMEHUB("GameHub"),
     PSP("PSP"),
     ANDROID("Android"),
