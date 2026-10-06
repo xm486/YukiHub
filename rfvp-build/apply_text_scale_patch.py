@@ -123,7 +123,7 @@ EDITS = [
 }""",
                 1,
             ),
-            # 5) TextManager::new 初始化
+            # 4b) TextManager::new 初始化
             (
                 """            device_render_scale: 1.0,
             render_scale: 1.0,
@@ -135,6 +135,14 @@ EDITS = [
             text_scale: 1.0,
         }""",
                 1,
+            ),
+            # 5) TextItem::new 初始化（单行锚点 + 全部替换：upstream 可能在
+            #    text_size1/text_size2 之间插入过新字段，两行相邻锚点会脱靶）
+            (
+                """            text_size2: 0,""",
+                """            text_size2: 0,
+            text_scale: 1.0,""",
+                -1,
             ),
             # 6) TextManager::set_text_scale（遍历下发到所有文本对象）
             (
@@ -267,6 +275,15 @@ def main() -> int:
                 print(f"[SKIP] 已打过补丁: {tag}")
                 continue
             count = text.count(old)
+            if expected == -1:
+                # -1 = 至少命中 1 次，全部替换（用于可能多处出现的初始化器）
+                if count < 1:
+                    print(f"[FAIL] 锚点命中 {count} 次（期望至少 1 次）: {tag}")
+                    failed = True
+                    continue
+                text = text.replace(old, new)
+                print(f"[OK]   {rel}: {tag}（{count} 处）")
+                continue
             if count != expected:
                 print(f"[FAIL] 锚点命中 {count} 次（期望 {expected}）: {tag}")
                 failed = True
