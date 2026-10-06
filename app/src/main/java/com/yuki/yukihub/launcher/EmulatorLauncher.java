@@ -704,6 +704,60 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
         return f.isFile() ? f.getParent() : f.getAbsolutePath();
     }
 
+    /**
+     * FVP 引擎（rfvp）启动：真实路径 + 单游戏覆盖（文本编码 / 文本 HiDPI / 系统字体 / 自定义字体）。
+     *
+     * <p>引擎内嵌在本应用（librfvp.so），存档固定为「游戏根目录/save」，
+     * 因此这里只需要把游戏目录与显示相关设置作为 extras 交给 {@code FvpActivity}。
+     *
+     * <p>rfvp 只认真实文件系统路径（无 SAF 支持），因此 {@code content://} 目录直接返回 null，
+     * 由调用方给出「请重新选择本地真实路径」的提示。
+     *
+     * @return 可直接 startActivity 的 Intent；目录无法解析为真实路径时为 null
+     */
+    public static Intent buildInternalFvpIntent(Context context, String gamePath, String launchTarget,
+                                                com.yuki.yukihub.fvp.FvpLaunchPrefs prefs) {
+        String rootPath = stripFileScheme(uriToFilePath(gamePath));
+        if (rootPath == null || rootPath.trim().isEmpty() || rootPath.startsWith("content://")) {
+            Log.w("EmulatorLauncher", "internal FVP unresolvable root=" + gamePath + " resolved=" + rootPath);
+            return null;
+        }
+        com.yuki.yukihub.fvp.FvpLaunchPrefs p = prefs == null
+                ? new com.yuki.yukihub.fvp.FvpLaunchPrefs() : prefs;
+        // 自定义字体文件可能已被用户删掉：失效就静默忽略（否则引擎会一直尝试加载不存在的字体）。
+        String fontPath = p.fontPath == null ? "" : p.fontPath.trim();
+        if (!fontPath.isEmpty()) {
+            try {
+                if (!new File(fontPath).isFile()) {
+                    Log.w("EmulatorLauncher", "internal FVP custom font missing, ignored: " + fontPath);
+                    fontPath = "";
+                }
+            } catch (Throwable t) {
+                fontPath = "";
+            }
+        }
+        Intent i = new Intent(context, com.yuki.yukihub.fvp.FvpActivity.class);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_GAME_ROOT, rootPath);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_NLS,
+                com.yuki.yukihub.fvp.FvpLaunchPrefs.normalizeNls(p.nls));
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_TEXT_HIDPI, p.textHidpi);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_SYSTEM_FONT, p.systemFont);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_FONT_PATH, fontPath);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_SCREEN_SCALE, p.screenScale);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_STRETCH_FILL, p.stretchFill);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_TEXT_SCALE, p.textScale);
+        i.putExtra("rootUri", gamePath);
+        i.putExtra("path", rootPath);
+        i.putExtra("launchTarget", launchTarget);
+        i.putExtra("launchMode", "internal.fvp");
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        Log.i("EmulatorLauncher", "internal FVP root=" + gamePath + " resolved=" + rootPath
+                + " nls=" + com.yuki.yukihub.fvp.FvpLaunchPrefs.normalizeNls(p.nls)
+                + " hidpi=" + p.textHidpi + " systemFont=" + p.systemFont
+                + " font=" + (fontPath.isEmpty() ? "-" : fontPath));
+        return i;
+    }
+
     public static Intent buildInternalOnsIntent(Context context, String gamePath, String launchTarget) {
         Intent i = new Intent(context, com.yuri.onscripter.ONScripter.class);
         String rootPath = stripFileScheme(uriToFilePath(gamePath));

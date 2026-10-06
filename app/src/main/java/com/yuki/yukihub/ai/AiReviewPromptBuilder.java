@@ -200,6 +200,7 @@ public final class AiReviewPromptBuilder {
         if (t.startsWith("internal.ons")) return "内置 ONS";
         if (t.startsWith("internal.tyrano")) return "内置 Tyrano";
         if (t.startsWith("internal.artemis")) return "内置 Artemis";
+        if (t.startsWith("internal.fvp")) return "内置 FVP";
         if ("manual".equals(t)) return "手动补记";
         return "外部模拟器";
     }

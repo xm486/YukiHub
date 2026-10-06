@@ -6,6 +6,7 @@ public enum EngineType {
     ONS("ONScripter"),
     TYRANO("Tyrano"),
     ARTEMIS("Artemis"),
+    FVP("FVP"),
     WINLATOR("Winlator"),
     PC("PC"),
     GAMEHUB("GameHub"),

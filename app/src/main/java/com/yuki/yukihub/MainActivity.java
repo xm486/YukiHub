@@ -136,6 +136,7 @@ import com.yuki.yukihub.data.GameRepository;
 import com.yuki.yukihub.data.GameRepository.PlayActivity;
 import com.yuki.yukihub.data.MetadataRepository;
 import com.yuki.yukihub.gamecursor.GameCursorConfig;
+import com.yuki.yukihub.fvp.FvpLaunchPrefs;
 import com.yuki.yukihub.gamecursor.GameCursorIconRenderer;
 import com.yuki.yukihub.launcher.EmulatorLauncher;
 import com.yuki.yukihub.launcher.PcLaunchPrefs;
@@ -379,6 +380,18 @@ private ActivityResultLauncher<String> videoBackgroundPickerLauncher;
 private ActivityResultLauncher<String> cursorIconPickerLauncher;
     /** Windows 光标包（文件夹）导入。 */
     private ActivityResultLauncher<Uri> cursorSchemePickerLauncher;
+    /** FVP 引擎：自定义字体文件选择。 */
+    private ActivityResultLauncher<String> fvpFontLauncher;
+    /**
+     * FVP 设置对话框正在编辑的偏好对象与对应游戏 id。
+     *
+     * 字体选择是异步回调，回来时必须改**对话框正在持有的那个** prefs，
+     * 否则点「保存」时会用旧快照把这次选择覆盖掉（与虚拟鼠标图标同一套路）。
+     */
+    private FvpLaunchPrefs fvpEditingPrefs;
+    private long fvpEditingGameId = -1L;
+    /** FVP 设置对话框里的「当前字体」文案控件；对话框关闭时置 null。 */
+    private TextView fvpFontPathView;
     /** 当前打开的虚拟鼠标设置对话框里的预览控件；关闭时置 null。 */
     private CursorPreviewView gameCursorPreview;
     /**
@@ -718,7 +731,7 @@ private void handleHomeTargetIntent(Intent intent) {
                 if (!Environment.isExternalStorageManager()) {
                     new AlertDialog.Builder(this)
                             .setTitle("需要文件访问权限")
-                            .setMessage("内置 KRKR 引擎需要访问外部存储来显示和读取游戏文件。请在系统页面允许“管理所有文件”。")
+                            .setMessage("内置引擎（KRKR / FVP）需要访问外部存储来读取游戏文件。请在系统页面允许“管理所有文件”。")
                             .setPositiveButton("去授权", (d, w) -> {
                                 try {
                                     Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -891,6 +904,27 @@ String bg = copyImageToInternalStorage(uri, "backgrounds", "bg_", 1920, 88);
                     if (uri == null) return;
                     onCursorSchemeFolderPicked(uri);
                 });
+        // FVP 引擎：自定义字体文件（复制到应用私有目录，避免 content Uri 授权失效）
+        fvpFontLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+            if (uri == null) return;
+            String saved = copyFvpFontToInternalStorage(uri);
+            if (saved == null || saved.isEmpty()) {
+                Toast.makeText(MainActivity.this, "字体文件保存失败", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (fvpEditingPrefs != null) {
+                fvpEditingPrefs.fontPath = saved;
+            } else if (fvpEditingGameId > 0) {
+                // 对话框因 Activity 重建而丢失：直接把字体写进该游戏的设置，避免用户白选一次。
+                FvpLaunchPrefs p = FvpLaunchPrefs.load(this, fvpEditingGameId);
+                p.fontPath = saved;
+                p.save(this, fvpEditingGameId);
+            }
+            if (fvpFontPathView != null) {
+                fvpFontPathView.setText("当前：自定义字体（" + new File(saved).getName() + "）");
+            }
+            Toast.makeText(MainActivity.this, "已选择字体，点「保存」后下次启动生效", Toast.LENGTH_SHORT).show();
+        });
 
         backupCreateLauncher = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/octet-stream"), uri -> {
             if (uri != null) exportLocalBackup(uri);
@@ -914,11 +948,43 @@ String bg = copyImageToInternalStorage(uri, "backgrounds", "bg_", 1920, 88);
         });
     }
 
-    private File persistentRemoteCoverDir() {
-    File dir = new File(getFilesDir(), "covers_remote");
-    if (!dir.exists()) dir.mkdirs();
-    return dir;
-}
+private File persistentRemoteCoverDir() {
+        File dir = new File(getFilesDir(), "covers_remote");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    /**
+     * FVP 自定义字体：把用户选中的字体文件复制到应用私有目录。
+     *
+     * 必须落盘：content Uri 的授权随时可能失效（重启、清理），而引擎启动时需要一个
+     * 长期有效的真实文件路径。返回 null 表示失败。
+     */
+    private String copyFvpFontToInternalStorage(Uri uri) {
+        if (uri == null) return null;
+        try {
+            File dir = new File(getFilesDir(), "fvp_fonts");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            File out = new File(dir, "font_" + System.currentTimeMillis() + ".ttf");
+            try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+                 java.io.OutputStream os = new java.io.FileOutputStream(out)) {
+                if (in == null) return null;
+                byte[] buf = new byte[64 * 1024];
+                long total = 0L;
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    os.write(buf, 0, n);
+                    total += n;
+                    // 字体文件不该超过 64MB：超了说明选错了文件，及时止损。
+                    if (total > 64L * 1024 * 1024) return null;
+                }
+            }
+            return out.getAbsolutePath();
+        } catch (Throwable t) {
+            Log.w("YukiHub", "copyFvpFont failed", t);
+            return null;
+        }
+    }
 
 private boolean isMissingFileUri(String uriText) {
     if (uriText == null || uriText.trim().isEmpty()) return false;
@@ -4435,6 +4501,7 @@ private String launchTypeLabel(String launchType) {
     if (t.startsWith("internal.ons")) return "内置 ONS";
     if (t.startsWith("internal.tyrano")) return "内置 Tyrano";
     if (t.startsWith("internal.artemis")) return "内置 Artemis";
+    if (t.startsWith("internal.fvp")) return "内置 FVP";
     return "外部模拟器";
 }
 
@@ -4693,6 +4760,7 @@ private boolean isEngineFilter(String value) {
     if (value == null) return false;
     switch (value) {
         case "KIRIKIRI": case "ONS": case "TYRANO": case "ARTEMIS":
+        case "FVP":
         case "WINLATOR": case "PC": case "GAMEHUB": case "PSP": case "ANDROID":
         case "UNKNOWN":
             return true;
@@ -4930,6 +4998,7 @@ scanMissingCoversIfNeeded();
         if ("ONS".equals(filter) && g.engine != EngineType.ONS) continue;
         if ("TYRANO".equals(filter) && g.engine != EngineType.TYRANO) continue;
         if ("ARTEMIS".equals(filter) && g.engine != EngineType.ARTEMIS) continue;
+        if ("FVP".equals(filter) && g.engine != EngineType.FVP) continue;
         if ("WINLATOR".equals(filter) && g.engine != EngineType.WINLATOR) continue;
         if ("PC".equals(filter) && g.engine != EngineType.PC) continue;
         if ("GAMEHUB".equals(filter) && g.engine != EngineType.GAMEHUB) continue;
@@ -5731,7 +5800,7 @@ String rematchItem = "重新匹配" + sourceLabel;
         String nsfwBlurItem = nsfwBlurLabel + "：" + (nsfwBlurGameOn ? "开启" : "关闭");
         java.util.List<String> itemList = new java.util.ArrayList<>(java.util.Arrays.asList(
                 "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
-        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC) itemList.add("引擎设置");
+        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC || game.engine == EngineType.FVP) itemList.add("引擎设置");
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS) itemList.add("虚拟鼠标");
         // 桌面快捷方式：部分启动器（含部分定制 ROM）不支持固定快捷方式，不支持时不显示该项
         boolean shortcutSupported = com.yuki.yukihub.shortcut.GameShortcutManager.isSupported(this);
@@ -5786,7 +5855,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                     Toast.makeText(this, "NSFW 封面模糊：" + (newVal ? "开启" : "关闭"), Toast.LENGTH_SHORT).show();
                     loadGames();
                 }
-                else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else if (game.engine == EngineType.PC) showPcSettingsDialog(game); else showKrSettingsDialog(game); }
+                else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else if (game.engine == EngineType.PC) showPcSettingsDialog(game); else if (game.engine == EngineType.FVP) showFvpSettingsDialog(game); else showKrSettingsDialog(game); }
                 else if ("虚拟鼠标".equals(chosen)) showGameCursorDialog(game);
                 else if (shortcutItem.equals(chosen)) requestGameShortcut(game);
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
@@ -5993,6 +6062,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 .setPositiveButton("删除", (x,w)->{
                     com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id);
                     PcLaunchPrefs.clear(this, game.id);
+                    FvpLaunchPrefs.clear(this, game.id);
                     repository.delete(game.id); selectedGame = null; loadGames(); })
                 .setNegativeButton("取消", null)
                 .show();
@@ -8110,14 +8180,15 @@ private void showDetailDialog(Game game) {
         }
         d.findViewById(R.id.btnStatus).setOnClickListener(v -> showPlayStatusDialog(game, d));
         d.findViewById(R.id.btnEdit).setOnClickListener(v -> { d.dismiss(); showEditDialog(game); });
-        boolean hasEngineSettings = game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC;
+        boolean hasEngineSettings = game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC || game.engine == EngineType.FVP;
         d.findViewById(R.id.btnKrSettings).setVisibility(hasEngineSettings ? View.VISIBLE : View.GONE);
         d.findViewById(R.id.btnKrSettings).setOnClickListener(v -> {
             if (game.engine == EngineType.ONS) showOnsSettingsDialog(game);
             else if (game.engine == EngineType.PC) showPcSettingsDialog(game);
+            else if (game.engine == EngineType.FVP) showFvpSettingsDialog(game);
             else showKrSettingsDialog(game);
         });
-        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id); PcLaunchPrefs.clear(this, game.id); repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
+        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ com.yuki.yukihub.shortcut.GameShortcutManager.disableForGame(this, game.id); PcLaunchPrefs.clear(this, game.id); FvpLaunchPrefs.clear(this, game.id); repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
         d.findViewById(R.id.btnLaunch).setOnClickListener(v -> launchGame(game));
         d.show();
         applyImmersiveToWindow(d.getWindow());
@@ -8957,7 +9028,7 @@ private String displayPath(String value) {
             public void onTextChanged(CharSequence s, int st, int b, int c) { updateWinlatorAdvanced.run(); }
             public void afterTextChanged(Editable e) {}
         });
-        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "WINLATOR", "PC", "GAMEHUB", "PSP", "ANDROID", "UNKNOWN"});
+        ArrayAdapter<String> spAdapter = krSpinnerAdapter(new String[]{"AUTO", "KIRIKIRI", "ONS", "TYRANO", "ARTEMIS", "FVP", "WINLATOR", "PC", "GAMEHUB", "PSP", "ANDROID", "UNKNOWN"});
         sp.setAdapter(spAdapter);
         ArrayAdapter<String> winlatorModeAdapter = krSpinnerAdapter(new String[]{"启动到游戏", "启动到程序"});
         winlatorModeSp.setAdapter(winlatorModeAdapter);
@@ -9003,6 +9074,8 @@ private String displayPath(String value) {
                     pkg.setText("internal.ons");
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "ARTEMIS".equals(engine)) {
                     pkg.setText("internal.artemis");
+                } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "FVP".equals(engine)) {
+                    pkg.setText("internal.fvp");
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "WINLATOR".equals(engine)) {
                     pkg.setText(guessInstalledWinlatorPackage());
                 } else if ((pkg.getText() == null || pkg.getText().toString().trim().isEmpty()) && "PC".equals(engine)) {
@@ -9089,7 +9162,7 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
             g.gamehubLaunchMode = g.engine == EngineType.GAMEHUB ? gamehubModeValue(gamehubModeSp.getSelectedItemPosition()) : "game";
             String selectedLaunchTarget = (String) launchSp.getSelectedItem();
             if (g.engine == EngineType.ANDROID) selectedLaunchTarget = "";
-            if (g.engine == EngineType.ARTEMIS || g.engine == EngineType.TYRANO) selectedLaunchTarget = "[游戏目录]";
+            if (g.engine == EngineType.ARTEMIS || g.engine == EngineType.TYRANO || g.engine == EngineType.FVP) selectedLaunchTarget = "[游戏目录]";
             if (g.engine == EngineType.GAMEHUB) selectedLaunchTarget = "[GameHub]";
             g.launchTarget = selectedLaunchTarget;
             g.description = desc.getText().toString();
@@ -9224,6 +9297,7 @@ if (pendingCoverUri == null || pendingCoverUri.isEmpty()) {
         if ("TYRANO".equals(e)) return "internal.tyrano";
         if ("ONS".equals(e)) return "internal.ons";
         if ("ARTEMIS".equals(e)) return "internal.artemis";
+        if ("FVP".equals(e)) return "internal.fvp";
         if ("WINLATOR".equals(e)) return guessInstalledWinlatorPackage();
         if ("PC".equals(e)) return WinlatorPcLauncher.PACKAGE_NAME;
         if ("GAMEHUB".equals(e)) return guessInstalledGameHubPackage();
@@ -9517,7 +9591,8 @@ private void showEditPlayTimeDialog(Game game) {
         return hours + "h" + remain + "m";
     }
 
-    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.WINLATOR) return 5; if (e == EngineType.PC) return 6; if (e == EngineType.GAMEHUB) return 7; if (e == EngineType.PSP) return 8; if (e == EngineType.ANDROID) return 9; if (e == EngineType.UNKNOWN) return 10; return 0; }
+    /** 引擎下拉索引映射（必须与 spAdapter 的数组顺序一致：AUTO=0 起）。 */
+    private int engineIndex(EngineType e) { if (e == EngineType.KIRIKIRI) return 1; if (e == EngineType.ONS) return 2; if (e == EngineType.TYRANO) return 3; if (e == EngineType.ARTEMIS) return 4; if (e == EngineType.FVP) return 5; if (e == EngineType.WINLATOR) return 6; if (e == EngineType.PC) return 7; if (e == EngineType.GAMEHUB) return 8; if (e == EngineType.PSP) return 9; if (e == EngineType.ANDROID) return 10; if (e == EngineType.UNKNOWN) return 11; return 0; }
 
     private boolean isWinlatorPackageName(String pkg) {
         if (pkg == null) return false;
@@ -10637,6 +10712,141 @@ private void showEditPlayTimeDialog(Game game) {
     }
 
     /**
+     * FVP 引擎（rfvp）设置：单游戏覆盖「文本编码 / 文本 HiDPI / 系统字体回退 / 自定义字体」。
+     *
+     * <p>这四项正是「同一个游戏别人机器上正常显示、我这里乱码或方框」的常见原因：
+     * <ul>
+     *   <li>编码：原版日文游戏 sjis，简中汉化版 gbk，部分移植/重打包是 utf8；</li>
+     *   <li>文本 HiDPI：小字号下中文更清晰（默认开）；</li>
+     *   <li>系统字体回退：游戏自带字体缺字时用系统字体补齐（默认开）；</li>
+     *   <li>自定义字体：强制用指定字体渲染（汉化游戏常需要）。</li>
+     * </ul>
+     *
+     * <p>引擎侧没有其它可调项——存档位置固定为「游戏根目录/save」，与容器/驱动无关，
+     * 所以这里不做多余开关（要调显示以外的行为只能改游戏本体或等上游引擎支持）。
+     */
+    private void showFvpSettingsDialog(Game game) {
+        if (game == null || game.id <= 0) return;
+        FvpLaunchPrefs prefs = FvpLaunchPrefs.load(this, game.id);
+        // 字体选择回调需要改这一份，见字段注释。
+        fvpEditingPrefs = prefs;
+        fvpEditingGameId = game.id;
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(getColorCompat(com.yuki.yukihub.R.color.yh_card));
+        int pad = (int) (18 * getResources().getDisplayMetrics().density);
+        panel.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText("FVP 引擎设置（rfvp）");
+        title.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
+        title.setTextSize(22);
+        title.setPadding(0, 0, 0, pad / 2);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+
+        android.widget.Spinner nlsSpinner = krSpinner(FvpLaunchPrefs.NLS_LABELS,
+                FvpLaunchPrefs.labelOfNls(prefs.nls));
+        CheckBox textHidpi = krCheckBox("文本高分辨率渲染（小字更清晰）", prefs.textHidpi);
+        CheckBox systemFont = krCheckBox("启用系统字体回退（缺字时用系统字体补齐）", prefs.systemFont);
+        CheckBox stretchFill = krCheckBox("画面铺满全屏（按游戏分辨率拉伸，消除黑边；"
+                + "配合已改为 720P 的脚本 = 字大 1.5 倍的全屏画面）", prefs.stretchFill);
+        android.widget.Spinner screenScale = krSpinner(FvpLaunchPrefs.SCALE_LABELS,
+                FvpLaunchPrefs.labelOfScale(prefs.screenScale));
+        android.widget.Spinner textScale = krSpinner(FvpLaunchPrefs.TEXT_SCALE_LABELS,
+                FvpLaunchPrefs.labelOfTextScale(prefs.textScale));
+
+        fvpFontPathView = krLabel(fvpFontSummary(prefs.fontPath));
+        fvpFontPathView.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        Button pickFont = krButton("选择字体文件…");
+        Button clearFont = krButton("清除自定义字体");
+        pickFont.setOnClickListener(v -> {
+            try {
+                fvpFontLauncher.launch("*/*");
+            } catch (Throwable t) {
+                Toast.makeText(MainActivity.this, "打开文件选择器失败：" + t, Toast.LENGTH_SHORT).show();
+            }
+        });
+        clearFont.setOnClickListener(v -> {
+            if (fvpEditingPrefs != null) fvpEditingPrefs.fontPath = "";
+            if (fvpFontPathView != null) fvpFontPathView.setText("当前：游戏自带字体");
+            Toast.makeText(MainActivity.this, "已清除自定义字体（点「保存」生效）", Toast.LENGTH_SHORT).show();
+        });
+
+        root.addView(krLabel("文本编码（汉化版乱码时改这里）"));
+        root.addView(nlsSpinner);
+        root.addView(krLabel("画面放大（等比放大并裁边，字会变大；渲染负担随之增加）"));
+        root.addView(screenScale);
+        root.addView(krLabel("文字大小（只放大文字，需 YukiHub 补丁版引擎；过大可能超出对话框）"));
+        root.addView(textScale);
+        root.addView(textHidpi);
+        root.addView(systemFont);
+        root.addView(stretchFill);
+        root.addView(krLabel("自定义字体（强制用指定字体渲染；留空则用游戏自带字体）"));
+        root.addView(pickFont);
+        root.addView(clearFont);
+        root.addView(fvpFontPathView);
+
+        TextView tip = krLabel("说明：设置按游戏单独保存，修改后下次启动生效。"
+                + "存档位于游戏目录的 save 文件夹（rfvp_s###.bin），随游戏目录一起备份即可。");
+        tip.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
+        root.addView(tip);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, pad / 2, 0, 0);
+        Button cancel = krButton("取消");
+        Button save = krButton("保存");
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, (int) (44 * getResources().getDisplayMetrics().density), 1));
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(0, (int) (44 * getResources().getDisplayMetrics().density), 1);
+        saveLp.leftMargin = pad / 2;
+        actions.addView(save, saveLp);
+
+        scroll.addView(root);
+        panel.addView(title);
+        panel.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        panel.addView(actions);
+        dialog.setContentView(panel);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> {
+            prefs.nls = FvpLaunchPrefs.valueOfNlsLabel(String.valueOf(nlsSpinner.getSelectedItem()));
+            prefs.screenScale = FvpLaunchPrefs.valueOfScaleLabel(String.valueOf(screenScale.getSelectedItem()));
+            prefs.textScale = FvpLaunchPrefs.valueOfTextScaleLabel(String.valueOf(textScale.getSelectedItem()));
+            prefs.textHidpi = textHidpi.isChecked();
+            prefs.systemFont = systemFont.isChecked();
+            prefs.stretchFill = stretchFill.isChecked();
+            // fontPath 由「选择/清除」按钮直接改 prefs，这里不能覆盖（否则会把刚选的字体抹掉）。
+            prefs.save(this, game.id);
+            Toast.makeText(MainActivity.this, "FVP 引擎设置已保存", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+        dialog.setOnDismissListener(d -> {
+            fvpEditingPrefs = null;
+            fvpEditingGameId = -1L;
+            fvpFontPathView = null;
+        });
+        dialog.show();
+        Window shownWindow = dialog.getWindow();
+        if (shownWindow != null) {
+            shownWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            shownWindow.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.72f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
+        }
+    }
+
+    /** FVP 设置里的「当前字体」一句话描述。 */
+    private String fvpFontSummary(String fontPath) {
+        String p = FvpLaunchPrefs.normalizePath(fontPath);
+        if (p.isEmpty()) return "当前：游戏自带字体";
+        File f = new File(p);
+        if (!f.isFile()) return "当前：自定义字体（文件已丢失，将自动忽略）";
+        return "当前：自定义字体（" + f.getName() + "）";
+    }
+
+    /**
      * 虚拟按键当前配置的一句话摘要，显示在设置项下方。
      */
     private String onsLayoutSummary() {
@@ -11214,6 +11424,7 @@ private String guessInstalledWinlatorPackage() {
             if (r.engine == EngineType.ONS) g.emulatorPackage = "internal.ons";
             if (r.engine == EngineType.TYRANO) g.emulatorPackage = "internal.tyrano";
             if (r.engine == EngineType.ARTEMIS) g.emulatorPackage = resolveArtemisPackageFromMarkers(g.rootUri);
+            if (r.engine == EngineType.FVP) g.emulatorPackage = "internal.fvp";
             if (r.engine == EngineType.PSP) g.emulatorPackage = "org.ppsspp.ppsspp";
             if (isDesktopLaunchTarget(g.launchTarget)) g.emulatorPackage = guessInstalledWinlatorPackage();
             long newId = repository.insertIfNotExists(g);
@@ -11316,6 +11527,7 @@ private String guessInstalledWinlatorPackage() {
         if (emulatorPackage.isEmpty() && game.engine == EngineType.KIRIKIRI) emulatorPackage = "internal.krkr";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.ONS) emulatorPackage = "internal.ons";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.TYRANO) emulatorPackage = "internal.tyrano";
+        if (emulatorPackage.isEmpty() && game.engine == EngineType.FVP) emulatorPackage = "internal.fvp";
         if (emulatorPackage.isEmpty() && game.engine == EngineType.WINLATOR) emulatorPackage = guessInstalledWinlatorPackage();
         if (emulatorPackage.isEmpty() && game.engine == EngineType.PC) emulatorPackage = WinlatorPcLauncher.PACKAGE_NAME;
         if (emulatorPackage.isEmpty() && game.engine == EngineType.GAMEHUB) emulatorPackage = guessInstalledGameHubPackage();
@@ -11324,7 +11536,7 @@ private String guessInstalledWinlatorPackage() {
             emulatorPackage = normalizeArtemisPackage(emulatorPackage);
         }
         String launchTarget = game.launchTarget;
-        if (game.engine == EngineType.ARTEMIS || game.engine == EngineType.TYRANO) launchTarget = "[游戏目录]";
+        if (game.engine == EngineType.ARTEMIS || game.engine == EngineType.TYRANO || game.engine == EngineType.FVP) launchTarget = "[游戏目录]";
         if (game.engine == EngineType.GAMEHUB) {
             String ghMode = game.gamehubLaunchMode == null ? "game" : game.gamehubLaunchMode.trim().toLowerCase(Locale.ROOT);
             if (!("program".equals(ghMode) || "normal".equals(ghMode)) && (game.gamehubLocalGameId == null || game.gamehubLocalGameId.trim().isEmpty())) { clearLaunchLoadingOverlay(); Toast.makeText(this, "请先编辑游戏，通过Shizuku导入GameHub localGameId。", Toast.LENGTH_LONG).show(); return; }
@@ -11756,6 +11968,16 @@ return startActivitySafely(intent);
         if (pkg.startsWith("internal.artemis")) {
             return startActivitySafely(EmulatorLauncher.buildInternalArtemisIntent(this, pkg, game.rootUri, launchTarget));
         }
+        if (pkg.startsWith("internal.fvp") || pkg.equals("com.yuki.yukihub.fvp")) {
+            // FVP 引擎（rfvp）内嵌在本应用；参数全部走单游戏设置（FvpLaunchPrefs）。
+            Intent fvpIntent = EmulatorLauncher.buildInternalFvpIntent(
+                    this, game.rootUri, launchTarget, FvpLaunchPrefs.load(this, game.id));
+            if (fvpIntent == null) {
+                lastLaunchFailReason = "FVP 引擎无法定位游戏目录（SAF 目录不支持内置引擎），请重新选择本地真实路径";
+                return false;
+            }
+            return startActivitySafely(fvpIntent);
+        }
         if (pkg.startsWith("internal.psp") || pkg.equals("org.ppsspp.ppsspp")) {
             // 检查PPSSPP是否安装
             if (!EmulatorLauncher.isPPSSPPInstalled(this)) {
@@ -11819,6 +12041,7 @@ return startActivitySafely(intent);
         if (pkg.startsWith("internal.ons") || pkg.equals("com.yuki.yukihub.ons")) return "internal.ons";
         if (pkg.startsWith("internal.tyrano") || pkg.equals("com.yuki.yukihub.tyrano")) return "internal.tyrano";
         if (pkg.startsWith("internal.artemis")) return pkg;
+        if (pkg.startsWith("internal.fvp") || pkg.equals("com.yuki.yukihub.fvp")) return "internal.fvp";
         return "external";
     }
 
