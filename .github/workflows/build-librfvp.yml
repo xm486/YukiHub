@@ -25,8 +25,6 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
-      CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ github.workspace }}/ndk-toolchain/bin/aarch64-linux-android${{ github.event.inputs.android_api }}-clang
-      CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: ${{ github.workspace }}/ndk-toolchain/bin/llvm-ar
     steps:
       - name: Checkout build scripts (this repo)
         uses: actions/checkout@v4
@@ -50,16 +48,30 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Install Android NDK
-        id: ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
-          add-to-path: false
+          add-to-path: true
 
-      - name: Link NDK into expected path
+      - name: Locate NDK bin (don't guess paths, find them)
         run: |
-          ln -s "${{ steps.ndk.outputs.ndk-path }}" "${{ github.workspace }}/ndk-toolchain"
-          "${{ github.workspace }}/ndk-toolchain/bin/aarch64-linux-android${{ github.event.inputs.android_api }}-clang" --version
+          API="${{ github.event.inputs.android_api }}"
+          CLANG="$(find /opt/hostedtoolcache "$HOME" -name "aarch64-linux-android${API}-clang" -type f 2>/dev/null | head -n1)"
+          if [ -z "$CLANG" ]; then
+            echo "::error::找不到 aarch64-linux-android${API}-clang，NDK 安装位置如下："
+            find /opt/hostedtoolcache -maxdepth 4 -type d -name 'ndk*' 2>/dev/null
+            exit 1
+          fi
+          NDK_BIN="$(cd "$(dirname "$CLANG")" && pwd)"
+          echo "NDK_BIN=$NDK_BIN" >> "$GITHUB_ENV"
+          echo "$NDK_BIN" >> "$GITHUB_PATH"
+          # cargo 交叉编译链接器/归档器（通过 GITHUB_ENV 对后续步骤生效）
+          {
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK_BIN/aarch64-linux-android${API}-clang"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=$NDK_BIN/llvm-ar"
+          } >> "$GITHUB_ENV"
+          "$NDK_BIN/clang" --version
+          "$NDK_BIN/llvm-ar" --version | head -1
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -75,7 +87,7 @@ jobs:
         run: |
           SO=rfvp/target/aarch64-linux-android/release/librfvp.so
           test -f "$SO"
-          "${{ github.workspace }}/ndk-toolchain/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)' 
+          llvm-nm -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
