@@ -217,9 +217,11 @@ public final class BigScreenLauncher {
         if (game.engine == EngineType.ANDROID) {
             return EmulatorLauncher.launch(act, pkg);
         }
-        // PC 引擎：winlator-cn 外置启动协议（目录临时挂载 + 相对 exe 启动）
+        // PC 引擎：winlator-cn 外置启动协议（目录临时挂载 + 相对 exe 启动 + 单游戏覆盖参数）
         if (game.engine == EngineType.PC) {
-            return com.yuki.yukihub.launcher.WinlatorPcLauncher.launch(act, game.rootUri, target).success;
+            return com.yuki.yukihub.launcher.WinlatorPcLauncher.launch(
+                    act, game.rootUri, target,
+                    com.yuki.yukihub.launcher.PcLaunchPrefs.load(act, game.id)).success;
         }
         // 外部模拟器（Winlator / GameHub / 其它）
         return EmulatorLauncher.launchGame(act, pkg, game.rootUri, target,
