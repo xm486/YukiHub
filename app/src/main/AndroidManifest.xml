@@ -331,5 +331,18 @@ android:screenOrientation="sensorLandscape"
             android:taskAffinity="com.yuki.yukihub.ONScripter"
             android:screenOrientation="sensorLandscape"
             android:configChanges="keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode" />
+
+        <!-- FVP 引擎（rfvp）宿主：Java 持 SurfaceView + Choreographer 主循环，Rust 侧被逐帧驱动。
+             configChanges 必须带上 orientation/screenSize 等：转屏时重建 Activity 会让引擎实例白丢。 -->
+        <activity
+            android:name="com.yuki.yukihub.fvp.FvpActivity"
+            android:exported="false"
+            android:process=":fvp"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.yuki.yukihub.Fvp"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.YukiHub.Kirikiroid2"
+            android:windowSoftInputMode="adjustNothing"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection" />
     </application>
 </manifest>

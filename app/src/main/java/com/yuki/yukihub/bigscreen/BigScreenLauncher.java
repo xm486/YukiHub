@@ -148,6 +148,8 @@ public final class BigScreenLauncher {
         if (pkg.isEmpty() && e == EngineType.KIRIKIRI) pkg = "internal.krkr";
         if (pkg.isEmpty() && e == EngineType.ONS) pkg = "internal.ons";
         if (pkg.isEmpty() && e == EngineType.TYRANO) pkg = "internal.tyrano";
+        // FVP 引擎（rfvp）内嵌在本应用，包名固定，不依赖扫描
+        if (pkg.isEmpty() && e == EngineType.FVP) pkg = "internal.fvp";
         if (pkg.isEmpty() && e == EngineType.PSP) pkg = "org.ppsspp.ppsspp";
 
         // 这两个引擎依赖"扫描已安装应用"和 localGameId 校验 —— 交给游戏库更稳妥
@@ -181,13 +183,14 @@ public final class BigScreenLauncher {
         if (pkg.startsWith("internal.ons") || pkg.equals("com.yuki.yukihub.ons")) { return "internal.ons"; }
         if (pkg.startsWith("internal.tyrano") || pkg.equals("com.yuki.yukihub.tyrano")) { return "internal.tyrano"; }
         if (pkg.startsWith("internal.artemis")) { return pkg; }
+        if (pkg.startsWith("internal.fvp") || pkg.equals("com.yuki.yukihub.fvp")) { return "internal.fvp"; }
         return "external";
     }
 
     /** 真正启动：分支与游戏库 launchGameInternal 一一对应 */
     private static boolean startGame(Activity act, Game game, String pkg, BigScreenPrefs prefs) {
         String target = game.launchTarget;
-        if (game.engine == EngineType.ARTEMIS || game.engine == EngineType.TYRANO) { target = "[游戏目录]"; }
+        if (game.engine == EngineType.ARTEMIS || game.engine == EngineType.TYRANO || game.engine == EngineType.FVP) { target = "[游戏目录]"; }
         if (game.engine == EngineType.GAMEHUB) { target = game.title; }
 
         if (pkg.startsWith("internal.krkr") || pkg.equals("org.tvp.kirikiri2.internal")) {
@@ -208,6 +211,12 @@ public final class BigScreenLauncher {
         }
         if (pkg.startsWith("internal.artemis")) {
             return start(act, EmulatorLauncher.buildInternalArtemisIntent(act, pkg, game.rootUri, target));
+        }
+        if (pkg.startsWith("internal.fvp") || pkg.equals("com.yuki.yukihub.fvp")) {
+            // FVP 引擎（rfvp）：参数走单游戏设置；目录解析失败（SAF）时返回 null，由游戏库提示更准确
+            return start(act, EmulatorLauncher.buildInternalFvpIntent(
+                    act, game.rootUri, target,
+                    com.yuki.yukihub.fvp.FvpLaunchPrefs.load(act, game.id)));
         }
         if (pkg.startsWith("internal.psp") || pkg.equals("org.ppsspp.ppsspp")) {
             // 没装 PPSSPP：交给游戏库（那里有下载引导对话框）

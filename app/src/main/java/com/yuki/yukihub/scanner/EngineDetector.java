@@ -21,6 +21,17 @@ import java.util.Set;
 public class EngineDetector {
     private static final String TAG = "EngineDetector";
 
+    /**
+     * FVP（rfvp）资源包文件名。
+     *
+     * 只在游戏根目录命中才算特征（与原版 *.hcb / 汉化 *.bch 脚本配合判定），
+     * 与 rFVP 上游扫描器的特征集保持一致。
+     */
+    private static final Set<String> FVP_PACK_NAMES = new HashSet<>(java.util.Arrays.asList(
+            "graph.bin", "graph_vis.bin", "bgm.bin", "se.bin", "se_env.bin", "se_sys.bin",
+            "voice.bin", "voice2.bin", "etc.bin"
+    ));
+
     public static class Result {
         public EngineType engine = EngineType.UNKNOWN;
         public int confidence = 0;
@@ -60,6 +71,10 @@ public class EngineDetector {
             score(r, EngineType.KIRIKIRI, s.firstXp3 != null ? 95 : 80, s.firstXp3 != null ? s.firstXp3 : "[游戏目录]");
         } else if (s.hasOnsScript || s.hasOnsArchive) {
             score(r, EngineType.ONS, s.hasOnsScript ? 90 : 70, "[游戏目录]");
+        } else if (s.hasFvpScript && s.hasFvpPack) {
+            score(r, EngineType.FVP, 96, "[游戏目录]");
+        } else if (s.hasFvpScript) {
+            score(r, EngineType.FVP, 88, "[游戏目录]");
         } else if (s.firstDesktop != null) {
             score(r, EngineType.WINLATOR, 90, s.firstDesktop);
         } else if (s.firstPspFile != null) {
@@ -124,6 +139,10 @@ public class EngineDetector {
             score(r, EngineType.KIRIKIRI, s.firstXp3 != null ? 95 : 80, s.firstXp3 != null ? s.firstXp3 : "[游戏目录]");
         } else if (s.hasOnsScript || s.hasOnsArchive) {
             score(r, EngineType.ONS, s.hasOnsScript ? 90 : 70, "[游戏目录]");
+        } else if (s.hasFvpScript && s.hasFvpPack) {
+            score(r, EngineType.FVP, 96, "[游戏目录]");
+        } else if (s.hasFvpScript) {
+            score(r, EngineType.FVP, 88, "[游戏目录]");
         } else if (s.firstDesktop != null) {
             score(r, EngineType.WINLATOR, 90, s.firstDesktop);
         } else if (s.firstPspFile != null) {
@@ -188,6 +207,11 @@ public class EngineDetector {
             if (lower.equals("app.asar") || rel.endsWith("/app.asar")) s.hasAppAsar = true;
             if (lower.equals("package.json") || rel.endsWith("/package.json")) s.hasPackageJson = true;
             if (lower.startsWith("chrome_") && lower.endsWith(".pak")) s.hasElectronPak = true;
+            // FVP（rfvp）：根目录脚本（原版 *.hcb / 汉化 *.bch）+ 资源包特征
+            if (rel.indexOf('/') < 0) {
+                if (lower.endsWith(".hcb") || lower.endsWith(".bch")) s.hasFvpScript = true;
+                if (FVP_PACK_NAMES.contains(lower)) s.hasFvpPack = true;
+            }
             if (lower.endsWith(".desktop") && s.firstDesktop == null) s.firstDesktop = original;
             if (lower.endsWith(".xp3")) {
                 // 优先级：中文「启动/游戏」xp3 > data.xp3 > 其它（见 KrkrEntryPriority）
@@ -240,6 +264,10 @@ public class EngineDetector {
         boolean hasAppAsar = false;
         boolean hasPackageJson = false;
         boolean hasElectronPak = false;
+        /** FVP（rfvp）：根目录存在 *.hcb/*.bch 脚本。 */
+        boolean hasFvpScript = false;
+        /** FVP（rfvp）：根目录存在特征资源包（graph.bin / bgm.bin ...）。 */
+        boolean hasFvpPack = false;
         String firstPspFile = null;
         /** 当前 firstXp3 的优先级分数，见 KrkrEntryPriority。 */
         int firstXp3Score = KrkrEntryPriority.SCORE_NONE;
@@ -307,6 +335,11 @@ public class EngineDetector {
             if (lower.equals("app.asar") || rel.endsWith("/app.asar")) s.hasAppAsar = true;
             if (lower.equals("package.json") || rel.endsWith("/package.json")) s.hasPackageJson = true;
             if (lower.startsWith("chrome_") && lower.endsWith(".pak")) s.hasElectronPak = true;
+            // FVP（rfvp）：根目录脚本（原版 *.hcb / 汉化 *.bch）+ 资源包特征
+            if (rel.indexOf('/') < 0) {
+                if (lower.endsWith(".hcb") || lower.endsWith(".bch")) s.hasFvpScript = true;
+                if (FVP_PACK_NAMES.contains(lower)) s.hasFvpPack = true;
+            }
             if (lower.endsWith(".desktop") && s.firstDesktop == null) s.firstDesktop = original;
             if (lower.endsWith(".xp3")) {
                 // 优先级：中文「启动/游戏」xp3 > data.xp3 > 其它（见 KrkrEntryPriority）
