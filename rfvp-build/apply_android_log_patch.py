@@ -63,30 +63,6 @@ android_logger = "0.14\"""",
     (
         "crates/rfvp/src/subsystem/components/syscalls/input.rs",
         [
-            # 3) 探针：脚本读到"按下"边沿时记录（含线程 id / 光标位置）
-            (
-                """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
-    Ok(Variant::Int(
-        game_data.inputs_manager.get_input_down() as i32
-    ))
-}""",
-                """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
-    let bits = game_data.inputs_manager.get_input_down();
-    // YukiHub patch: probe: log click edges exactly as the script sees them.
-    if bits != 0 {
-        log::info!(
-            "YHPROBE get_down bits={:#x} cursor=({},{}) in={} tid={}",
-            bits,
-            game_data.inputs_manager.get_cursor_x(),
-            game_data.inputs_manager.get_cursor_y(),
-            game_data.inputs_manager.get_cursor_in(),
-            game_data.get_current_thread()
-        );
-    }
-    Ok(Variant::Int(bits as i32))
-}""",
-                1,
-            ),
             # 4) 探针：事件队列是消费型，记录谁取走了什么
             (
                 """pub fn input_get_event(game_data: &mut GameData) -> Result<Variant> {
@@ -162,6 +138,67 @@ android_logger = "0.14\"""",
     }
 
     Ok(if hit { Variant::True } else { Variant::Nil })""",
+                1,
+            ),
+        ],
+    ),
+    (
+        "crates/rfvp/src/subsystem/resources/input_manager.rs",
+        [
+            # 7) 点击边沿"读后即消费"：第一个读取的脚本线程拿走本次点击，
+            #    同帧内其他脚本线程（如系统菜单轮询线程）读到的就是 0。
+            #    对齐原版引擎行为，修复「点按钮时对话也被推进」。
+            (
+                """    pub fn get_input_down(&self) -> u32 {
+        self.input_down
+    }""",
+                """    pub fn get_input_down(&self) -> u32 {
+        self.input_down
+    }
+
+    /// YukiHub patch: consume-on-read variant of `get_input_down`.
+    /// Returns the frame's down edges and clears the virtual click bits
+    /// (LeftClick/RightClick) so later readers in the same frame see nothing.
+    /// Matches the original engine, where only the first script thread that
+    /// observes a click acts on it (button handling wins over advancing).
+    pub fn take_input_down_click(&mut self) -> u32 {
+        let _g = self.cs.enter();
+        let bits = self.input_down;
+        self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
+            | Self::bit_for(KeyCode::RightClick));
+        bits
+    }""",
+                1,
+            ),
+        ],
+    ),
+    (
+        "crates/rfvp/src/subsystem/components/syscalls/input.rs",
+        [
+            # 8)+9) syscall 改为消费式读取，并带探针日志（一个编辑，保证幂等）
+            (
+                """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
+    Ok(Variant::Int(
+        game_data.inputs_manager.get_input_down() as i32
+    ))
+}""",
+                """pub fn input_get_down(game_data: &mut GameData) -> Result<Variant> {
+    // YukiHub patch: consume-on-read + probe (original engine semantics):
+    // the first script thread that observes the click takes it; later readers
+    // in the same frame see nothing (fixes button taps also advancing text).
+    let bits = game_data.inputs_manager.take_input_down_click();
+    if bits != 0 {
+        log::info!(
+            "YHPROBE get_down bits={:#x} cursor=({},{}) in={} tid={}",
+            bits,
+            game_data.inputs_manager.get_cursor_x(),
+            game_data.inputs_manager.get_cursor_y(),
+            game_data.inputs_manager.get_cursor_in(),
+            game_data.get_current_thread()
+        );
+    }
+    Ok(Variant::Int(bits as i32))
+}""",
                 1,
             ),
         ],
