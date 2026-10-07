@@ -140,6 +140,19 @@ android_logger = "0.14\"""",
     Ok(if hit { Variant::True } else { Variant::Nil })""",
                 1,
             ),
+            # 6b) 探针：记录每个贴图 id 对应的文件路径（用于把日志里的 tex=NNN
+            #     映射到游戏目录里的实际图片，进而检查该图是否自带暗带）
+            (
+                """    match path {
+        Variant::String(path) | Variant::ConstString(path, _) => {
+            let buff = game_data.vfs_load_file(path)?;""",
+                """    match path {
+        Variant::String(path) | Variant::ConstString(path, _) => {
+            // YukiHub patch: probe — which file backs each graph id.
+            log::info!("YHPROBE graph_load id={} path={}", id, path);
+            let buff = game_data.vfs_load_file(path)?;""",
+                1,
+            ),
         ],
     ),
     (
