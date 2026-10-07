@@ -203,7 +203,7 @@ android_logger = "0.14\"""",
             {
                 let mut s = String::new();
                 for tid in 0..self.tm.total_contexts() {
-                    let st = self.tm.get_context_status(tid);
+                    let st = self.tm.get_context_status(tid as u32);
                     if st != ThreadState::CONTEXT_STATUS_NONE {
                         s.push_str(&format!("{}:{:#x} ", tid, st.bits()));
                     }
@@ -221,7 +221,7 @@ android_logger = "0.14\"""",
             {
                 let mut s = String::new();
                 for tid in 0..self.tm.total_contexts() {
-                    let st = self.tm.get_context_status(tid);
+                    let st = self.tm.get_context_status(tid as u32);
                     if st != ThreadState::CONTEXT_STATUS_NONE {
                         s.push_str(&format!("{}:{:#x} ", tid, st.bits()));
                     }
