@@ -123,14 +123,7 @@ android_logger = "0.14\"""",
     let click_active = game_data.inputs_manager.get_input_down() != 0
         || game_data.inputs_manager.get_input_up() != 0;
     let hit = game_data.motion_manager.prim_hit(id, flag_non_nil, cin, cx, cy);
-    // YukiHub patch: probe + button-owns-click semantics.
-    // If this click lands on a clickable prim, consume the click edges right
-    // away: the dialogue-advance threads polling InputGetDown in the same
-    // frame must not treat this click as "advance text" (matches the original
-    // engine, where tapping a message-window button never advances dialogue).
-    if hit && click_active {
-        game_data.inputs_manager.consume_click_edges();
-    }
+    // YukiHub patch: probe only (log hit tests while a click is in flight).
     if click_active {
         log::info!(
             "YHPROBE prim_hit id={} flag={} cursor=({},{}) in={} -> {} tid={}",
@@ -145,34 +138,6 @@ android_logger = "0.14\"""",
     }
 
     Ok(if hit { Variant::True } else { Variant::Nil })""",
-                1,
-            ),
-        ],
-    ),
-    (
-        "crates/rfvp/src/subsystem/resources/input_manager.rs",
-        [
-            # 7) 命中即抑制：按钮命中时清掉点击边沿，推进线程就不会
-            #    再把同一次点击当作「推进对话」处理（对齐原版引擎行为）。
-            (
-                """    pub fn get_input_down(&self) -> u32 {
-        self.input_down
-    }""",
-                """    pub fn get_input_down(&self) -> u32 {
-        self.input_down
-    }
-
-    /// YukiHub patch: called by PrimHit when the cursor lands on a clickable
-    /// sprite during an active click. Clearing the click edges here means the
-    /// button press "owns" this click and the dialogue-advance threads
-    /// (which poll InputGetDown) no longer see it in the same frame.
-    pub fn consume_click_edges(&mut self) {
-        let _g = self.cs.enter();
-        self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
-            | Self::bit_for(KeyCode::RightClick)
-            | Self::bit_for(KeyCode::MouseLeft)
-            | Self::bit_for(KeyCode::MouseRight));
-    }""",
                 1,
             ),
         ],
