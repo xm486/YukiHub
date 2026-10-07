@@ -443,17 +443,20 @@ public final class FvpActivity extends Activity implements
 
     // ---------- 输入 ----------
 
+    /**
+     * 点击延迟到抬手时下发（实验性修复：点按钮不该推进对话）。
+     *
+     * <p>背景：Windows 上鼠标先移动到按钮（悬停若干帧）再按下，而 Android 一次触摸的
+     * move/down/up 会在极短时间内一起到达。实测 rfvp 里同一次点击会被「按钮线程」和
+     * 「推进对话线程」同时看到（YHPROBE 探针：多线程同帧都读到 bits=0x14）。
+     *
+     * <p>这里把点击推迟到 ACTION_UP 才合成（move → down → up），让脚本在按下之前
+     * 至少经过若干帧的移动事件来更新「光标在哪个按钮上」的状态。
+     * 若此方案无效，把 PHASE 映射改回直通即可（见 git 历史）。
+     */
     @Override
     public boolean onTouch(View view, MotionEvent event) {
         if (handle == 0L || event == null) return false;
-        int phase;
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN: phase = 0; break;
-            case MotionEvent.ACTION_MOVE: phase = 1; break;
-            case MotionEvent.ACTION_UP: phase = 2; break;
-            case MotionEvent.ACTION_CANCEL: phase = 3; break;
-            default: return false;
-        }
         // 铺满模式下 buffer（=引擎坐标系）与 view 尺寸不同，需要按比例换算
         double x = event.getX();
         double y = event.getY();
@@ -463,8 +466,26 @@ public final class FvpActivity extends Activity implements
             x = x * bufW / viewW;
             y = y * bufH / viewH;
         }
-        NativeRfvp.touch(handle, phase, x, y);
-        return true;
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                // 只移动光标，不按下：给脚本时间建立悬停状态
+                NativeRfvp.touch(handle, 1, x, y);
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                NativeRfvp.touch(handle, 1, x, y);
+                return true;
+            case MotionEvent.ACTION_UP:
+                // 抬手时才合成一次完整点击：先确保光标到位，再 down + up
+                NativeRfvp.touch(handle, 1, x, y);
+                NativeRfvp.touch(handle, 0, x, y);
+                NativeRfvp.touch(handle, 2, x, y);
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                NativeRfvp.touch(handle, 3, x, y);
+                return true;
+            default:
+                return false;
+        }
     }
 
     @Override
