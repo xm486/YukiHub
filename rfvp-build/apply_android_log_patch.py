@@ -80,7 +80,7 @@ android_logger = "0.14\"""",
             game_data.inputs_manager.get_cursor_x(),
             game_data.inputs_manager.get_cursor_y(),
             game_data.inputs_manager.get_cursor_in(),
-            game_data.get_last_current_thread()
+            game_data.get_current_thread()
         );
     }
     Ok(Variant::Int(bits as i32))
@@ -100,7 +100,7 @@ android_logger = "0.14\"""",
             event.get_keycode(),
             event.get_x(),
             event.get_y(),
-            game_data.get_last_current_thread()
+            game_data.get_current_thread()
         );
         let mut table = Table::new();""",
                 1,
@@ -118,7 +118,7 @@ android_logger = "0.14\"""",
             log::info!(
                 "YHPROBE set_click mode={} tid={}",
                 v,
-                game_data.get_last_current_thread()
+                game_data.get_current_thread()
             );
             game_data.inputs_manager.set_click(*v as u32);
         }
@@ -157,7 +157,7 @@ android_logger = "0.14\"""",
             cy,
             cin,
             hit,
-            game_data.get_last_current_thread()
+            game_data.get_current_thread()
         );
     }
 
