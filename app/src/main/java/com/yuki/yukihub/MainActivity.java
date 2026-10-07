@@ -10753,8 +10753,7 @@ private void showEditPlayTimeDialog(Game game) {
                 FvpLaunchPrefs.labelOfNls(prefs.nls));
         CheckBox textHidpi = krCheckBox("文本高分辨率渲染（小字更清晰）", prefs.textHidpi);
         CheckBox systemFont = krCheckBox("启用系统字体回退（缺字时用系统字体补齐）", prefs.systemFont);
-        CheckBox stretchFill = krCheckBox("画面铺满全屏（按游戏分辨率拉伸，消除黑边；"
-                + "配合已改为 720P 的脚本 = 字大 1.5 倍的全屏画面）", prefs.stretchFill);
+        CheckBox stretchFill = krCheckBox("画面铺满全屏（拉伸画面消除黑边，画面比例会轻微变形）", prefs.stretchFill);
         android.widget.Spinner screenScale = krSpinner(FvpLaunchPrefs.SCALE_LABELS,
                 FvpLaunchPrefs.labelOfScale(prefs.screenScale));
         android.widget.Spinner textScale = krSpinner(FvpLaunchPrefs.TEXT_SCALE_LABELS,
@@ -10777,11 +10776,11 @@ private void showEditPlayTimeDialog(Game game) {
             Toast.makeText(MainActivity.this, "已清除自定义字体（点「保存」生效）", Toast.LENGTH_SHORT).show();
         });
 
-        root.addView(krLabel("文本编码（汉化版乱码时改这里）"));
+        root.addView(krLabel("文本编码（已自动识别，若仍有乱码可手动更改）"));
         root.addView(nlsSpinner);
         root.addView(krLabel("画面放大（等比放大并裁边，字会变大；渲染负担随之增加）"));
         root.addView(screenScale);
-        root.addView(krLabel("文字大小（只放大文字，需 YukiHub 补丁版引擎；过大可能超出对话框）"));
+        root.addView(krLabel("文字大小（只放大文字，画面布局不变；过大会超出对话框）"));
         root.addView(textScale);
         root.addView(textHidpi);
         root.addView(systemFont);
