@@ -81,7 +81,8 @@ public final class FvpLaunchPrefs {
      * 0.0 = 行距完全不变（最紧凑）；0.5 = 放大增量减半（默认）；1.0 = 与字号等比。
      */
     public static final String[] LINE_SCALE_LABELS = {
-            "比原版更紧（可能贴字）", "比原版略紧", "与原版行距一致（推荐）", "比原版松一半", "随字号等比（原样）"
+            "比原版更紧（-1.0，可能贴字）", "比原版略紧（-0.5）", "与原版行距一致（0.0，推荐）",
+            "比原版松一半（+0.5）", "随字号等比（+1.0，原样）"
     };
     public static final float[] LINE_SCALE_VALUES = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
 
