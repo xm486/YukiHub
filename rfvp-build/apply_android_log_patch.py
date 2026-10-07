@@ -236,6 +236,48 @@ android_logger = "0.14\"""",
             ),
         ],
     ),
+    (
+        "crates/rfvp/src/rendering/prim_commands.rs",
+        [
+            # 11) 探针：打印纯色矩形（Tile）图元的矩形与 RGBA
+            #     半透明黑色矩形（黑框 bug）最可能就是这类图元
+            (
+                """                let rgba = vec4(
+                    color.get_r() as f32 / 255.0,
+                    color.get_g() as f32 / 255.0,
+                    color.get_b() as f32 / 255.0,
+                    draw_alpha * (color.get_a() as f32 / 255.0),
+                );""",
+                """                let rgba = vec4(
+                    color.get_r() as f32 / 255.0,
+                    color.get_g() as f32 / 255.0,
+                    color.get_b() as f32 / 255.0,
+                    draw_alpha * (color.get_a() as f32 / 255.0),
+                );
+                // YukiHub patch: probe — log solid-colour Tile prims (black-box hunt).
+                {
+                    use core::sync::atomic::{AtomicU32, Ordering};
+                    static TILE_BUDGET: AtomicU32 = AtomicU32::new(600);
+                    let n = TILE_BUDGET.fetch_sub(1, Ordering::Relaxed);
+                    if n > 0 && (n % 8) == 0 && rgba.w > 0.001 {
+                        log::info!(
+                            "YHPROBE tile id={} xy=({},{}) wh=({},{}) rgba=({:.3},{:.3},{:.3},{:.3})",
+                            draw_id,
+                            parent_x + draw_x,
+                            parent_y + draw_y,
+                            w,
+                            h,
+                            rgba.x,
+                            rgba.y,
+                            rgba.z,
+                            rgba.w
+                        );
+                    }
+                }""",
+                1,
+            ),
+        ],
+    ),
 ]
 
 
