@@ -93,7 +93,7 @@ jobs:
           # 校验补丁确实编译进去了（防止缓存命中导致补丁丢失、却上传旧产物）
           echo "--- 探针字符串检查 ---"
           grep -ao 'YHPROBE [a-z_]*' "$SO" | sort | uniq -c || true
-          for k in "YHPROBE get_down" "YHPROBE tile" "YHPROBE big" "YHPROBE load"; do
+          for k in "YHPROBE get_down" "YHPROBE tile" "YHPROBE big" "YHPROBE load" "YHPROBE parts" "YHPROBE hit seq="; do
             if ! grep -qa "$k" "$SO"; then
               echo "::error::librfvp.so 缺少 ['$k'] —— 补丁未生效（很可能是编译缓存问题）"
               exit 1
