@@ -321,6 +321,90 @@ android_logger = "0.14\"""",
             ),
         ],
     ),
+    (
+        "crates/rfvp/src/rendering/gpu_prim.rs",
+        [
+            # 11b) 探针：纯色矩形（Tile）。注意：Android 实际走的是本文件
+            #      （GpuPrimRenderer，被 app.rs 引用），而 prim_commands.rs 里那套
+            #      collect_tree/emit_sprite 没有任何调用者，属死代码会被链接器丢弃，
+            #      因此探针必须放在这里才进得了二进制。
+            (
+                """                if w > 0.0 && h > 0.0 {
+                    let color = vec4(
+                        c.get_r() as f32 / 255.0,
+                        c.get_g() as f32 / 255.0,
+                        c.get_b() as f32 / 255.0,
+                        draw_alpha * (c.get_a() as f32 / 255.0),
+                    );""",
+                """                if w > 0.0 && h > 0.0 {
+                    let color = vec4(
+                        c.get_r() as f32 / 255.0,
+                        c.get_g() as f32 / 255.0,
+                        c.get_b() as f32 / 255.0,
+                        draw_alpha * (c.get_a() as f32 / 255.0),
+                    );
+                    // YukiHub patch: probe — solid-colour Tile prims (black-box hunt).
+                    {
+                        use core::sync::atomic::{AtomicU32, Ordering};
+                        static TILE_BUDGET: AtomicU32 = AtomicU32::new(600);
+                        let n = TILE_BUDGET.fetch_sub(1, Ordering::Relaxed);
+                        if n > 0 && (n % 8) == 0 && color.w > 0.001 {
+                            log::info!(
+                                "YHPROBE tile id={} xy=({},{}) wh=({},{}) rgba=({:.3},{:.3},{:.3},{:.3})",
+                                draw_id,
+                                parent_x + draw_x,
+                                parent_y + draw_y,
+                                w,
+                                h,
+                                color.x,
+                                color.y,
+                                color.z,
+                                color.w
+                            );
+                        }
+                    }""",
+                1,
+            ),
+            # 12b) 探针：大贴图图元（背景层），放在真正被链接的顶点发射函数里
+            (
+                """        let base = self.vertices.len() as u32;
+
+        // Two triangles (0,1,2) (2,1,3)
+        let p0 = model.transform_point3(vec3(0.0, dst_h, 0.0));""",
+                """        let base = self.vertices.len() as u32;
+
+        // Two triangles (0,1,2) (2,1,3)
+        let p0 = model.transform_point3(vec3(0.0, dst_h, 0.0));
+        // YukiHub patch: probe — big textured quads (background layers).
+        {
+            use core::sync::atomic::{AtomicU32, Ordering};
+            static BIG_BUDGET: AtomicU32 = AtomicU32::new(1200);
+            let n = BIG_BUDGET.fetch_sub(1, Ordering::Relaxed);
+            let tex_key = match tex {
+                DrawTextureKey::Graph(g) => g as i64,
+                DrawTextureKey::White => -1i64,
+            };
+            if n > 0 && (n % 24) == 0 && dst_w * dst_h > 100000.0 {
+                log::info!(
+                    "YHPROBE big dst=({:.0},{:.0}) uv=({:.3},{:.3})-({:.3},{:.3}) rgba=({:.3},{:.3},{:.3},{:.3}) tex={}",
+                    dst_w,
+                    dst_h,
+                    uv0.x,
+                    uv0.y,
+                    uv1.x,
+                    uv1.y,
+                    color.x,
+                    color.y,
+                    color.z,
+                    color.w,
+                    tex_key
+                );
+            }
+        }""",
+                1,
+            ),
+        ],
+    ),
 ]
 
 
