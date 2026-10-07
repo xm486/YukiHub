@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 
 import org.json.JSONObject;
 
+import java.io.File;
+
 /**
  * FVP 引擎（rfvp）的单游戏启动偏好。
  *
@@ -23,6 +25,8 @@ public final class FvpLaunchPrefs {
 
     /** 文本编码默认值（rfvp 未显式传入时自身也是 sjis）。 */
     public static final String NLS_SJIS = "sjis";
+    /** 简体中文编码（GBK 直写型汉化补丁）。 */
+    public static final String NLS_GBK = "gbk";
 
     /** 文本编码（对齐 rfvp 支持的三档）。 */
     public static final String[] NLS_LABELS = {
@@ -52,6 +56,8 @@ public final class FvpLaunchPrefs {
      * 1.0 = 脚本原大；只放大文字，UI 布局不动、画面无拉伸无裁剪。
      */
     public float textScale = 1.0f;
+    /** 是否已经跑过一次自动编码探测（true 后不再自动改，尊重用户手选）。 */
+    public boolean nlsAuto = false;
 
     /** 画面放大档位。 */
     public static final String[] SCALE_LABELS = {
@@ -81,6 +87,7 @@ public final class FvpLaunchPrefs {
             p.screenScale = normalizeScale(o.optString("screen_scale", "1.0"));
             p.stretchFill = o.optBoolean("stretch_fill", false);
             p.textScale = normalizeScale(o.optString("text_scale", "1.0"));
+            p.nlsAuto = o.optBoolean("nls_auto", false);
         } catch (Throwable ignored) { }
         return p;
     }
@@ -96,6 +103,7 @@ public final class FvpLaunchPrefs {
             o.put("screen_scale", String.valueOf(normalizeScale(String.valueOf(screenScale))));
             o.put("stretch_fill", stretchFill);
             o.put("text_scale", String.valueOf(normalizeScale(String.valueOf(textScale))));
+            o.put("nls_auto", nlsAuto);
             context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     .edit().putString(KEY_PREFIX + gameId, o.toString()).apply();
         } catch (Throwable ignored) { }
@@ -108,6 +116,118 @@ public final class FvpLaunchPrefs {
             context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     .edit().remove(KEY_PREFIX + gameId).apply();
         } catch (Throwable ignored) { }
+    }
+
+    /**
+     * load 的带路径提示版本：从未探测过编码时（nls_auto=false），采样脚本推断
+     * SJIS/GBK 并落盘。只在「检出 GBK 且当前是 SJIS」时纠偏，之后永不覆盖手选。
+     */
+    public static FvpLaunchPrefs load(Context context, long gameId, String rootHint) {
+        FvpLaunchPrefs p = load(context, gameId);
+        if (context == null || gameId <= 0 || p.nlsAuto) return p;
+        try {
+            String detected = detectNlsFromRoot(rootHint);
+            if (detected != null && NLS_GBK.equals(detected) && !NLS_GBK.equals(p.nls)) {
+                android.util.Log.i("FvpLaunchPrefs",
+                        "nls auto-detect: gbk (was " + p.nls + ") game=" + gameId);
+                p.nls = NLS_GBK;
+            }
+            p.nlsAuto = true;
+            p.save(context, gameId);
+        } catch (Throwable ignored) { }
+        return p;
+    }
+
+    /**
+     * 采样 hcb/bch 脚本推断文本编码。
+     * 原理：汉化组「GBK 直写」的脚本里有大量 SJIS 解不开、但 GBK 能解开的 pushstring；
+     * 日文原版几乎不存在这种串。判据：GBK-only 串 ≥30 且占比 ≥5% → GBK。
+     * 任何异常都返回 null（保持默认 sjis，绝不因探测导致启动异常）。
+     */
+    public static String detectNlsFromRoot(String rootUriOrPath) {
+        try {
+            String root = rootUriOrPath == null ? "" : rootUriOrPath.trim();
+            if (root.startsWith("file://")) {
+                root = android.net.Uri.decode(root.substring(7));
+            }
+            if (!root.startsWith("/")) return null;
+            File dir = new File(root);
+            File[] children = dir.listFiles();
+            if (children == null) return null;
+            // 与 rfvp find_hcb 同规则：优先 *.bch（汉化补丁脚本），否则 *.hcb，取字典序第一个
+            File bch = null, hcb = null;
+            for (File f : children) {
+                if (!f.isFile()) continue;
+                String n = f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (n.endsWith(".bch")) {
+                    if (bch == null || n.compareTo(bch.getName().toLowerCase(java.util.Locale.ROOT)) < 0) bch = f;
+                } else if (n.endsWith(".hcb")) {
+                    if (hcb == null || n.compareTo(hcb.getName().toLowerCase(java.util.Locale.ROOT)) < 0) hcb = f;
+                }
+            }
+            File script = bch != null ? bch : hcb;
+            return script == null ? null : detectNlsFromFile(script);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static String detectNlsFromFile(File script) {
+        try {
+            long size = script.length();
+            int cap = (int) Math.min(size, 8L * 1024 * 1024);
+            if (cap < 4096) return null;
+            byte[] buf = new byte[cap];
+            java.io.FileInputStream in = new java.io.FileInputStream(script);
+            int read = 0;
+            while (read < cap) {
+                int r = in.read(buf, read, cap - read);
+                if (r < 0) break;
+                read += r;
+            }
+            in.close();
+            java.nio.charset.Charset sjis = java.nio.charset.Charset.forName("Shift_JIS");
+            java.nio.charset.Charset gbk = java.nio.charset.Charset.forName("GBK");
+            int total = 0, sjisOk = 0, gbkOnly = 0;
+            int i = 0;
+            while (i < read - 2 && total < 40000) {
+                if (buf[i] == 0x0E) {
+                    int len = buf[i + 1] & 0xFF;
+                    if (len >= 2 && len <= 120 && i + 2 + len <= read) {
+                        total++;
+                        byte[] s = new byte[len];
+                        System.arraycopy(buf, i + 2, s, 0, len);
+                        if (strictDecode(s, sjis)) {
+                            sjisOk++;
+                        } else if (strictDecode(s, gbk)) {
+                            gbkOnly++;
+                        }
+                        i += 2 + len;
+                        continue;
+                    }
+                }
+                i++;
+            }
+            android.util.Log.i("FvpLaunchPrefs", "nls detect: file=" + script.getName()
+                    + " total=" + total + " sjisOk=" + sjisOk + " gbkOnly=" + gbkOnly);
+            if (gbkOnly >= 30 && total > 0 && gbkOnly * 20 >= total) {
+                return NLS_GBK;
+            }
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static boolean strictDecode(byte[] bytes, java.nio.charset.Charset cs) {
+        try {
+            java.nio.charset.CodingErrorAction rep = java.nio.charset.CodingErrorAction.REPORT;
+            cs.newDecoder().onMalformedInput(rep).onUnmappableCharacter(rep)
+                    .decode(java.nio.ByteBuffer.wrap(bytes));
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** 文本编码归一：白名单外一律回 sjis（rfvp 的默认值，绝不会因非法值启动失败）。 */

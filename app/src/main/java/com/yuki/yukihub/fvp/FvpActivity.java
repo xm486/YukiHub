@@ -340,21 +340,51 @@ public final class FvpActivity extends Activity implements
 
     /** 强制自定义字体；文件不存在或加载失败时静默回退游戏默认字体。 */
     private void applyCustomFont() {
-        if (handle == 0L || fontPath.isEmpty()) return;
+        if (handle == 0L) return;
+        String path = fontPath;
+        boolean fromAsset = false;
+        if (path.isEmpty()) {
+            // 内置默认字体（assets/fonts/snow.ttf）：CJK 全覆盖（含日文假名与常用汉字），
+            // 对所有 FVP 游戏首次启动自动注入，日文文本同样正常渲染，缺简中字形的问题一并消除。
+            path = extractBundledFont();
+            fromAsset = true;
+            if (path == null) return;
+        }
         try {
-            if (!new File(fontPath).isFile()) {
-                Log.w(TAG, "custom font missing, fall back: " + fontPath);
+            if (!new File(path).isFile()) {
+                Log.w(TAG, "custom font missing, fall back: " + path);
                 return;
             }
         } catch (Throwable ignored) {
             return;
         }
-        int fontId = NativeRfvp.addFont(handle, fontPath);
+        int fontId = NativeRfvp.addFont(handle, path);
         if (fontId >= 0) {
             NativeRfvp.setForcedFont(handle, fontId);
-            Log.i(TAG, "forced font enabled: id=" + fontId + " path=" + fontPath);
+            Log.i(TAG, (fromAsset ? "bundled" : "forced") + " font enabled: id=" + fontId + " path=" + path);
         } else {
-            Log.w(TAG, "custom font load failed, fall back to game default: " + fontPath);
+            Log.w(TAG, "custom font load failed, fall back to game default: " + path);
+        }
+    }
+
+    /** 把 assets 里的内置字体解到私有目录（assets 不能直接传路径给引擎）。 */
+    private String extractBundledFont() {
+        try {
+            File dir = new File(getFilesDir(), "fvp_fonts");
+            if (!dir.exists()) dir.mkdirs();
+            File out = new File(dir, "bundled_snow.ttf");
+            if (out.isFile() && out.length() > 1024) return out.getAbsolutePath();
+            try (java.io.InputStream in = getAssets().open("fonts/snow.ttf");
+                 java.io.OutputStream os = new java.io.FileOutputStream(out)) {
+                byte[] buf = new byte[64 * 1024];
+                int r;
+                while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+            }
+            Log.i(TAG, "bundled font extracted: " + out.getAbsolutePath());
+            return out.getAbsolutePath();
+        } catch (Throwable t) {
+            Log.w(TAG, "extract bundled font failed: " + t);
+            return null;
         }
     }
 

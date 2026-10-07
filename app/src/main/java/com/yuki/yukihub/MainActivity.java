@@ -10727,7 +10727,7 @@ private void showEditPlayTimeDialog(Game game) {
      */
     private void showFvpSettingsDialog(Game game) {
         if (game == null || game.id <= 0) return;
-        FvpLaunchPrefs prefs = FvpLaunchPrefs.load(this, game.id);
+        FvpLaunchPrefs prefs = FvpLaunchPrefs.load(this, game.id, game.rootUri);
         // 字体选择回调需要改这一份，见字段注释。
         fvpEditingPrefs = prefs;
         fvpEditingGameId = game.id;
@@ -11971,7 +11971,7 @@ return startActivitySafely(intent);
         if (pkg.startsWith("internal.fvp") || pkg.equals("com.yuki.yukihub.fvp")) {
             // FVP 引擎（rfvp）内嵌在本应用；参数全部走单游戏设置（FvpLaunchPrefs）。
             Intent fvpIntent = EmulatorLauncher.buildInternalFvpIntent(
-                    this, game.rootUri, launchTarget, FvpLaunchPrefs.load(this, game.id));
+                    this, game.rootUri, launchTarget, FvpLaunchPrefs.load(this, game.id, game.rootUri));
             if (fvpIntent == null) {
                 lastLaunchFailReason = "FVP 引擎无法定位游戏目录（SAF 目录不支持内置引擎），请重新选择本地真实路径";
                 return false;

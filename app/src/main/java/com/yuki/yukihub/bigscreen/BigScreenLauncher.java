@@ -216,7 +216,7 @@ public final class BigScreenLauncher {
             // FVP 引擎（rfvp）：参数走单游戏设置；目录解析失败（SAF）时返回 null，由游戏库提示更准确
             return start(act, EmulatorLauncher.buildInternalFvpIntent(
                     act, game.rootUri, target,
-                    com.yuki.yukihub.fvp.FvpLaunchPrefs.load(act, game.id)));
+                    com.yuki.yukihub.fvp.FvpLaunchPrefs.load(act, game.id, game.rootUri)));
         }
         if (pkg.startsWith("internal.psp") || pkg.equals("org.ppsspp.ppsspp")) {
             // 没装 PPSSPP：交给游戏库（那里有下载引导对话框）
