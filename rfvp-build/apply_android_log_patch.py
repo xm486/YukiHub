@@ -123,7 +123,14 @@ android_logger = "0.14\"""",
     let click_active = game_data.inputs_manager.get_input_down() != 0
         || game_data.inputs_manager.get_input_up() != 0;
     let hit = game_data.motion_manager.prim_hit(id, flag_non_nil, cin, cx, cy);
-    // YukiHub patch: probe: log hit tests while a click is in flight.
+    // YukiHub patch: probe + button-owns-click semantics.
+    // If this click lands on a clickable prim, consume the click edges right
+    // away: the dialogue-advance threads polling InputGetDown in the same
+    // frame must not treat this click as "advance text" (matches the original
+    // engine, where tapping a message-window button never advances dialogue).
+    if hit && click_active {
+        game_data.inputs_manager.consume_click_edges();
+    }
     if click_active {
         log::info!(
             "YHPROBE prim_hit id={} flag={} cursor=({},{}) in={} -> {} tid={}",
@@ -145,9 +152,8 @@ android_logger = "0.14\"""",
     (
         "crates/rfvp/src/subsystem/resources/input_manager.rs",
         [
-            # 7) 点击边沿"读后即消费"：第一个读取的脚本线程拿走本次点击，
-            #    同帧内其他脚本线程（如系统菜单轮询线程）读到的就是 0。
-            #    对齐原版引擎行为，修复「点按钮时对话也被推进」。
+            # 7) 命中即抑制：按钮命中时清掉点击边沿，推进线程就不会
+            #    再把同一次点击当作「推进对话」处理（对齐原版引擎行为）。
             (
                 """    pub fn get_input_down(&self) -> u32 {
         self.input_down
@@ -156,25 +162,16 @@ android_logger = "0.14\"""",
         self.input_down
     }
 
-    /// YukiHub patch: consume-on-read variant of `get_input_down`.
-    /// Returns the frame's down edges and clears the virtual click bits
-    /// (LeftClick/RightClick) so later readers in the same frame see nothing.
-    /// Matches the original engine, where only the first script thread that
-    /// observes a click acts on it (button handling wins over advancing).
-    pub fn take_input_down_click(&mut self) -> u32 {
-        {
-            let _g = self.cs.enter();
-            let bits = self.input_down;
-            // Clear ALL click-related bits (virtual + physical). Clearing only
-            // the virtual bits leaves MouseL/MouseR set, which later readers in
-            // the same frame still treat as a click (regression observed on
-            // device: every thread saw bits=0x10 after the first read).
-            self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
-                | Self::bit_for(KeyCode::RightClick)
-                | Self::bit_for(KeyCode::MouseLeft)
-                | Self::bit_for(KeyCode::MouseRight));
-            bits
-        }
+    /// YukiHub patch: called by PrimHit when the cursor lands on a clickable
+    /// sprite during an active click. Clearing the click edges here means the
+    /// button press "owns" this click and the dialogue-advance threads
+    /// (which poll InputGetDown) no longer see it in the same frame.
+    pub fn consume_click_edges(&mut self) {
+        let _g = self.cs.enter();
+        self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
+            | Self::bit_for(KeyCode::RightClick)
+            | Self::bit_for(KeyCode::MouseLeft)
+            | Self::bit_for(KeyCode::MouseRight));
     }""",
                 1,
             ),
@@ -183,18 +180,15 @@ android_logger = "0.14\"""",
     (
         "crates/rfvp/src/subsystem/components/syscalls/input.rs",
         [
-            # 8)+9) syscall 改为消费式读取，并带探针日志（一个编辑，保证幂等）
+            # 8) 保留只读探针（撤销消费式读取）
             (
                 """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
     Ok(Variant::Int(
         game_data.inputs_manager.get_input_down() as i32
     ))
 }""",
-                """pub fn input_get_down(game_data: &mut GameData) -> Result<Variant> {
-    // YukiHub patch: consume-on-read + probe (original engine semantics):
-    // the first script thread that observes the click takes it; later readers
-    // in the same frame see nothing (fixes button taps also advancing text).
-    let bits = game_data.inputs_manager.take_input_down_click();
+                """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
+    let bits = game_data.inputs_manager.get_input_down();
     if bits != 0 {
         log::info!(
             "YHPROBE get_down bits={:#x} cursor=({},{}) in={} tid={}",
