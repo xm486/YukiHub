@@ -170,6 +170,72 @@ android_logger = "0.14\"""",
             ),
         ],
     ),
+    (
+        "crates/rfvp/src/vm_runner.rs",
+        [
+            # 9) 探针：读档路径 + 读档前后活跃线程状态（定位「读档后卡在菜单」）
+            (
+                """            #[cfg(not(feature = "no_std"))]
+            {
+                let path = SaveItem::resolve_save_path_for_read(slot);""",
+                """            #[cfg(not(feature = "no_std"))]
+            {
+                let path = SaveItem::resolve_save_path_for_read(slot);
+                // YukiHub patch: probe — which file is being read?
+                match fs::metadata(&path) {
+                    Ok(md) => log::info!(
+                        "YHPROBE load path={} len={}",
+                        path.display(),
+                        md.len()
+                    ),
+                    Err(e) => log::warn!(
+                        "YHPROBE load path={} unreadable: {:#}",
+                        path.display(),
+                        e
+                    ),
+                }""",
+                1,
+            ),
+            (
+                """        if let Some(slot) = game.save_manager.take_load_request() {""",
+                """        if let Some(slot) = game.save_manager.take_load_request() {
+            // YukiHub patch: probe — dump active contexts before restoring.
+            {
+                let mut s = String::new();
+                for tid in 0..self.tm.total_contexts() {
+                    let st = self.tm.get_context_status(tid);
+                    if st != ThreadState::CONTEXT_STATUS_NONE {
+                        s.push_str(&format!("{}:{:#x} ", tid, st.bits()));
+                    }
+                }
+                log::info!("YHPROBE load slot={} BEFORE active=[{}]", slot, s);
+            }""",
+                1,
+            ),
+            # 10) 探针：恢复完成后再次打印（对比菜单线程是否仍活跃）
+            (
+                """            // Do not advance contexts in the same tick; resume on the next frame.
+            #[cfg(not(feature = "no_std"))]
+            if debug_ui::enabled() {""",
+                """            // YukiHub patch: probe — dump active contexts after restoring.
+            {
+                let mut s = String::new();
+                for tid in 0..self.tm.total_contexts() {
+                    let st = self.tm.get_context_status(tid);
+                    if st != ThreadState::CONTEXT_STATUS_NONE {
+                        s.push_str(&format!("{}:{:#x} ", tid, st.bits()));
+                    }
+                }
+                log::info!("YHPROBE load slot={} AFTER active=[{}]", slot, s);
+            }
+
+            // Do not advance contexts in the same tick; resume on the next frame.
+            #[cfg(not(feature = "no_std"))]
+            if debug_ui::enabled() {""",
+                1,
+            ),
+        ],
+    ),
 ]
 
 
