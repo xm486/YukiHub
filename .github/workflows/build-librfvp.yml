@@ -79,18 +79,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rfvp
-          # 缓存键带上「本仓库提交」，避免补丁脚本变了却复用旧编译产物
-          key: ${{ github.event.inputs.rfvp_repo }}@${{ github.event.inputs.rfvp_ref }}-${{ github.sha }}
-
-      - name: Force rebuild of patched crate
-        working-directory: rfvp
-        run: |
-          # rust-cache 恢复的 target/ 可能让 cargo 误判 rfvp 已是最新（补丁不生效），
-          # 这里清掉 rfvp 自身的产物，强制用打过补丁的源码重新编译。
-          # 依赖（wgpu 等）的产物保留，所以不会退化成全量重编。
-          cargo clean -p rfvp
-          # 双保险：补丁改过的文件刷一下 mtime，避免增量判断失效
-          touch crates/rfvp/src/lib.rs
+          key: ${{ github.event.inputs.rfvp_repo }}@${{ github.event.inputs.rfvp_ref }}
 
       - name: Build librfvp.so (aarch64, release)
         working-directory: rfvp
