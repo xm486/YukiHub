@@ -403,6 +403,61 @@ android_logger = "0.14\"""",
         }""",
                 1,
             ),
+            # 12c) 探针：只记录屏幕矩形覆盖「黑框区域（x 700~1100）」的图元，
+            #      带屏幕坐标，便于直接对上截图里的竖直暗带
+            (
+                """        tex: DrawTextureKey,
+    ) {
+        let base = self.vertices.len() as u32;""",
+                """        tex: DrawTextureKey,
+    ) {
+        // YukiHub patch: probe — quads covering the black-strip area (x 700..1100).
+        {
+            use core::sync::atomic::{AtomicU32, Ordering};
+            static HIT_BUDGET: AtomicU32 = AtomicU32::new(400);
+            let n = HIT_BUDGET.fetch_sub(1, Ordering::Relaxed);
+            let q0 = model.transform_point3(vec3(0.0, dst_h, 0.0));
+            let q1 = model.transform_point3(vec3(0.0, 0.0, 0.0));
+            let q2 = model.transform_point3(vec3(dst_w, dst_h, 0.0));
+            let q3 = model.transform_point3(vec3(dst_w, 0.0, 0.0));
+            let min_x = q0.x.min(q1.x).min(q2.x).min(q3.x);
+            let max_x = q0.x.max(q1.x).max(q2.x).max(q3.x);
+            let min_y = q0.y.min(q1.y).min(q2.y).min(q3.y);
+            let max_y = q0.y.max(q1.y).max(q2.y).max(q3.y);
+            let tex_key = match tex {
+                DrawTextureKey::Graph(g) => g as i64,
+                DrawTextureKey::White => -1i64,
+            };
+            if n > 0
+                && (n % 8) == 0
+                && max_x > 700.0
+                && min_x < 1100.0
+                && max_y > 100.0
+                && min_y < 900.0
+            {
+                log::info!(
+                    "YHPROBE hit rect=({:.0},{:.0})-({:.0},{:.0}) dst=({:.0},{:.0}) uv=({:.3},{:.3})-({:.3},{:.3}) rgba=({:.3},{:.3},{:.3},{:.3}) tex={}",
+                    min_x,
+                    min_y,
+                    max_x,
+                    max_y,
+                    dst_w,
+                    dst_h,
+                    uv0.x,
+                    uv0.y,
+                    uv1.x,
+                    uv1.y,
+                    color.x,
+                    color.y,
+                    color.z,
+                    color.w,
+                    tex_key
+                );
+            }
+        }
+        let base = self.vertices.len() as u32;""",
+                1,
+            ),
         ],
     ),
 ]
