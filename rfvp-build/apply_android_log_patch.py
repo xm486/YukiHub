@@ -60,6 +60,112 @@ android_logger = "0.14\"""",
             ),
         ],
     ),
+    (
+        "crates/rfvp/src/subsystem/components/syscalls/input.rs",
+        [
+            # 3) 探针：脚本读到"按下"边沿时记录（含线程 id / 光标位置）
+            (
+                """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
+    Ok(Variant::Int(
+        game_data.inputs_manager.get_input_down() as i32
+    ))
+}""",
+                """pub fn input_get_down(game_data: &GameData) -> Result<Variant> {
+    let bits = game_data.inputs_manager.get_input_down();
+    // YukiHub patch: probe: log click edges exactly as the script sees them.
+    if bits != 0 {
+        log::info!(
+            "YHPROBE get_down bits={:#x} cursor=({},{}) in={} tid={}",
+            bits,
+            game_data.inputs_manager.get_cursor_x(),
+            game_data.inputs_manager.get_cursor_y(),
+            game_data.inputs_manager.get_cursor_in(),
+            game_data.get_last_current_thread()
+        );
+    }
+    Ok(Variant::Int(bits as i32))
+}""",
+                1,
+            ),
+            # 4) 探针：事件队列是消费型，记录谁取走了什么
+            (
+                """pub fn input_get_event(game_data: &mut GameData) -> Result<Variant> {
+    if let Some(event) = game_data.inputs_manager.get_event() {
+        let mut table = Table::new();""",
+                """pub fn input_get_event(game_data: &mut GameData) -> Result<Variant> {
+    if let Some(event) = game_data.inputs_manager.get_event() {
+        // YukiHub patch: probe: the press-item queue is consuming; log the taker.
+        log::info!(
+            "YHPROBE get_event key={} at=({},{}) tid={}",
+            event.get_keycode(),
+            event.get_x(),
+            event.get_y(),
+            game_data.get_last_current_thread()
+        );
+        let mut table = Table::new();""",
+                1,
+            ),
+            # 5) 探针：脚本用 InputSetClick 切换"入队的是按下还是抬起"
+            (
+                """    if let Variant::Int(v) = clicked {
+        if *v == 0 || *v == 1 {
+            game_data.inputs_manager.set_click(*v as u32);
+        }
+    }""",
+                """    if let Variant::Int(v) = clicked {
+        if *v == 0 || *v == 1 {
+            // YukiHub patch: probe: the script toggles which mouse edge gets enqueued.
+            log::info!(
+                "YHPROBE set_click mode={} tid={}",
+                v,
+                game_data.get_last_current_thread()
+            );
+            game_data.inputs_manager.set_click(*v as u32);
+        }
+    }""",
+                1,
+            ),
+        ],
+    ),
+    (
+        "crates/rfvp/src/subsystem/components/syscalls/graph.rs",
+        [
+            # 6) 探针：点击进行中时记录每次图元命中测试及其结果
+            (
+                """    let hit = game_data.motion_manager.prim_hit(
+        id,
+        flag_non_nil,
+        game_data.inputs_manager.get_cursor_in(),
+        game_data.inputs_manager.get_cursor_x(),
+        game_data.inputs_manager.get_cursor_y(),
+    );
+
+    Ok(if hit { Variant::True } else { Variant::Nil })""",
+                """    let cin = game_data.inputs_manager.get_cursor_in();
+    let cx = game_data.inputs_manager.get_cursor_x();
+    let cy = game_data.inputs_manager.get_cursor_y();
+    let click_active = game_data.inputs_manager.get_input_down() != 0
+        || game_data.inputs_manager.get_input_up() != 0;
+    let hit = game_data.motion_manager.prim_hit(id, flag_non_nil, cin, cx, cy);
+    // YukiHub patch: probe: log hit tests while a click is in flight.
+    if click_active {
+        log::info!(
+            "YHPROBE prim_hit id={} flag={} cursor=({},{}) in={} -> {} tid={}",
+            id,
+            flag_non_nil,
+            cx,
+            cy,
+            cin,
+            hit,
+            game_data.get_last_current_thread()
+        );
+    }
+
+    Ok(if hit { Variant::True } else { Variant::Nil })""",
+                1,
+            ),
+        ],
+    ),
 ]
 
 
