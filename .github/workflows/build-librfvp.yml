@@ -79,7 +79,18 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rfvp
-          key: ${{ github.event.inputs.rfvp_repo }}@${{ github.event.inputs.rfvp_ref }}
+          # 缓存键带上「本仓库提交」，避免补丁脚本变了却复用旧编译产物
+          key: ${{ github.event.inputs.rfvp_repo }}@${{ github.event.inputs.rfvp_ref }}-${{ github.sha }}
+
+      - name: Force rebuild of patched crate
+        working-directory: rfvp
+        run: |
+          # rust-cache 恢复的 target/ 可能让 cargo 误判 rfvp 已是最新（补丁不生效），
+          # 这里清掉 rfvp 自身的产物，强制用打过补丁的源码重新编译。
+          # 依赖（wgpu 等）的产物保留，所以不会退化成全量重编。
+          cargo clean -p rfvp
+          # 双保险：补丁改过的文件刷一下 mtime，避免增量判断失效
+          touch crates/rfvp/src/lib.rs
 
       - name: Build librfvp.so (aarch64, release)
         working-directory: rfvp
@@ -90,6 +101,16 @@ jobs:
           SO=rfvp/target/aarch64-linux-android/release/librfvp.so
           test -f "$SO"
           llvm-nm -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)'
+          # 校验补丁确实编译进去了（防止缓存命中导致补丁丢失、却上传旧产物）
+          echo "--- 探针字符串检查 ---"
+          grep -ao 'YHPROBE [a-z_]*' "$SO" | sort | uniq -c || true
+          for k in "YHPROBE get_down" "YHPROBE tile" "YHPROBE big" "YHPROBE load"; do
+            if ! grep -qa "$k" "$SO"; then
+              echo "::error::librfvp.so 缺少 ['$k'] —— 补丁未生效（很可能是编译缓存问题）"
+              exit 1
+            fi
+          done
+          echo "补丁校验通过 ✓"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
