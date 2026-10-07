@@ -570,6 +570,61 @@ android_logger = "0.14\"""",
             ),
         ],
     ),
+    (
+        "crates/rfvp/src/subsystem/components/syscalls/graph.rs",
+        [
+            # 14) 探针：PrimSetZ 的调用值（图层顺序诊断）
+            (
+                """    if let Some(z_i) = z.as_int() {
+        let z_i = z_i.clamp(100, 10000);
+        game_data.motion_manager.prim_manager.prim_set_z(id, z_i);""",
+                """    if let Some(z_i) = z.as_int() {
+        let z_i = z_i.clamp(100, 10000);
+        // YukiHub patch: probe - PrimSetZ values (layer ordering diagnosis).
+        log::info!("YHPROBE prim_set_z id={} z={}", id, z_i);
+        game_data.motion_manager.prim_manager.prim_set_z(id, z_i);""",
+                1,
+            ),
+        ],
+    ),
+    (
+        "crates/rfvp/src/rendering/gpu_prim.rs",
+        [
+            # 15) 修复：同层子节点按 PrimSetZ 排序（对齐原版图层顺序）+ 顺序探针
+            (
+                """        let next_parent_x = parent_x + draw_x;
+        let next_parent_y = parent_y + draw_y;
+        for cid in children {""",
+                """        // YukiHub patch: FVP orders sibling layers by PrimSetZ (prim.z). rfvp drew
+        // them in creation order only, which put e.g. BG063_020_parts2 above the
+        // starfield layer (visible as a hard-edged dark strip). Sorting only applies
+        // when at least one sibling actually had PrimSetZ applied (attr bit 0x04), so
+        // scenes that never use it keep the exact previous order.
+        {
+            let any_explicit_z = children
+                .iter()
+                .any(|&c| (prim_manager.get_prim_immutable(c).get_attr() & 0x04) != 0);
+            if any_explicit_z && children.len() > 1 {
+                children.sort_by_key(|&c| prim_manager.get_prim_immutable(c).get_z());
+                use core::sync::atomic::{AtomicU32, Ordering};
+                static ZORDER_BUDGET: AtomicU32 = AtomicU32::new(40);
+                if ZORDER_BUDGET.fetch_sub(1, Ordering::Relaxed) > 0 {
+                    let zs: Vec<i16> = children
+                        .iter()
+                        .map(|&c| prim_manager.get_prim_immutable(c).get_z())
+                        .collect();
+                    log::info!("YHPROBE zorder parent={} children={:?} z={:?}", prim_id, children, zs);
+                }
+            }
+        }
+
+        let next_parent_x = parent_x + draw_x;
+        let next_parent_y = parent_y + draw_y;
+        for cid in children {""",
+                1,
+            ),
+        ],
+    ),
 ]
 
 
