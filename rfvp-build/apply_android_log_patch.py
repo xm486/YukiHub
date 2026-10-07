@@ -162,11 +162,19 @@ android_logger = "0.14\"""",
     /// Matches the original engine, where only the first script thread that
     /// observes a click acts on it (button handling wins over advancing).
     pub fn take_input_down_click(&mut self) -> u32 {
-        let _g = self.cs.enter();
-        let bits = self.input_down;
-        self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
-            | Self::bit_for(KeyCode::RightClick));
-        bits
+        {
+            let _g = self.cs.enter();
+            let bits = self.input_down;
+            // Clear ALL click-related bits (virtual + physical). Clearing only
+            // the virtual bits leaves MouseL/MouseR set, which later readers in
+            // the same frame still treat as a click (regression observed on
+            // device: every thread saw bits=0x10 after the first read).
+            self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
+                | Self::bit_for(KeyCode::RightClick)
+                | Self::bit_for(KeyCode::MouseL)
+                | Self::bit_for(KeyCode::MouseR));
+            bits
+        }
     }""",
                 1,
             ),
