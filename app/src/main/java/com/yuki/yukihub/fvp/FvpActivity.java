@@ -106,7 +106,7 @@ public final class FvpActivity extends Activity implements
     /** 全局文字缩放（引擎级；1.0 = 脚本原大）。 */
     private float textScale = 1.0f;
     /** 行距跟随系数（引擎级；只在文字放大时起作用，1.0 = 与字号等比）。 */
-    private float lineScale = 0.5f;
+    private float lineScale = 0.0f;
     /** 铺满模式的渲染 buffer 尺寸（= 游戏虚拟分辨率）；0 = 未启用。 */
     private int bufW;
     private int bufH;
@@ -136,7 +136,7 @@ public final class FvpActivity extends Activity implements
         textScale = FvpLaunchPrefs.normalizeScale(
                 String.valueOf(intent.getFloatExtra(EXTRA_TEXT_SCALE, 1.0f)));
         lineScale = FvpLaunchPrefs.normalizeLineScale(
-                String.valueOf(intent.getFloatExtra(EXTRA_TEXT_LINE_SCALE, 0.5f)));
+                String.valueOf(intent.getFloatExtra(EXTRA_TEXT_LINE_SCALE, 0.0f)));
         if (stretchFill) {
             int[] virtual = parseFvpVirtualSize(gameRoot);
             if (virtual != null) {
