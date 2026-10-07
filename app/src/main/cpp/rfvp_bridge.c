@@ -70,6 +70,7 @@ typedef void (*set_surface_fn_t)(void* handle, void* native_window_ptr,
 typedef void (*touch_fn_t)(void* handle, int phase, double x_px, double y_px);
 typedef void (*set_text_hidpi_fn_t)(void* handle, int enabled);
 typedef void (*set_text_scale_fn_t)(void* handle, float scale);
+typedef void (*set_text_line_scale_fn_t)(void* handle, float scale);
 typedef void (*key_fn_t)(void* handle, int vk_code, int phase);
 typedef void (*set_system_font_fn_t)(void* handle, int enabled);
 typedef int (*add_font_fn_t)(void* handle, const char* font_path_utf8);
@@ -85,6 +86,7 @@ typedef struct RfvpApi {
     touch_fn_t touch;
     set_text_hidpi_fn_t set_text_hidpi;
     set_text_scale_fn_t set_text_scale;
+    set_text_line_scale_fn_t set_text_line_scale;
     key_fn_t key;
     set_system_font_fn_t set_system_font;
     add_font_fn_t add_font;
@@ -125,6 +127,8 @@ static void load_api_once(void) {
     g_api.touch = (touch_fn_t) load_symbol("rfvp_android_touch");
     g_api.set_text_hidpi = (set_text_hidpi_fn_t) load_symbol("rfvp_android_set_text_hidpi");
     g_api.set_text_scale = (set_text_scale_fn_t) load_symbol("rfvp_android_set_text_scale");
+    g_api.set_text_line_scale =
+            (set_text_line_scale_fn_t) load_symbol("rfvp_android_set_text_line_scale");
     g_api.key = (key_fn_t) load_symbol("rfvp_android_key");
     g_api.set_system_font = (set_system_font_fn_t) load_symbol("rfvp_android_set_system_font");
     g_api.add_font = (add_font_fn_t) load_symbol("rfvp_android_add_font");
@@ -320,6 +324,14 @@ Java_com_yuki_yukihub_fvp_NativeRfvp_setTextScale(JNIEnv* env, jclass clazz, jlo
     (void) env; (void) clazz;
     if (g_api.set_text_scale == 0 || handle == 0) return;
     g_api.set_text_scale((void*) (intptr_t) handle, (float) scale);
+}
+
+JNIEXPORT void JNICALL
+Java_com_yuki_yukihub_fvp_NativeRfvp_setTextLineScale(JNIEnv* env, jclass clazz, jlong handle,
+                                                      jfloat scale) {
+    (void) env; (void) clazz;
+    if (g_api.set_text_line_scale == 0 || handle == 0) return;
+    g_api.set_text_line_scale((void*) (intptr_t) handle, (float) scale);
 }
 
 JNIEXPORT void JNICALL

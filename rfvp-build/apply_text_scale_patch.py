@@ -37,6 +37,9 @@ EDITS = [
     text_size2: u8,
     // YukiHub patch: host-driven global text scale (1.0 = script-authored size).
     text_scale: f32,
+    // YukiHub patch: line-pitch damping for the host text scale
+    // (1.0 = line pitch follows the font size, 0.5 = half of the delta).
+    line_scale: f32,
     outline_size1: u8,""",
                 1,
             ),
@@ -79,6 +82,32 @@ EDITS = [
     }""",
                 1,
             ),
+            # 2b) TextItem::set_line_scale（依赖上一条）
+            (
+                """        self.text_scale = normalized;
+        self.mark_layout_dirty();
+    }""",
+                """        self.text_scale = normalized;
+        self.mark_layout_dirty();
+    }
+
+    /// YukiHub patch: how strongly the line pitch follows the host text scale.
+    /// 1.0 = pitch grows with the font (upstream look), 0.5 = half of the growth,
+    /// 0.0 = pitch stays at the script-authored value. Glyph size is unaffected.
+    pub fn set_line_scale(&mut self, scale: f32) {
+        let normalized = if scale.is_finite() && scale >= 0.0 {
+            scale.clamp(0.0, 2.0)
+        } else {
+            1.0
+        };
+        if (self.line_scale - normalized).abs() <= f32::EPSILON {
+            return;
+        }
+        self.line_scale = normalized;
+        self.mark_layout_dirty();
+    }""",
+                1,
+            ),
             # 3) 布局块：main_size / ruby_size 乘上系数（先于一切派生量）
             (
                 """        let main_size = if self.text_size1 == 0 {
@@ -109,6 +138,22 @@ EDITS = [
         let main_draw_size = main_size * render_scale;""",
                 1,
             ),
+            # 3b) 行距阻尼：只压缩"行距步进"，不动字形大小
+            #     line_scale = 1.0 -> 行高与字号等比（原行为）
+            #     line_scale = 0.5 -> 放大增量只吃一半（字号 1.25x 时行高 1.125x）
+            #     line_scale = 0.0 -> 行高完全保持脚本原值
+            (
+                """        let line_h = ruby_block_h + main_size.round() as i32 + self.line_gap_y as i32;""",
+                """        // YukiHub patch: damp the line pitch only (glyph size stays as scaled above).
+        // Explicitly NOT scaling anything else, so text_scale = 1.0 is byte-identical
+        // to upstream behaviour and line_scale = 1.0 reproduces the old look.
+        let line_size = {
+            let base = main_size / self.text_scale.max(f32::EPSILON);
+            base + (main_size - base) * self.line_scale
+        };
+        let line_h = ruby_block_h + line_size.round() as i32 + self.line_gap_y as i32;""",
+                1,
+            ),
             # 4) TextManager 结构体字段
             (
                 """    device_render_scale: f32,
@@ -120,6 +165,8 @@ EDITS = [
     hidpi_enabled: bool,
     // YukiHub patch: host-driven global text scale.
     text_scale: f32,
+    // YukiHub patch: line-pitch damping for the host text scale.
+    line_scale: f32,
 }""",
                 1,
             ),
@@ -133,6 +180,7 @@ EDITS = [
             render_scale: 1.0,
             hidpi_enabled: true,
             text_scale: 1.0,
+            line_scale: 1.0,
         }""",
                 1,
             ),
@@ -142,6 +190,15 @@ EDITS = [
                 """            text_size2: 0,""",
                 """            text_size2: 0,
             text_scale: 1.0,""",
+                -1,
+            ),
+            # 5b) TextItem::new 里的行距阻尼默认值（依赖上一条）
+            (
+                """            text_size2: 0,
+            text_scale: 1.0,""",
+                """            text_size2: 0,
+            text_scale: 1.0,
+            line_scale: 1.0,""",
                 -1,
             ),
             # 6) TextManager::set_text_scale（遍历下发到所有文本对象）
@@ -186,6 +243,36 @@ EDITS = [
     }""",
                 1,
             ),
+            # 6b) TextManager::set_line_scale（遍历下发，依赖上一条）
+            (
+                """        self.text_scale = normalized;
+        for item in self.items.iter_mut() {
+            item.set_text_scale(normalized);
+        }
+    }""",
+                """        self.text_scale = normalized;
+        for item in self.items.iter_mut() {
+            item.set_text_scale(normalized);
+        }
+    }
+
+    /// YukiHub patch: host-driven line-pitch damping for every text object.
+    pub fn set_line_scale(&mut self, scale: f32) {
+        let normalized = if scale.is_finite() && scale >= 0.0 {
+            scale.clamp(0.0, 2.0)
+        } else {
+            1.0
+        };
+        if (self.line_scale - normalized).abs() <= f32::EPSILON {
+            return;
+        }
+        self.line_scale = normalized;
+        for item in self.items.iter_mut() {
+            item.set_line_scale(normalized);
+        }
+    }""",
+                1,
+            ),
         ],
     ),
     (
@@ -212,6 +299,32 @@ EDITS = [
         gd.motion_manager
             .text_manager
             .set_text_scale(scale);
+    }""",
+                1,
+            ),
+            # App::set_text_line_scale（依赖上一条）
+            (
+                """    /// YukiHub patch: host-driven global text scale.
+    pub fn set_text_scale(&mut self, scale: f32) {
+        let mut gd = gd_write(&self.game_data);
+        gd.motion_manager
+            .text_manager
+            .set_text_scale(scale);
+    }""",
+                """    /// YukiHub patch: host-driven global text scale.
+    pub fn set_text_scale(&mut self, scale: f32) {
+        let mut gd = gd_write(&self.game_data);
+        gd.motion_manager
+            .text_manager
+            .set_text_scale(scale);
+    }
+
+    /// YukiHub patch: how strongly the line pitch follows the text scale.
+    pub fn set_text_line_scale(&mut self, scale: f32) {
+        let mut gd = gd_write(&self.game_data);
+        gd.motion_manager
+            .text_manager
+            .set_line_scale(scale);
     }""",
                 1,
             ),
@@ -251,6 +364,28 @@ pub unsafe extern "C" fn rfvp_android_set_text_scale(handle: *mut c_void, scale:
     }
     let app: &mut App = &mut *(handle as *mut App);
     app.set_text_scale(scale);
+}""",
+                1,
+            ),
+            # 新增 set_text_line_scale 导出（依赖上一条；旧宿主解析不到会安全降级）
+            (
+                """    let app: &mut App = &mut *(handle as *mut App);
+    app.set_text_scale(scale);
+}""",
+                """    let app: &mut App = &mut *(handle as *mut App);
+    app.set_text_scale(scale);
+}
+
+/// YukiHub patch: how strongly the line pitch follows the host text scale.
+/// 1.0 = upstream look (pitch grows with the font), 0.5 = half of the growth,
+/// 0.0 = pitch stays at the script-authored value. Glyph size is unaffected.
+#[no_mangle]
+pub unsafe extern "C" fn rfvp_android_set_text_line_scale(handle: *mut c_void, scale: f32) {
+    if handle.is_null() {
+        return;
+    }
+    let app: &mut App = &mut *(handle as *mut App);
+    app.set_text_line_scale(scale);
 }""",
                 1,
             ),

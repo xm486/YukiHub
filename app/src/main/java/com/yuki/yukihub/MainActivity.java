@@ -10758,6 +10758,8 @@ private void showEditPlayTimeDialog(Game game) {
                 FvpLaunchPrefs.labelOfScale(prefs.screenScale));
         android.widget.Spinner textScale = krSpinner(FvpLaunchPrefs.TEXT_SCALE_LABELS,
                 FvpLaunchPrefs.labelOfTextScale(prefs.textScale));
+        android.widget.Spinner lineScale = krSpinner(FvpLaunchPrefs.LINE_SCALE_LABELS,
+                FvpLaunchPrefs.labelOfLineScale(prefs.lineScale));
 
         fvpFontPathView = krLabel(fvpFontSummary(prefs.fontPath));
         fvpFontPathView.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text_muted));
@@ -10782,6 +10784,8 @@ private void showEditPlayTimeDialog(Game game) {
         root.addView(screenScale);
         root.addView(krLabel("文字大小（只放大文字，画面布局不变；过大会超出对话框）"));
         root.addView(textScale);
+        root.addView(krLabel("行距（字号放大时，行与行之间的距离跟随多少）"));
+        root.addView(lineScale);
         root.addView(textHidpi);
         root.addView(systemFont);
         root.addView(stretchFill);
@@ -10815,6 +10819,7 @@ private void showEditPlayTimeDialog(Game game) {
             prefs.nls = FvpLaunchPrefs.valueOfNlsLabel(String.valueOf(nlsSpinner.getSelectedItem()));
             prefs.screenScale = FvpLaunchPrefs.valueOfScaleLabel(String.valueOf(screenScale.getSelectedItem()));
             prefs.textScale = FvpLaunchPrefs.valueOfTextScaleLabel(String.valueOf(textScale.getSelectedItem()));
+            prefs.lineScale = FvpLaunchPrefs.valueOfLineScaleLabel(String.valueOf(lineScale.getSelectedItem()));
             prefs.textHidpi = textHidpi.isChecked();
             prefs.systemFont = systemFont.isChecked();
             prefs.stretchFill = stretchFill.isChecked();

@@ -75,6 +75,8 @@ public final class FvpActivity extends Activity implements
     public static final String EXTRA_STRETCH_FILL = "fvpStretchFill";
     /** 全局文字缩放系数（1.0 = 脚本原大；需要 YukiHub 补丁版 librfvp.so）。 */
     public static final String EXTRA_TEXT_SCALE = "fvpTextScale";
+    /** 行距跟随系数（1.0 = 与字号等比；0.5 = 放大增量减半；0.0 = 行距不变）。 */
+    public static final String EXTRA_TEXT_LINE_SCALE = "fvpTextLineScale";
 
     /** 引擎侧取消/返回键（Windows VK）。 */
     private static final int VK_ESCAPE = 0x1B;
@@ -103,6 +105,8 @@ public final class FvpActivity extends Activity implements
     private float screenScale = 1.0f;
     /** 全局文字缩放（引擎级；1.0 = 脚本原大）。 */
     private float textScale = 1.0f;
+    /** 行距跟随系数（引擎级；只在文字放大时起作用，1.0 = 与字号等比）。 */
+    private float lineScale = 0.5f;
     /** 铺满模式的渲染 buffer 尺寸（= 游戏虚拟分辨率）；0 = 未启用。 */
     private int bufW;
     private int bufH;
@@ -131,6 +135,8 @@ public final class FvpActivity extends Activity implements
         boolean stretchFill = intent.getBooleanExtra(EXTRA_STRETCH_FILL, false);
         textScale = FvpLaunchPrefs.normalizeScale(
                 String.valueOf(intent.getFloatExtra(EXTRA_TEXT_SCALE, 1.0f)));
+        lineScale = FvpLaunchPrefs.normalizeLineScale(
+                String.valueOf(intent.getFloatExtra(EXTRA_TEXT_LINE_SCALE, 0.5f)));
         if (stretchFill) {
             int[] virtual = parseFvpVirtualSize(gameRoot);
             if (virtual != null) {
@@ -331,11 +337,13 @@ public final class FvpActivity extends Activity implements
             // 引擎级全局文字缩放：仅 YukiHub 补丁版 librfvp.so 有该符号，
             // 旧版引擎没有时桥只打 warning，本调用安全无害。
             NativeRfvp.setTextScale(handle, textScale);
+            // 行距跟随程度：只压行距步进，字形大小不受影响（0.5 = 放大增量减半）。
+            NativeRfvp.setTextLineScale(handle, lineScale);
         }
         applyCustomFont();
         Log.i(TAG, "engine created: " + width + "x" + height + " nls=" + FvpLaunchPrefs.normalizeNls(nls)
                 + " hidpi=" + textHidpi + " systemFont=" + systemFont
-                + (textScale > 1.0f ? " textScale=" + textScale : ""));
+                + (textScale > 1.0f ? " textScale=" + textScale + " lineScale=" + lineScale : ""));
     }
 
     /** 强制自定义字体；文件不存在或加载失败时静默回退游戏默认字体。 */

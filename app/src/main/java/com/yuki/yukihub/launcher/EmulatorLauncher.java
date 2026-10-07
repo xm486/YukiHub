@@ -746,6 +746,7 @@ if (rootUri != null && !rootUri.trim().isEmpty()) {
         i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_SCREEN_SCALE, p.screenScale);
         i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_STRETCH_FILL, p.stretchFill);
         i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_TEXT_SCALE, p.textScale);
+        i.putExtra(com.yuki.yukihub.fvp.FvpActivity.EXTRA_TEXT_LINE_SCALE, p.lineScale);
         i.putExtra("rootUri", gamePath);
         i.putExtra("path", rootPath);
         i.putExtra("launchTarget", launchTarget);
