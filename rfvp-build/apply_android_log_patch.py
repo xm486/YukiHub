@@ -428,6 +428,8 @@ android_logger = "0.14\"""",
         {
             use core::sync::atomic::{AtomicU32, Ordering};
             static HIT_BUDGET: AtomicU32 = AtomicU32::new(400);
+            static HIT_SEQ: AtomicU32 = AtomicU32::new(0);
+            let seq = HIT_SEQ.fetch_add(1, Ordering::Relaxed);
             let n = HIT_BUDGET.fetch_sub(1, Ordering::Relaxed);
             let q0 = model.transform_point3(vec3(0.0, dst_h, 0.0));
             let q1 = model.transform_point3(vec3(0.0, 0.0, 0.0));
@@ -442,14 +444,15 @@ android_logger = "0.14\"""",
                 DrawTextureKey::White => -1i64,
             };
             if n > 0
-                && (n % 8) == 0
+                && seq < 400
                 && max_x > 700.0
                 && min_x < 1100.0
                 && max_y > 100.0
                 && min_y < 900.0
             {
                 log::info!(
-                    "YHPROBE hit rect=({:.0},{:.0})-({:.0},{:.0}) dst=({:.0},{:.0}) uv=({:.3},{:.3})-({:.3},{:.3}) rgba=({:.3},{:.3},{:.3},{:.3}) tex={}",
+                    "YHPROBE hit seq={} rect=({:.0},{:.0})-({:.0},{:.0}) dst=({:.0},{:.0}) uv=({:.3},{:.3})-({:.3},{:.3}) rgba=({:.3},{:.3},{:.3},{:.3}) tex={}",
+                    seq,
                     min_x,
                     min_y,
                     max_x,
@@ -469,6 +472,100 @@ android_logger = "0.14\"""",
             }
         }
         let base = self.vertices.len() as u32;""",
+                1,
+            ),
+        ],
+    ),
+    (
+        "crates/rfvp/src/subsystem/components/syscalls/parts.rs",
+        [
+            # 13) 探针：记录脚本对 parts（拼合背景）系统的每次调用（黑框溯源）
+            (
+                """impl Syscaller for PartsAssign {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_assign(game_data, get_var!(args, 0), get_var!(args, 1))""",
+                """impl Syscaller for PartsAssign {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts assign args={:?}", args);
+        parts_assign(game_data, get_var!(args, 0), get_var!(args, 1))""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsLoad {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_load(game_data, get_var!(args, 0), get_var!(args, 1))""",
+                """impl Syscaller for PartsLoad {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts load args={:?}", args);
+        parts_load(game_data, get_var!(args, 0), get_var!(args, 1))""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsMotion {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_motion(""",
+                """impl Syscaller for PartsMotion {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts motion args={:?}", args);
+        parts_motion(""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsMotionPause {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_motion_pause(game_data, get_var!(args, 0), get_var!(args, 1))""",
+                """impl Syscaller for PartsMotionPause {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts motion_pause args={:?}", args);
+        parts_motion_pause(game_data, get_var!(args, 0), get_var!(args, 1))""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsMotionStop {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_motion_stop(game_data, &args[0])""",
+                """impl Syscaller for PartsMotionStop {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts motion_stop args={:?}", args);
+        parts_motion_stop(game_data, &args[0])""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsMotionTest {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_motion_test(game_data, &args[0])""",
+                """impl Syscaller for PartsMotionTest {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts motion_test args={:?}", args);
+        parts_motion_test(game_data, &args[0])""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsRGB {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_rgb(game_data, &args[0], &args[1], &args[2], &args[3])""",
+                """impl Syscaller for PartsRGB {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts rgb args={:?}", args);
+        parts_rgb(game_data, &args[0], &args[1], &args[2], &args[3])""",
+                1,
+            ),
+            (
+                """impl Syscaller for PartsSelect {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        parts_select(game_data, &args[0], &args[1])""",
+                """impl Syscaller for PartsSelect {
+    fn call(&self, game_data: &mut GameData, args: Vec<Variant>) -> Result<Variant> {
+        // YukiHub patch: probe - parts syscall trace.
+        log::info!("YHPROBE parts select args={:?}", args);
+        parts_select(game_data, &args[0], &args[1])""",
                 1,
             ),
         ],
