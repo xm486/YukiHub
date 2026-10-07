@@ -171,8 +171,8 @@ android_logger = "0.14\"""",
             // device: every thread saw bits=0x10 after the first read).
             self.input_down &= !(Self::bit_for(KeyCode::LeftClick)
                 | Self::bit_for(KeyCode::RightClick)
-                | Self::bit_for(KeyCode::MouseL)
-                | Self::bit_for(KeyCode::MouseR));
+                | Self::bit_for(KeyCode::MouseLeft)
+                | Self::bit_for(KeyCode::MouseRight));
             bits
         }
     }""",
