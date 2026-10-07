@@ -73,6 +73,13 @@ public final class NativeRfvp {
     public static native void setTextScale(long handle, float scale);
 
     /**
+     * 行距随字号的跟随程度（1.0 = 与字号等比 = 引擎原行为；0.5 = 放大增量减半；
+     * 0.0 = 行高保持脚本原值）。只影响行与行之间的距离，字形大小不变。
+     * 仅当 librfvp.so 为 YukiHub 补丁版（导出 rfvp_android_set_text_line_scale）时生效。
+     */
+    public static native void setTextLineScale(long handle, float scale);
+
+    /**
      * 注入按键事件（Windows VK 语义）。keyCode 0x1B = Escape、0x0D = Enter、0x20 = Space、
      * 0x25..0x28 = 方向键；phase 0 = down、1 = up。
      */

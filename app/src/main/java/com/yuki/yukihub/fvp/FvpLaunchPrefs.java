@@ -56,6 +56,12 @@ public final class FvpLaunchPrefs {
      * 1.0 = 脚本原大；只放大文字，UI 布局不动、画面无拉伸无裁剪。
      */
     public float textScale = 1.0f;
+    /**
+     * 行距跟随程度（引擎级；只在文字被放大时起作用）。
+     * 1.0 = 行距与字号等比（引擎原行为）；0.5 = 放大增量减半；0.0 = 行距保持脚本原值。
+     * 字形大小不受影响。
+     */
+    public float lineScale = 0.5f;
     /** 是否已经跑过一次自动编码探测（true 后不再自动改，尊重用户手选）。 */
     public boolean nlsAuto = false;
 
@@ -69,6 +75,15 @@ public final class FvpLaunchPrefs {
     public static final String[] TEXT_SCALE_LABELS = {
             "1.0x（脚本原大）", "1.25x", "1.5x", "1.75x", "2.0x"
     };
+
+    /**
+     * 行距档位标签：字号放大时，行与行之间的距离跟随多少。
+     * 0.0 = 行距完全不变（最紧凑）；0.5 = 放大增量减半（默认）；1.0 = 与字号等比。
+     */
+    public static final String[] LINE_SCALE_LABELS = {
+            "紧凑（行距不变）", "略紧（0.25）", "适中（0.5，推荐）", "偏松（0.75）", "随字号（1.0，原样）"
+    };
+    public static final float[] LINE_SCALE_VALUES = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
 
     // ================= 读写 =================
 
@@ -87,6 +102,7 @@ public final class FvpLaunchPrefs {
             p.screenScale = normalizeScale(o.optString("screen_scale", "1.0"));
             p.stretchFill = o.optBoolean("stretch_fill", false);
             p.textScale = normalizeScale(o.optString("text_scale", "1.0"));
+            p.lineScale = normalizeLineScale(o.optString("line_scale", "0.5"));
             p.nlsAuto = o.optBoolean("nls_auto", false);
         } catch (Throwable ignored) { }
         return p;
@@ -103,6 +119,7 @@ public final class FvpLaunchPrefs {
             o.put("screen_scale", String.valueOf(normalizeScale(String.valueOf(screenScale))));
             o.put("stretch_fill", stretchFill);
             o.put("text_scale", String.valueOf(normalizeScale(String.valueOf(textScale))));
+            o.put("line_scale", String.valueOf(normalizeLineScale(String.valueOf(lineScale))));
             o.put("nls_auto", nlsAuto);
             context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     .edit().putString(KEY_PREFIX + gameId, o.toString()).apply();
@@ -292,6 +309,35 @@ public final class FvpLaunchPrefs {
             if (TEXT_SCALE_LABELS[i].equals(label)) return SCALE_VALUES[i];
         }
         return 1.0f;
+    }
+
+    /** 行距档位：值 → 标签。 */
+    public static String labelOfLineScale(float value) {
+        float v = normalizeLineScale(String.valueOf(value));
+        for (int i = 0; i < LINE_SCALE_VALUES.length; i++) {
+            if (Math.abs(LINE_SCALE_VALUES[i] - v) < 0.001f) return LINE_SCALE_LABELS[i];
+        }
+        return LINE_SCALE_LABELS[2];
+    }
+
+    /** 行距档位：标签 → 值（UI 保存用）。 */
+    public static float valueOfLineScaleLabel(String label) {
+        if (label == null) return 0.5f;
+        for (int i = 0; i < LINE_SCALE_LABELS.length; i++) {
+            if (LINE_SCALE_LABELS[i].equals(label)) return LINE_SCALE_VALUES[i];
+        }
+        return 0.5f;
+    }
+
+    /** 行距系数合法范围 0.0–2.0，非法归 0.5（与默认档一致）。 */
+    public static float normalizeLineScale(String raw) {
+        try {
+            float v = Float.parseFloat(raw);
+            if (Float.isNaN(v) || Float.isInfinite(v)) return 0.5f;
+            return Math.max(0.0f, Math.min(2.0f, v));
+        } catch (Throwable ignored) {
+            return 0.5f;
+        }
     }
 
     /** 值 → 标签（UI 回显用）。 */

@@ -36,11 +36,13 @@ jobs:
           ref: ${{ github.event.inputs.rfvp_ref }}
           path: rfvp
 
-      - name: Apply YukiHub text-scale patch (fail loudly on mismatch)
+      - name: Apply YukiHub patches (text scale + logcat logging)
         run: |
           cp rfvp-build/apply_text_scale_patch.py rfvp/
+          cp rfvp-build/apply_android_log_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
+          python3 apply_android_log_patch.py
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
