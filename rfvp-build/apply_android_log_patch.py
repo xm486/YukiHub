@@ -276,6 +276,49 @@ android_logger = "0.14\"""",
                 }""",
                 1,
             ),
+            # 12) 探针：打印「面积大的贴图图元」（背景层），用于定位黑框
+            (
+                """    let p3 = model.transform_point3(vec3(dst_w, 0.0, 0.0));
+    let texture = match texture {""",
+                """    let p3 = model.transform_point3(vec3(dst_w, 0.0, 0.0));
+    // YukiHub patch: probe — log big textured quads (background layers).
+    {
+        use core::sync::atomic::{AtomicU32, Ordering};
+        static BIG_BUDGET: AtomicU32 = AtomicU32::new(1200);
+        let n = BIG_BUDGET.fetch_sub(1, Ordering::Relaxed);
+        let tex_key = match texture {
+            DrawTextureKey::Graph(g) => g as i64,
+            DrawTextureKey::White => -1i64,
+        };
+        if n > 0 && (n % 24) == 0 && dst_w * dst_h > 100000.0 {
+            let min_x = p0.x.min(p1.x).min(p2.x).min(p3.x);
+            let min_y = p0.y.min(p1.y).min(p2.y).min(p3.y);
+            let max_x = p0.x.max(p1.x).max(p2.x).max(p3.x);
+            let max_y = p0.y.max(p1.y).max(p2.y).max(p3.y);
+            log::info!(
+                "YHPROBE big prim={} rect=({:.0},{:.0},{:.0},{:.0}) dst=({:.0},{:.0}) uv=({:.3},{:.3})-({:.3},{:.3}) rgba=({:.3},{:.3},{:.3},{:.3}) tex={}",
+                prim_id,
+                min_x,
+                min_y,
+                max_x - min_x,
+                max_y - min_y,
+                dst_w,
+                dst_h,
+                uv0.x,
+                uv0.y,
+                uv1.x,
+                uv1.y,
+                color.x,
+                color.y,
+                color.z,
+                color.w,
+                tex_key
+            );
+        }
+    }
+    let texture = match texture {""",
+                1,
+            ),
         ],
     ),
 ]
