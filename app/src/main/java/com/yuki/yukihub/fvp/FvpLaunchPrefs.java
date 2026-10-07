@@ -56,12 +56,12 @@ public final class FvpLaunchPrefs {
      * 1.0 = 脚本原大；只放大文字，UI 布局不动、画面无拉伸无裁剪。
      */
     public float textScale = 1.0f;
-    /**
+/**
      * 行距跟随程度（引擎级；只在文字被放大时起作用）。
-     * 1.0 = 行距与字号等比（引擎原行为）；0.5 = 放大增量减半；0.0 = 行距保持脚本原值。
+     * -1.0 = 比原版行距更紧；0.0 = 与原版行距一致（默认）；1.0 = 行距随字号等比。
      * 字形大小不受影响。
      */
-    public float lineScale = 0.5f;
+    public float lineScale = 0.0f;
     /** 是否已经跑过一次自动编码探测（true 后不再自动改，尊重用户手选）。 */
     public boolean nlsAuto = false;
 
@@ -81,9 +81,9 @@ public final class FvpLaunchPrefs {
      * 0.0 = 行距完全不变（最紧凑）；0.5 = 放大增量减半（默认）；1.0 = 与字号等比。
      */
     public static final String[] LINE_SCALE_LABELS = {
-            "紧凑（行距不变）", "略紧（0.25）", "适中（0.5，推荐）", "偏松（0.75）", "随字号（1.0，原样）"
+            "比原版更紧（可能贴字）", "比原版略紧", "与原版行距一致（推荐）", "比原版松一半", "随字号等比（原样）"
     };
-    public static final float[] LINE_SCALE_VALUES = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+    public static final float[] LINE_SCALE_VALUES = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
 
     // ================= 读写 =================
 
@@ -102,7 +102,7 @@ public final class FvpLaunchPrefs {
             p.screenScale = normalizeScale(o.optString("screen_scale", "1.0"));
             p.stretchFill = o.optBoolean("stretch_fill", false);
             p.textScale = normalizeScale(o.optString("text_scale", "1.0"));
-            p.lineScale = normalizeLineScale(o.optString("line_scale", "0.5"));
+            p.lineScale = normalizeLineScale(o.optString("line_scale", "0.0"));
             p.nlsAuto = o.optBoolean("nls_auto", false);
         } catch (Throwable ignored) { }
         return p;
@@ -322,21 +322,21 @@ public final class FvpLaunchPrefs {
 
     /** 行距档位：标签 → 值（UI 保存用）。 */
     public static float valueOfLineScaleLabel(String label) {
-        if (label == null) return 0.5f;
+        if (label == null) return 0.0f;
         for (int i = 0; i < LINE_SCALE_LABELS.length; i++) {
             if (LINE_SCALE_LABELS[i].equals(label)) return LINE_SCALE_VALUES[i];
         }
-        return 0.5f;
+        return 0.0f;
     }
 
-    /** 行距系数合法范围 0.0–2.0，非法归 0.5（与默认档一致）。 */
+    /** 行距系数合法范围 -1.0–1.0，非法归 0.0（= 与原版行距一致）。 */
     public static float normalizeLineScale(String raw) {
         try {
             float v = Float.parseFloat(raw);
-            if (Float.isNaN(v) || Float.isInfinite(v)) return 0.5f;
-            return Math.max(0.0f, Math.min(2.0f, v));
+            if (Float.isNaN(v) || Float.isInfinite(v)) return 0.0f;
+            return Math.max(-1.0f, Math.min(1.0f, v));
         } catch (Throwable ignored) {
-            return 0.5f;
+            return 0.0f;
         }
     }
 

@@ -92,13 +92,14 @@ EDITS = [
     }
 
     /// YukiHub patch: how strongly the line pitch follows the host text scale.
-    /// 1.0 = pitch grows with the font (upstream look), 0.5 = half of the growth,
-    /// 0.0 = pitch stays at the script-authored value. Glyph size is unaffected.
+    /// 1.0 = pitch grows with the font (upstream look); 0.0 = pitch stays at the
+    /// script-authored value (font grows, line pitch unchanged); negative = even
+    /// tighter than the script. Range -1.0 .. 1.0. Glyph size is unaffected.
     pub fn set_line_scale(&mut self, scale: f32) {
-        let normalized = if scale.is_finite() && scale >= 0.0 {
-            scale.clamp(0.0, 2.0)
+        let normalized = if scale.is_finite() {
+            scale.clamp(-1.0, 1.0)
         } else {
-            1.0
+            0.0
         };
         if (self.line_scale - normalized).abs() <= f32::EPSILON {
             return;
@@ -149,7 +150,10 @@ EDITS = [
         // to upstream behaviour and line_scale = 1.0 reproduces the old look.
         let line_size = {
             let base = main_size / self.text_scale.max(f32::EPSILON);
-            base + (main_size - base) * self.line_scale
+            let damped = base + (main_size - base) * self.line_scale;
+            // Safety: never collapse the pitch below half of the script size
+            // (negative line_scale can otherwise push it to zero / negative).
+            damped.max(base * 0.5)
         };
         let line_h = ruby_block_h + line_size.round() as i32 + self.line_gap_y as i32;""",
                 1,
@@ -257,11 +261,12 @@ EDITS = [
     }
 
     /// YukiHub patch: host-driven line-pitch damping for every text object.
+    /// Range -1.0 .. 1.0 (0.0 = script-authored pitch, negative = tighter).
     pub fn set_line_scale(&mut self, scale: f32) {
-        let normalized = if scale.is_finite() && scale >= 0.0 {
-            scale.clamp(0.0, 2.0)
+        let normalized = if scale.is_finite() {
+            scale.clamp(-1.0, 1.0)
         } else {
-            1.0
+            0.0
         };
         if (self.line_scale - normalized).abs() <= f32::EPSILON {
             return;
@@ -377,8 +382,9 @@ pub unsafe extern "C" fn rfvp_android_set_text_scale(handle: *mut c_void, scale:
 }
 
 /// YukiHub patch: how strongly the line pitch follows the host text scale.
-/// 1.0 = upstream look (pitch grows with the font), 0.5 = half of the growth,
-/// 0.0 = pitch stays at the script-authored value. Glyph size is unaffected.
+/// 1.0 = upstream look (pitch grows with the font); 0.0 = pitch stays at the
+/// script-authored value; negative = tighter than the script. Range -1.0 .. 1.0.
+/// Glyph size is unaffected.
 #[no_mangle]
 pub unsafe extern "C" fn rfvp_android_set_text_line_scale(handle: *mut c_void, scale: f32) {
     if handle.is_null() {
