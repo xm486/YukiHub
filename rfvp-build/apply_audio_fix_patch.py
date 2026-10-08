@@ -173,7 +173,45 @@ use std::fs;""",
     let spec = SignalSpec::new(sr, track_for_decode.codec_params.channels.unwrap());""",
                 1,
             ),
-            # 2) 插入容器解析辅助函数（放到 build_wav_pcm16le 之前）
+            # 3) 解码缓冲区：SampleBuffer::new(0, spec) 容量为 0，
+            #    一旦真正解码就会 assert!(capacity >= n_samples) panic
+            (
+                """    let mut pcm: Vec<i16> = Vec::new();
+    let mut sample_buf = SampleBuffer::<i16>::new(0, spec);""",
+                """    let mut pcm: Vec<i16> = Vec::new();
+    // YukiHub patch: `SampleBuffer::new(0, spec)` allocates a zero-capacity buffer and
+    // `copy_interleaved_ref` asserts `capacity() >= n_samples`, so it panics on the very
+    // first decoded packet. (Unreachable before, because AAC tracks were never selected.)
+    // Allocate lazily, sized to each decoded packet's real frame count.
+    let mut sample_buf: Option<SampleBuffer<i16>> = None;""",
+                1,
+            ),
+            # 4) 解码成功分支：按需分配 + copy
+            (
+                """        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                sample_buf.copy_interleaved_ref(decoded);
+                pcm.extend_from_slice(sample_buf.samples());
+            }""",
+                """        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                // YukiHub patch: size the interleaved buffer to this packet's frame count.
+                let frames = decoded.frames();
+                let n_channels = decoded.spec().channels.count();
+                let need_realloc = match &sample_buf {
+                    Some(b) => b.capacity() < frames * n_channels,
+                    None => true,
+                };
+                if need_realloc {
+                    sample_buf = Some(SampleBuffer::<i16>::new(frames as u64, *decoded.spec()));
+                }
+                let buf = sample_buf.as_mut().expect("just allocated");
+                buf.copy_interleaved_ref(decoded);
+                pcm.extend_from_slice(buf.samples());
+            }""",
+                1,
+            ),
+            # 5) 插入容器解析辅助函数（放到 build_wav_pcm16le 之前）
             (
                 """fn build_wav_pcm16le(samples: &[i16], channels: u16, sample_rate: u32) -> Vec<u8> {""",
                 """// ─────────────────────────────────────────────────────────────────────────────
