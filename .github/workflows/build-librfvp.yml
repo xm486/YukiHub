@@ -44,6 +44,29 @@ jobs:
           python3 apply_text_scale_patch.py
           python3 apply_android_log_patch.py
 
+      - name: Patch video-sys (AImageReader CPU_READ usage — fixes OP playback on Qualcomm)
+        run: |
+          # video-sys 是 rfvp 的依赖（crates.io 0.1.0）。上游创建 AImageReader 时未设置
+          # CPU_READ usage，高通解码器因此分配 GPU-only 缓冲，AImage_getPlaneData 失败，
+          # 解码线程被 bail! 杀死 -> OP 白屏。此补丁：
+          #   1) 改用 AImageReader_newWithUsage 并请求 CPU_READ_OFTEN | GPU_SAMPLE_UPLOADED
+          #   2) 个别帧取不到平面数据时丢帧容错，而不是杀线程
+          git clone --depth 1 https://github.com/xmoezzz/video-sys.git video-sys-src
+          cd video-sys-src
+          git apply --check ../rfvp-build/video-sys-cpu-read.patch
+          git apply ../rfvp-build/video-sys-cpu-read.patch
+          grep -q 'AImageReader_newWithUsage' video-sys/src/backend/mediacodec.rs
+          echo "video-sys 补丁已应用 ✓"
+          # 让 rfvp 工作区改用本地补丁版 video-sys（覆盖 crates.io 版本）
+          cd ../rfvp
+          cat >> Cargo.toml <<'TOML'
+
+# YukiHub patch: use locally patched video-sys (CPU_READ usage fix, see workflow).
+[patch.crates-io]
+video-sys = { path = "../video-sys-src/video-sys" }
+TOML
+          grep -A3 'patch.crates-io' Cargo.toml
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
