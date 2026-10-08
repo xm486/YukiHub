@@ -53,7 +53,7 @@ android_logger = \"0.14\"""",
     // YukiHub patch: route Rust logs (log::error!/warn!/info!) to logcat under tag \"rfvp\".
     android_logger::init_once(
         android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
+            .with_max_level(log::LevelFilter::Debug)
             .with_tag(\"rfvp\"),
     );
     let Some(win) = NonNull::new(native_window_ptr) else {
