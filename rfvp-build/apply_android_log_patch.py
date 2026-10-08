@@ -470,6 +470,22 @@ android_logger = "0.14\"""",
                     tex_key
                 );
             }
+            // YukiHub patch: probe - background layer alpha timeline (does parts2 fade to 0?).
+            {
+                static BG_BUDGET: AtomicU32 = AtomicU32::new(2400);
+                let bn = BG_BUDGET.fetch_sub(1, Ordering::Relaxed);
+                if bn > 0
+                    && (bn % 24) == 0
+                    && ((186..=187).contains(&tex_key)
+                        || (240..=241).contains(&tex_key)
+                        || tex_key == 493)
+                {
+                    log::info!(
+                        "YHPROBE bgalpha seq={} tex={} alpha={:.3}",
+                        seq, tex_key, color.w
+                    );
+                }
+            }
         }
         let base = self.vertices.len() as u32;""",
                 1,
