@@ -1,0 +1,44 @@
+diff --git a/video-sys/src/backend/mediacodec.rs b/video-sys/src/backend/mediacodec.rs
+index 4204bd0..5c4a90a 100644
+--- a/video-sys/src/backend/mediacodec.rs
++++ b/video-sys/src/backend/mediacodec.rs
+@@ -97,6 +97,15 @@ unsafe extern "C" {
+         maxImages: i32,
+         reader: *mut *mut AImageReader,
+     ) -> MediaStatus;
++    // YukiHub patch: allocate reader with CPU_READ usage so planes are CPU-accessible.
++    fn AImageReader_newWithUsage(
++        width: i32,
++        height: i32,
++        format: i32,
++        usage: u64,
++        maxImages: i32,
++        reader: *mut *mut AImageReader,
++    ) -> MediaStatus;
+     fn AImageReader_delete(reader: *mut AImageReader) -> MediaStatus;
+     fn AImageReader_getWindow(reader: *mut AImageReader, window: *mut *mut ANativeWindow) -> MediaStatus;
+ 
+@@ -132,7 +141,9 @@ impl AndroidH264Decoder {
+         // Create AImageReader + ANativeWindow surface for decoder output.
+         let mut reader: *mut AImageReader = ptr::null_mut();
+         let st = unsafe {
+-            AImageReader_new(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888, 4, &mut reader)
++            AImageReader_newWithUsage(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888,
++                // AHARDWAREBUFFER_USAGE_GPU_SAMPLE_UPLOADED | CPU_READ_OFTEN
++                (1u64 << 8) | (1u64 << 5), 4, &mut reader)
+         };
+         if st != 0 || reader.is_null() {
+             bail!("AImageReader_new failed: status={}", st);
+@@ -350,8 +361,11 @@ impl H264Decoder for AndroidH264Decoder {
+         let st2 = unsafe { AImage_getPlaneData(image, 2, &mut v_ptr, &mut v_len) };
+ 
+         if st0 != 0 || st1 != 0 || st2 != 0 || y_ptr.is_null() || u_ptr.is_null() || v_ptr.is_null() {
++            // YukiHub patch: some decoders emit GPU-only buffers transiently; drop the
++            // frame instead of tearing down the whole decode thread.
+             unsafe { let _ = AImage_delete(image); }
+-            bail!("AImage_getPlaneData failed");
++            log::warn!("AImage_getPlaneData failed (dropping frame)");
++            return Ok(None);
+         }
+ 
+         let mut y_rs: i32 = 0;
