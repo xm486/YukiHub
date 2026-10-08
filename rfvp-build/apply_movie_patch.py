@@ -231,37 +231,12 @@ pub struct VideoPlayerManager {
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (tx, rx) = crossbeam_channel::bounded::<WmvRgbaFrame>(2);""",
-                """            // YukiHub patch: layer-effect movies keep their audio (see the MP4 branch).
-            MovieMode::LayerNoAudio => {
-                let am = audio_manager;
-                let data = match am.as_ref() {
-                    None => {
-                        log::warn!("WMV movie audio decode skipped: no AudioManager");
-                        None
-                    }
-                    Some(_) => match decode_wmv_audio_to_wav_bytes(&wmv_path) {
-                        Ok(Some(wav_bytes)) => {
-                            let cursor = std::io::Cursor::new(wav_bytes);
-                            Some(
-                                StaticSoundData::from_cursor(cursor)
-                                    .context("kira StaticSoundData::from_cursor")?,
-                            )
-                        }
-                        Ok(None) => {
-                            log::warn!(
-                                "WMV movie audio: no decodable audio track: {}",
-                                wmv_path.display()
-                            );
-                            None
-                        }
-                        Err(e) => {
-                            log::warn!("WMV movie audio decode failed: {e:?}");
-                            None
-                        }
-                    },
-                };
-                (data, am)
-            }
+                """            // YukiHub patch: keep the original behaviour here. Decoding WMV audio is a
+            // synchronous full-file pass; on a large .wmv that blocks the game thread for a
+            // long time, and the decoder can panic on some streams (negative index), which
+            // kills the logic thread outright -> permanent white screen. Layer-effect movies
+            // therefore do not decode WMV audio.
+            MovieMode::LayerNoAudio => (None, None),
         };
 
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -275,37 +250,9 @@ pub struct VideoPlayerManager {
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (tx, rx) = crossbeam_channel::bounded::<MpegRgbaFrame>(2);""",
-                """            // YukiHub patch: layer-effect movies keep their audio (see the MP4 branch).
-            MovieMode::LayerNoAudio => {
-                let am = audio_manager;
-                let data = match am.as_ref() {
-                    None => {
-                        log::warn!("MPEG movie audio decode skipped: no AudioManager");
-                        None
-                    }
-                    Some(_) => match decode_mpeg_audio_to_wav_bytes(&mpeg_path) {
-                        Ok(Some(wav_bytes)) => {
-                            let cursor = std::io::Cursor::new(wav_bytes);
-                            Some(
-                                StaticSoundData::from_cursor(cursor)
-                                    .context("kira StaticSoundData::from_cursor")?,
-                            )
-                        }
-                        Ok(None) => {
-                            log::warn!(
-                                "MPEG movie audio: no decodable audio track: {}",
-                                mpeg_path.display()
-                            );
-                            None
-                        }
-                        Err(e) => {
-                            log::warn!("MPEG movie audio decode failed: {e:?}");
-                            None
-                        }
-                    },
-                };
-                (data, am)
-            }
+                """            // YukiHub patch: same reasoning as the WMV branch — no synchronous audio decode
+            // for layer-effect movies.
+            MovieMode::LayerNoAudio => (None, None),
         };
 
         let stop_flag = Arc::new(AtomicBool::new(false));
