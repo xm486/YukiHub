@@ -91,14 +91,12 @@ jobs:
           test -f "$SO"
           llvm-nm -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)'
           # 校验补丁确实编译进去了（防止缓存命中导致补丁丢失、却上传旧产物）
-          echo "--- 探针字符串检查 ---"
-          grep -ao 'YHPROBE [a-z_]*' "$SO" | sort | uniq -c || true
-          for k in "YHPROBE get_down" "YHPROBE tile" "YHPROBE big" "YHPROBE load" "YHPROBE parts" "YHPROBE hit seq=" "YHPROBE bgalpha"; do
-            if ! grep -qa "$k" "$SO"; then
-              echo "::error::librfvp.so 缺少 ['$k'] —— 补丁未生效（很可能是编译缓存问题）"
-              exit 1
-            fi
-          done
+          echo "--- 探针清理检查（不应再有 YHPROBE） ---"
+          if grep -qa 'YHPROBE' "$SO"; then
+            echo "::error::librfvp.so 仍含 YHPROBE 探针 —— 补丁脚本未清理干净"
+            exit 1
+          fi
+          echo "无探针残留 ✓"
           echo "补丁校验通过 ✓"
 
       - name: Upload artifact
