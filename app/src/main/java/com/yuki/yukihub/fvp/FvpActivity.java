@@ -111,6 +111,19 @@ public final class FvpActivity extends Activity implements
     private int bufW;
     private int bufH;
 
+    /**
+     * 待下发的「按下」事件（phase=0），NaN 表示无待发。
+     *
+     * <p>脚本用 PrimHit（读**当前**光标）判定是否点在按钮上，用 InputGetDown
+     * （读**帧冻结**的边沿）判定是否推进对话。Android 的手指落下几乎瞬移到位，
+     * 若 move 与 down 同帧到达，脚本在 down 那一帧才首次知道光标在按钮上，
+     * 来不及跳过对话推进 → 按钮与对话同时响应（点击穿透）。
+     * 因此 ACTION_DOWN 只发 move，down 延后到下一帧（见 {@link #doFrame}），
+     * 让光标状态比 down 早一帧建立。
+     */
+    private double pendingDownX = Double.NaN;
+    private double pendingDownY = Double.NaN;
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -432,6 +445,16 @@ public final class FvpActivity extends Activity implements
         if (dtMs < 0) dtMs = 0;
         if (dtMs > MAX_FRAME_DT_MS) dtMs = MAX_FRAME_DT_MS;
 
+        // 下发上一帧登记的「按下」：此时光标状态（由上一帧的 move 建立）已被脚本
+        // 通过 PrimHit 观察到，脚本会跳过对话推进，从而避免点击穿透。
+        if (!Double.isNaN(pendingDownX)) {
+            double dx = pendingDownX;
+            double dy = pendingDownY;
+            pendingDownX = Double.NaN;
+            pendingDownY = Double.NaN;
+            NativeRfvp.touch(handle, 0, dx, dy);
+        }
+
         int status = NativeRfvp.step(handle, dtMs);
         if (status != 0) {
             finish();
@@ -444,25 +467,32 @@ public final class FvpActivity extends Activity implements
     // ---------- 输入 ----------
 
     /**
-     * 触摸事件映射：**move 直通 + down 前补一帧同坐标 move + up 直通**。
+     * 触摸事件映射：**move 直通 + down 延后一帧 + up 直通**。
      *
-     * <p>要解决的原始问题：点右下角存档/菜单按钮时，**按钮响应了，对话也过一句**
-     * （点击穿透）。原因是 Windows 上鼠标会先在按钮上悬停若干帧再按下，脚本在 down
-     * 之前就记好了「光标落在哪个按钮上」，按钮吃掉这次点击、对话层不响应；
-     * 而 Android 手指落下几乎是瞬移到位，down 之前没有任何 move 帧，
-     * 脚本判定「点的不是按钮」→ 对话层也跟着响应。
+     * <p>要解决的问题：点右下角存档/菜单按钮时，**按钮响应了，对话也过一句**（点击穿透）。
      *
-     * <p>三次尝试的取舍：
-     * <ol>
-     *   <li><b>纯直通</b>：滑条正常，但按钮点击穿透（对话多过一句）。</li>
-     *   <li><b>UP 合成版</b>：ACTION_DOWN 改发 move、抬手才合成 down+up。
-     *       穿透解决了，但「按下」边沿丢失 → 设置滑条拖不动、退出不保存。</li>
-     *   <li><b>本方案</b>：down/up 保持直通（按下边沿与拖动轨迹都真实保留），
-     *       只在 down 之前**同帧补发一次同坐标 move**。引擎侧
-     *       {@code notify_mouse_move} 是立即更新 cursor_x/y，而
-     *       {@code notify_mouse_down} 会读取当前 cursor 填进事件坐标，
-     *       所以 down 处理时光标位置已经是新位置，脚本判定与 Windows 一致。</li>
-     * </ol>
+     * <p>根因（已在引擎源码确认）：脚本判定「点没点到按钮」用的是
+     * {@code PrimHit} → {@code prim_hit(...)} → {@code inputs_manager.get_cursor_x/y()}，
+     * 读的是**当前光标**（立即更新，非帧冻结）；而判定「推进对话」用的是
+     * {@code InputGetDown(LeftClick)}，读的是**帧冻结**的 down 边沿。
+     * Windows 上鼠标先在按钮上悬停若干帧，脚本在 down 之前的帧就已通过 PrimHit
+     * 得知「光标在按钮上」，于是跳过对话推进；Android 手指落下几乎瞬移到位，
+     * 若 move 与 down 同帧到达，脚本在 down 那一帧才第一次知道光标在按钮上，
+     * 来不及跳过 → down 边沿与 PrimHit 同时成立 → 按钮和对话都响应。
+     *
+     * <p>因此必须让**光标状态比 down 早至少一帧**：ACTION_DOWN 只发 move，
+     * down 登记到 {@link #pendingDownX}，由下一次 doFrame 在 step() 之前下发。
+     *
+     * <p>与历史两次尝试的区别：
+     * <ul>
+     *   <li>纯直通：move/down 同帧 → 穿透。</li>
+     *   <li>同帧补 move（上一版）：引擎的 host_touch 本来就每次先调
+     *       notify_mouse_move，补发是冗余的，仍同帧 → 穿透。</li>
+     *   <li>UP 合成版（ff76e1c）：down 一直拖到**抬手**才合成，导致按下边沿
+     *       丢失（滑条拖不动、退出不保存）。</li>
+     *   <li>本方案：down 只延后**一帧**（落手后立刻补上），按下边沿完整保留，
+     *       拖动轨迹由直通的 MOVE 传递，滑条与设置保存都正常。</li>
+     * </ul>
      */
     @Override
     public boolean onTouch(View view, MotionEvent event) {
@@ -478,27 +508,28 @@ public final class FvpActivity extends Activity implements
         }
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                // 方案 X：先补发一次同坐标 move，再发 down。
-                //
-                // 背景：Windows 上鼠标会先在按钮上悬停若干帧再按下，脚本因此在
-                // down 之前就把「光标当前落在哪个按钮上」记好了，按钮吃掉这次点击、
-                // 对话层不响应。Android 的手指落下几乎是「瞬移到位」，down 之前没有
-                // 任何 move 帧，脚本判定「点的不是按钮」-> 对话也跟着过一句
-                // （表现：点右下角存档/菜单按钮时，按钮响应了、对话也动一次）。
-                //
-                // 在同一次 step() 之前把 move 排在 down 前面，引擎处理 down 时
-                // 光标位置已经刷新（cursor_x/y 先被 move 更新），脚本的状态判定
-                // 与 Windows 一致。move 与 down 同帧不影响其它逻辑（引擎按顺序处理）。
+                // 本帧只发 move：让脚本先用 PrimHit 建立「光标落在按钮上」的状态，
+                // down 留到下一帧再发（见 doFrame），从而跳过对话推进。
                 NativeRfvp.touch(handle, 1, x, y);
-                NativeRfvp.touch(handle, 0, x, y);
+                pendingDownX = x;
+                pendingDownY = y;
                 return true;
             case MotionEvent.ACTION_MOVE:
                 NativeRfvp.touch(handle, 1, x, y);
                 return true;
             case MotionEvent.ACTION_UP:
+                // 若 down 还没发出去（极短点击，抬手早于下一帧），先补发 down 再发 up，
+                // 保证脚本一定能观察到「按下 -> 抬起」完整序列（滑条/确认按钮依赖它）。
+                if (!Double.isNaN(pendingDownX)) {
+                    NativeRfvp.touch(handle, 0, pendingDownX, pendingDownY);
+                    pendingDownX = Double.NaN;
+                    pendingDownY = Double.NaN;
+                }
                 NativeRfvp.touch(handle, 2, x, y);
                 return true;
             case MotionEvent.ACTION_CANCEL:
+                pendingDownX = Double.NaN;
+                pendingDownY = Double.NaN;
                 NativeRfvp.touch(handle, 3, x, y);
                 return true;
             default:
