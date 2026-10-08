@@ -41,10 +41,12 @@ jobs:
           cp rfvp-build/apply_text_scale_patch.py rfvp/
           cp rfvp-build/apply_android_log_patch.py rfvp/
           cp rfvp-build/apply_movie_patch.py rfvp/
+          cp rfvp-build/apply_audio_fix_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_android_log_patch.py
           python3 apply_movie_patch.py
+          python3 apply_audio_fix_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
