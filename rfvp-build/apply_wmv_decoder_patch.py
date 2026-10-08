@@ -56,8 +56,10 @@ NEW = """            last_exp += code - 60;
 def main() -> int:
     path = Path(TARGET)
     if not path.exists():
-        print(f"[SKIP] {TARGET} 不存在（可能不是 WMV 构建）")
-        return 0
+        # fail-fast：上游若重命名/移动了该文件，这里必须让 CI 红，而不是静默跳过。
+        # 静默跳过会让人误以为"补丁已打"，实际产物里根本没有防护。
+        print(f"[FAIL] {TARGET} 不存在 —— 上游可能改了目录结构，补丁无法应用")
+        return 1
 
     text = path.read_text(encoding="utf-8")
 
@@ -67,7 +69,7 @@ def main() -> int:
 
     count = text.count(OLD)
     if count != 1:
-        print(f"[FAIL] {TARGET}: 锚点命中 {count} 次（期望 1）")
+        print(f"[FAIL] {TARGET}: 锚点命中 {count} 次（期望 1）—— 上游源码已变动")
         return 1
 
     text = text.replace(OLD, NEW, 1)
