@@ -1,5 +1,5 @@
 diff --git a/video-sys/src/backend/mediacodec.rs b/video-sys/src/backend/mediacodec.rs
-index 4204bd0..b1c990d 100644
+index 4204bd0..36f2efe 100644
 --- a/video-sys/src/backend/mediacodec.rs
 +++ b/video-sys/src/backend/mediacodec.rs
 @@ -97,6 +97,15 @@ unsafe extern "C" {
@@ -18,27 +18,302 @@ index 4204bd0..b1c990d 100644
      fn AImageReader_delete(reader: *mut AImageReader) -> MediaStatus;
      fn AImageReader_getWindow(reader: *mut AImageReader, window: *mut *mut ANativeWindow) -> MediaStatus;
  
-@@ -132,7 +141,9 @@ impl AndroidH264Decoder {
-         // Create AImageReader + ANativeWindow surface for decoder output.
-         let mut reader: *mut AImageReader = ptr::null_mut();
-         let st = unsafe {
--            AImageReader_new(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888, 4, &mut reader)
-+            AImageReader_newWithUsage(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888,
-+                // AHARDWAREBUFFER_USAGE_GPU_SAMPLE_UPLOADED | CPU_READ_OFTEN
-+                (1u64 << 8) | (1u64 << 2), 4, &mut reader)
-         };
-         if st != 0 || reader.is_null() {
-             bail!("AImageReader_new failed: status={}", st);
-@@ -350,8 +361,11 @@ impl H264Decoder for AndroidH264Decoder {
-         let st2 = unsafe { AImage_getPlaneData(image, 2, &mut v_ptr, &mut v_len) };
+@@ -129,88 +138,64 @@ unsafe impl Sync for AndroidH264Decoder {}
  
-         if st0 != 0 || st1 != 0 || st2 != 0 || y_ptr.is_null() || u_ptr.is_null() || v_ptr.is_null() {
-+            // YukiHub patch: some decoders emit GPU-only buffers transiently; drop the
-+            // frame instead of tearing down the whole decode thread.
-             unsafe { let _ = AImage_delete(image); }
--            bail!("AImage_getPlaneData failed");
-+            log::warn!("AImage_getPlaneData failed (dropping frame)");
-+            return Ok(None);
+ impl AndroidH264Decoder {
+     pub fn new(cfg: H264Config) -> Result<Self> {
+-        // Create AImageReader + ANativeWindow surface for decoder output.
+-        let mut reader: *mut AImageReader = ptr::null_mut();
+-        let st = unsafe {
+-            AImageReader_new(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888, 4, &mut reader)
+-        };
+-        if st != 0 || reader.is_null() {
+-            bail!("AImageReader_new failed: status={}", st);
+-        }
+-        let mut window: *mut ANativeWindow = ptr::null_mut();
+-        let st = unsafe { AImageReader_getWindow(reader, &mut window) };
+-        if st != 0 || window.is_null() {
+-            unsafe { let _ = AImageReader_delete(reader); }
+-            bail!("AImageReader_getWindow failed: status={}", st);
+-        }
+-
+-        let mime = CString::new("video/avc")?;
+-        let codec = unsafe { AMediaCodec_createDecoderByType(mime.as_ptr() as *const i8) };
++        let codec = unsafe { AMediaCodec_createDecoderByType(b"video/avc\0".as_ptr() as *const i8) };
+         if codec.is_null() {
+-            unsafe { let _ = AImageReader_delete(reader); }
+-            bail!("AMediaCodec_createDecoderByType(video/avc) returned null");
++            bail!("AMediaCodec_createDecoderByType(video/avc) failed");
+         }
+-
+         let format = unsafe { AMediaFormat_new() };
+         if format.is_null() {
+-            unsafe {
+-                AMediaCodec_delete(codec);
+-                let _ = AImageReader_delete(reader);
+-            }
+-            bail!("AMediaFormat_new returned null");
++            unsafe { AMediaCodec_delete(codec) };
++            bail!("AMediaFormat_new failed");
+         }
+-
+         unsafe {
+-            let key_mime = CString::new("mime")?;
+-            let key_w = CString::new("width")?;
+-            let key_h = CString::new("height")?;
+-            let key_csd0 = CString::new("csd-0")?;
+-            let key_csd1 = CString::new("csd-1")?;
+-
+-            AMediaFormat_setString(format, key_mime.as_ptr() as *const i8, mime.as_ptr() as *const i8);
+-            AMediaFormat_setInt32(format, key_w.as_ptr() as *const i8, cfg.width as i32);
+-            AMediaFormat_setInt32(format, key_h.as_ptr() as *const i8, cfg.height as i32);
+-
++            let key_mime = CString::new("mime").unwrap();
++            let key_w = CString::new("width").unwrap();
++            let key_h = CString::new("height").unwrap();
++            let key_maxw = CString::new("max-width").unwrap();
++            let key_maxh = CString::new("max-height").unwrap();
++            let key_cf = CString::new("color-format").unwrap();
++            let key_csd0 = CString::new("csd-0").unwrap();
++            let key_csd1 = CString::new("csd-1").unwrap();
++            AMediaFormat_setString(format, key_mime.as_ptr(), b"video/avc\0".as_ptr() as *const i8);
++            AMediaFormat_setInt32(format, key_w.as_ptr(), cfg.width as i32);
++            AMediaFormat_setInt32(format, key_h.as_ptr(), cfg.height as i32);
++            AMediaFormat_setInt32(format, key_maxw.as_ptr(), cfg.width as i32);
++            AMediaFormat_setInt32(format, key_maxh.as_ptr(), cfg.height as i32);
++            // YukiHub patch: ByteBuffer mode. COLOR_FormatYUV420Flexible = 2135033992.
++            // Do NOT render to a Surface: Qualcomm/Oplus decoders pick UBWC (0x7fa30c06)
++            // for ImageReader output, which can never be CPU-locked.
++            AMediaFormat_setInt32(format, key_cf.as_ptr(), 2135033992);
+             let mut csd0 = Vec::new();
+             csd0.extend_from_slice(&[0, 0, 0, 1]);
+             csd0.extend_from_slice(&cfg.sps[0]);
+-
+             let mut csd1 = Vec::new();
+             csd1.extend_from_slice(&[0, 0, 0, 1]);
+             csd1.extend_from_slice(&cfg.pps[0]);
+-
+-            AMediaFormat_setBuffer(format, key_csd0.as_ptr() as *const i8, csd0.as_ptr() as *const libc::c_void, csd0.len());
+-            AMediaFormat_setBuffer(format, key_csd1.as_ptr() as *const i8, csd1.as_ptr() as *const libc::c_void, csd1.len());
+-
+-            // IMPORTANT: pass ANativeWindow* as the output surface.
+-            let st = AMediaCodec_configure(codec, format, window as *mut libc::c_void, ptr::null_mut(), 0);
++            AMediaFormat_setBuffer(format, key_csd0.as_ptr(), csd0.as_ptr() as *const libc::c_void, csd0.len());
++            AMediaFormat_setBuffer(format, key_csd1.as_ptr(), csd1.as_ptr() as *const libc::c_void, csd1.len());
++            // surface = null: decoder hands out CPU-visible byte buffers.
++            let st = AMediaCodec_configure(codec, format, ptr::null_mut(), ptr::null_mut(), 0);
+             if st != 0 {
+                 AMediaFormat_delete(format);
+                 AMediaCodec_delete(codec);
+-                let _ = AImageReader_delete(reader);
+                 bail!("AMediaCodec_configure failed: status={}", st);
+             }
+-
+             let st = AMediaCodec_start(codec);
+             if st != 0 {
+                 AMediaFormat_delete(format);
+                 AMediaCodec_delete(codec);
+-                let _ = AImageReader_delete(reader);
+                 bail!("AMediaCodec_start failed: status={}", st);
+             }
+         }
+-
+         Ok(Self {
+             cfg,
+             codec,
+             format,
+-            reader,
+-            window,
+             in_queue: VecDeque::new(),
+             eos_sent: false,
++            layout_logged: false,
+         })
+     }
+-
+     fn try_feed(&mut self) -> Result<()> {
+         if self.codec.is_null() || self.eos_sent {
+             return Ok(());
+@@ -259,11 +244,7 @@ impl Drop for AndroidH264Decoder {
+                 AMediaFormat_delete(self.format);
+                 self.format = ptr::null_mut();
+             }
+-            if !self.reader.is_null() {
+-                let _ = AImageReader_delete(self.reader);
+-                self.reader = ptr::null_mut();
+-                self.window = ptr::null_mut();
+-            }
++
+         }
+     }
+ }
+@@ -300,10 +281,8 @@ impl H264Decoder for AndroidH264Decoder {
+ 
+     fn try_receive(&mut self) -> Result<Option<VideoFrame>> {
+         self.try_feed()?;
+-
+         let mut info = AMediaCodecBufferInfo::default();
+         let idx = unsafe { AMediaCodec_dequeueOutputBuffer(self.codec, &mut info as *mut _, 0) };
+-
+         if idx == AMEDIACODEC_INFO_TRY_AGAIN_LATER {
+             return Ok(None);
+         }
+@@ -313,80 +292,98 @@ impl H264Decoder for AndroidH264Decoder {
+         if idx < 0 {
+             return Err(anyhow!("AMediaCodec_dequeueOutputBuffer returned {}", idx));
+         }
+-
+-        // Render this output buffer into the AImageReader surface.
+-        unsafe {
+-            let st = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, true);
+-            if st != 0 {
+-                bail!("AMediaCodec_releaseOutputBuffer(render=true) failed: status={}", st);
+-            }
+-        }
+-
+-        // Acquire the latest image (drops older ones).
+-        let mut image: *mut AImage = ptr::null_mut();
+-        let st = unsafe { AImageReader_acquireLatestImage(self.reader, &mut image) };
+-        if st != 0 || image.is_null() {
++        // YukiHub patch: ByteBuffer decode path. Read the output buffer directly
++        // (render=false) and convert to RGBA, then release the buffer.
++        let mut buf_size: usize = 0;
++        let buf_ptr = unsafe { AMediaCodec_getOutputBuffer(self.codec, idx as usize, &mut buf_size as *mut usize) };
++        if buf_ptr.is_null() || buf_size == 0 {
++            unsafe { let _ = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, false); }
++            log::warn!("output buffer null (dropping frame)");
+             return Ok(None);
          }
  
-         let mut y_rs: i32 = 0;
+-        let mut w: i32 = 0;
+-        let mut h: i32 = 0;
++        // Query the actual output layout.
++        let ofmt = unsafe { AMediaCodec_getOutputFormat(self.codec) };
++        let mut stride: i32 = 0;
++        let mut slice_h: i32 = 0;
++        let mut cfmt: i32 = 0;
+         unsafe {
+-            let _ = AImage_getWidth(image, &mut w);
+-            let _ = AImage_getHeight(image, &mut h);
++            let k_stride = CString::new("stride").unwrap();
++            let k_slice = CString::new("slice-height").unwrap();
++            let k_cf = CString::new("color-format").unwrap();
++            if !ofmt.is_null() {
++                AMediaFormat_getInt32(ofmt, k_stride.as_ptr(), &mut stride);
++                AMediaFormat_getInt32(ofmt, k_slice.as_ptr(), &mut slice_h);
++                AMediaFormat_getInt32(ofmt, k_cf.as_ptr(), &mut cfmt);
++            }
+         }
+-        let width = if w > 0 { w as u32 } else { self.cfg.width };
+-        let height = if h > 0 { h as u32 } else { self.cfg.height };
+-
+-        let mut y_ptr: *mut u8 = ptr::null_mut();
+-        let mut u_ptr: *mut u8 = ptr::null_mut();
+-        let mut v_ptr: *mut u8 = ptr::null_mut();
+-        let mut y_len: i32 = 0;
+-        let mut u_len: i32 = 0;
+-        let mut v_len: i32 = 0;
+-
+-        let st0 = unsafe { AImage_getPlaneData(image, 0, &mut y_ptr, &mut y_len) };
+-        let st1 = unsafe { AImage_getPlaneData(image, 1, &mut u_ptr, &mut u_len) };
+-        let st2 = unsafe { AImage_getPlaneData(image, 2, &mut v_ptr, &mut v_len) };
+-
+-        if st0 != 0 || st1 != 0 || st2 != 0 || y_ptr.is_null() || u_ptr.is_null() || v_ptr.is_null() {
+-            unsafe { let _ = AImage_delete(image); }
+-            bail!("AImage_getPlaneData failed");
++        if !ofmt.is_null() {
++            unsafe { AMediaFormat_delete(ofmt) };
+         }
+-
+-        let mut y_rs: i32 = 0;
+-        let mut u_rs: i32 = 0;
+-        let mut v_rs: i32 = 0;
+-        let mut u_ps: i32 = 0;
+-        let mut v_ps: i32 = 0;
+-
+-        unsafe {
+-            let _ = AImage_getPlaneRowStride(image, 0, &mut y_rs);
+-            let _ = AImage_getPlaneRowStride(image, 1, &mut u_rs);
+-            let _ = AImage_getPlaneRowStride(image, 2, &mut v_rs);
+-            let _ = AImage_getPlanePixelStride(image, 1, &mut u_ps);
+-            let _ = AImage_getPlanePixelStride(image, 2, &mut v_ps);
++        let width = self.cfg.width;
++        let height = self.cfg.height;
++        let stride = if stride > 0 { stride as usize } else { width as usize };
++        let slice_h = if slice_h > 0 { slice_h as usize } else { height as usize };
++        // COLOR_FormatYUV420Planar = 19; anything else (21 / vendor NV12) is treated
++        // as semi-planar, which is what modern c2 decoders emit in ByteBuffer mode.
++        let planar = cfmt == 19;
++
++        if !self.layout_logged {
++            self.layout_logged = true;
++            log::info!("mediacodec ByteBuffer layout: {}x{} stride={} slice-h={} color-format={} planar={}",
++                width, height, stride, slice_h, cfmt, planar);
+         }
+ 
+-        let y = unsafe { std::slice::from_raw_parts(y_ptr as *const u8, y_len.max(0) as usize) };
+-        let u = unsafe { std::slice::from_raw_parts(u_ptr as *const u8, u_len.max(0) as usize) };
+-        let v = unsafe { std::slice::from_raw_parts(v_ptr as *const u8, v_len.max(0) as usize) };
++        let size = buf_size;
++        let y_size_needed = stride.checked_mul(slice_h);
++        let Some(y_size) = y_size_needed else {
++            unsafe { let _ = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, false); }
++            return Ok(None);
++        };
++        if size < y_size {
++            unsafe { let _ = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, false); }
++            log::warn!("output buffer too small: {} < {} (dropping frame)", size, y_size);
++            return Ok(None);
++        }
++        let all = unsafe { std::slice::from_raw_parts(buf_ptr, size) };
++        let y_plane = &all[..y_size];
++
++        let (u_plane, v_plane, u_ps, v_ps) = if planar {
++            let chroma_rows = slice_h / 2;
++            let u_off = y_size;
++            let u_len = stride * chroma_rows;
++            let v_off = u_off + u_len;
++            let v_len = (size - v_off).min(u_len);
++            if size < v_off + 1 {
++                unsafe { let _ = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, false); }
++                log::warn!("planar chroma out of range (dropping frame)");
++                return Ok(None);
++            }
++            (&all[u_off..u_off + u_len], &all[v_off..v_off + v_len], 1, 1)
++        } else {
++            // Semi-planar NV12: VU interleaved, pixel stride 2.
++            let chroma_size = size - y_size;
++            if chroma_size < 4 {
++                unsafe { let _ = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, false); }
++                log::warn!("chroma too small (dropping frame)");
++                return Ok(None);
++            }
++            (&all[y_size..size], &all[y_size + 1..size], 2, 2)
++        };
+ 
+         let rgba = yuv420_888_to_rgba(
+             width,
+             height,
+-            y_rs.max(0) as usize,
+-            u_rs.max(0) as usize,
+-            v_rs.max(0) as usize,
+-            u_ps.max(0) as usize,
+-            v_ps.max(0) as usize,
+-            y,
+-            u,
+-            v,
++            stride,
++            stride,
++            stride,
++            u_ps,
++            v_ps,
++            y_plane,
++            u_plane,
++            v_plane,
+         );
+-
+-        unsafe { let _ = AImage_delete(image); }
+-
++        unsafe { let _ = AMediaCodec_releaseOutputBuffer(self.codec, idx as usize, false); }
+         Ok(Some(VideoFrame {
+             width,
+             height,
