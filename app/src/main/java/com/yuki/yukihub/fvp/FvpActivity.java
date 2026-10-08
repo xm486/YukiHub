@@ -111,6 +111,19 @@ public final class FvpActivity extends Activity implements
     private int bufW;
     private int bufH;
 
+    /**
+     * 待下发的一次「抬手」事件（phase=2）。
+     *
+     * <p>引擎的输入是帧级冻结的：同一帧内下发的 down 与 up 会被脚本同时读到，导致
+     * "补全文字"和"下一条"各触发一次（点一下跳两句）。所以 down 在 ACTION_UP 当场下发，
+     * up 则登记到这里，由**下一次 doFrame（即下一帧 step 之前）** 下发，保证二者之间
+     * 至少隔了一次 step()。
+     *
+     * <p>{@code pendingUpX/Y} 用 NaN 表示"无待发事件"。
+     */
+    private double pendingUpX = Double.NaN;
+    private double pendingUpY = Double.NaN;
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -432,6 +445,16 @@ public final class FvpActivity extends Activity implements
         if (dtMs < 0) dtMs = 0;
         if (dtMs > MAX_FRAME_DT_MS) dtMs = MAX_FRAME_DT_MS;
 
+        // 先把上一帧登记的「抬手」下发掉，再 step：这样 down 与 up 之间必然隔了一次
+        // step()，脚本不会在同一帧里同时看到两者（否则点一下会推进两句）。
+        if (!Double.isNaN(pendingUpX)) {
+            double ux = pendingUpX;
+            double uy = pendingUpY;
+            pendingUpX = Double.NaN;
+            pendingUpY = Double.NaN;
+            NativeRfvp.touch(handle, 2, ux, uy);
+        }
+
         int status = NativeRfvp.step(handle, dtMs);
         if (status != 0) {
             finish();
@@ -444,15 +467,21 @@ public final class FvpActivity extends Activity implements
     // ---------- 输入 ----------
 
     /**
-     * 点击延迟到抬手时下发（实验性修复：点按钮不该推进对话）。
+     * 点击在抬手的**下一帧**合成（down 与 up 分帧下发）。
      *
      * <p>背景：Windows 上鼠标先移动到按钮（悬停若干帧）再按下，而 Android 一次触摸的
      * move/down/up 会在极短时间内一起到达。实测 rfvp 里同一次点击会被「按钮线程」和
      * 「推进对话线程」同时看到（YHPROBE 探针：多线程同帧都读到 bits=0x14）。
      *
-     * <p>这里把点击推迟到 ACTION_UP 才合成（move → down → up），让脚本在按下之前
-     * 至少经过若干帧的移动事件来更新「光标在哪个按钮上」的状态。
-     * 若此方案无效，把 PHASE 映射改回直通即可（见 git 历史）。
+     * <p>因此点击推迟到 ACTION_UP 才合成（move → down → up），让脚本在按下之前至少经过
+     * 若干帧的移动事件来更新「光标在哪个按钮上」的状态。
+     *
+     * <p><b>为什么 up 还要再延后一帧</b>：引擎的输入是**帧级冻结**的
+     * （{@code InputManager::begin_frame()} 把 pending 的 down/up 一起冻结成本帧可见值）。
+     * 若 down 与 up 在同一个 {@code step()} 之前一起下发，脚本会在同一帧同时读到
+     * {@code InputGetDown(LeftClick)} 与 {@code InputGetUp(LeftClick)}，于是
+     * "显示全文"和"下一条"两个分支各触发一次 —— 表现就是**点一下跳两句**。
+     * 把 up 放到下一帧下发即可恢复「先补全文字，再下一条」的原版手感。
      */
     @Override
     public boolean onTouch(View view, MotionEvent event) {
@@ -466,22 +495,29 @@ public final class FvpActivity extends Activity implements
             x = x * bufW / viewW;
             y = y * bufH / viewH;
         }
+        final long h = handle;
+        final double fx = x;
+        final double fy = y;
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 // 只移动光标，不按下：给脚本时间建立悬停状态
-                NativeRfvp.touch(handle, 1, x, y);
+                NativeRfvp.touch(h, 1, fx, fy);
                 return true;
             case MotionEvent.ACTION_MOVE:
-                NativeRfvp.touch(handle, 1, x, y);
+                NativeRfvp.touch(h, 1, fx, fy);
                 return true;
             case MotionEvent.ACTION_UP:
-                // 抬手时才合成一次完整点击：先确保光标到位，再 down + up
-                NativeRfvp.touch(handle, 1, x, y);
-                NativeRfvp.touch(handle, 0, x, y);
-                NativeRfvp.touch(handle, 2, x, y);
+                // 抬手时合成一次完整点击：先确保光标到位，再 down；
+                // up 登记下来，交给下一帧的 doFrame 在 step() 之前下发 ——
+                // 保证 down/up 不会被冻结进同一帧（否则脚本会同时看到 down 与 up，
+                // "补全文字"与"下一条"各触发一次 → 点一下跳两句）。
+                NativeRfvp.touch(h, 1, fx, fy);
+                NativeRfvp.touch(h, 0, fx, fy);
+                pendingUpX = fx;
+                pendingUpY = fy;
                 return true;
             case MotionEvent.ACTION_CANCEL:
-                NativeRfvp.touch(handle, 3, x, y);
+                NativeRfvp.touch(h, 3, fx, fy);
                 return true;
             default:
                 return false;

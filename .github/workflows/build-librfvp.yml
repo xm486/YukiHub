@@ -36,17 +36,19 @@ jobs:
           ref: ${{ github.event.inputs.rfvp_ref }}
           path: rfvp
 
-      - name: Apply YukiHub patches (text scale + logcat logging + movie)
+      - name: Apply YukiHub patches (text scale + logcat logging + movie + audio)
         run: |
           cp rfvp-build/apply_text_scale_patch.py rfvp/
           cp rfvp-build/apply_android_log_patch.py rfvp/
           cp rfvp-build/apply_movie_patch.py rfvp/
           cp rfvp-build/apply_audio_fix_patch.py rfvp/
+          cp rfvp-build/apply_wmv_decoder_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_android_log_patch.py
           python3 apply_movie_patch.py
           python3 apply_audio_fix_patch.py
+          python3 apply_wmv_decoder_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
