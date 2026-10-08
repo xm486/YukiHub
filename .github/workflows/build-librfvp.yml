@@ -43,12 +43,14 @@ jobs:
           cp rfvp-build/apply_movie_patch.py rfvp/
           cp rfvp-build/apply_audio_fix_patch.py rfvp/
           cp rfvp-build/apply_wmv_decoder_patch.py rfvp/
+          cp rfvp-build/apply_probe_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_android_log_patch.py
           python3 apply_movie_patch.py
           python3 apply_audio_fix_patch.py
           python3 apply_wmv_decoder_patch.py
+          python3 apply_probe_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -127,12 +129,15 @@ jobs:
           test -f "$SO"
           llvm-nm -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)'
           # 校验补丁确实编译进去了（防止缓存命中导致补丁丢失、却上传旧产物）
-          echo "--- 探针清理检查（不应再有 YHPROBE） ---"
+          echo "--- 探针检查 ---"
+          # ⚠️ 诊断期临时放行：apply_probe_patch.py 会注入 YHPROBE 探针，
+          #    用于定位「点按钮时对话也过一句」（点击穿透）。
+          #    诊断结束后请删除该补丁、恢复下面的 fail 分支。
           if grep -qa 'YHPROBE' "$SO"; then
-            echo "::error::librfvp.so 仍含 YHPROBE 探针 —— 补丁脚本未清理干净"
-            exit 1
+            echo "::warning::librfvp.so 含 YHPROBE 诊断探针（诊断期预期行为，非错误）"
+          else
+            echo "无探针（本次构建未注入诊断探针）"
           fi
-          echo "无探针残留 ✓"
           echo "补丁校验通过 ✓"
 
       - name: Upload artifact
