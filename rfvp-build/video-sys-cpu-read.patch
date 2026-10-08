@@ -1,5 +1,5 @@
 diff --git a/video-sys/src/backend/mediacodec.rs b/video-sys/src/backend/mediacodec.rs
-index 4204bd0..5c4a90a 100644
+index 4204bd0..b1c990d 100644
 --- a/video-sys/src/backend/mediacodec.rs
 +++ b/video-sys/src/backend/mediacodec.rs
 @@ -97,6 +97,15 @@ unsafe extern "C" {
@@ -25,7 +25,7 @@ index 4204bd0..5c4a90a 100644
 -            AImageReader_new(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888, 4, &mut reader)
 +            AImageReader_newWithUsage(cfg.width as i32, cfg.height as i32, AIMAGE_FORMAT_YUV_420_888,
 +                // AHARDWAREBUFFER_USAGE_GPU_SAMPLE_UPLOADED | CPU_READ_OFTEN
-+                (1u64 << 8) | (1u64 << 5), 4, &mut reader)
++                (1u64 << 8) | (1u64 << 2), 4, &mut reader)
          };
          if st != 0 || reader.is_null() {
              bail!("AImageReader_new failed: status={}", st);
