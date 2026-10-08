@@ -444,22 +444,25 @@ public final class FvpActivity extends Activity implements
     // ---------- 输入 ----------
 
     /**
-     * 触摸事件【直通映射】（phase 0/1/2/3 = down/move/up/cancel）。
+     * 触摸事件映射：**move 直通 + down 前补一帧同坐标 move + up 直通**。
      *
-     * <p>历史教训（两次走弯路）：
+     * <p>要解决的原始问题：点右下角存档/菜单按钮时，**按钮响应了，对话也过一句**
+     * （点击穿透）。原因是 Windows 上鼠标会先在按钮上悬停若干帧再按下，脚本在 down
+     * 之前就记好了「光标落在哪个按钮上」，按钮吃掉这次点击、对话层不响应；
+     * 而 Android 手指落下几乎是瞬移到位，down 之前没有任何 move 帧，
+     * 脚本判定「点的不是按钮」→ 对话层也跟着响应。
+     *
+     * <p>三次尝试的取舍：
      * <ol>
-     *   <li><b>直通版</b>：down/up 在极短时间内到达，被引擎帧级冻结进同一帧，脚本同时
-     *       读到 down 与 up，表现为「点一下跳两句」。</li>
-     *   <li><b>UP 合成版</b>：ACTION_DOWN 改发 move、抬手才合成 down+up —— 结果
-     *       「按下」状态彻底丢失：游戏设置里的滑条（音量/文字速度）拖不动、
-     *       退出也不保存，因为 Gal 设置界面需要真实的按住拖动。</li>
+     *   <li><b>纯直通</b>：滑条正常，但按钮点击穿透（对话多过一句）。</li>
+     *   <li><b>UP 合成版</b>：ACTION_DOWN 改发 move、抬手才合成 down+up。
+     *       穿透解决了，但「按下」边沿丢失 → 设置滑条拖不动、退出不保存。</li>
+     *   <li><b>本方案</b>：down/up 保持直通（按下边沿与拖动轨迹都真实保留），
+     *       只在 down 之前**同帧补发一次同坐标 move**。引擎侧
+     *       {@code notify_mouse_move} 是立即更新 cursor_x/y，而
+     *       {@code notify_mouse_down} 会读取当前 cursor 填进事件坐标，
+     *       所以 down 处理时光标位置已经是新位置，脚本判定与 Windows 一致。</li>
      * </ol>
-     *
-     * <p><b>最终方案：直通 + 引擎侧分帧</b>。pointer 事件的物理时序天然保证
-     * up 晚于 down（至少间隔一个 doFrame），而 doFrame 会在 step() 之前下发上一帧
-     * 登记的 up（见 {@link #doFrame}），所以 down 与 up 必然落在不同帧 ——
-     * 脚本不会同帧看到两者，即恢复「先补全文字，再下一条」的原版手感，
-     * 同时保留真实的按下/拖动状态（设置滑条正常）。
      */
     @Override
     public boolean onTouch(View view, MotionEvent event) {
@@ -475,6 +478,18 @@ public final class FvpActivity extends Activity implements
         }
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                // 方案 X：先补发一次同坐标 move，再发 down。
+                //
+                // 背景：Windows 上鼠标会先在按钮上悬停若干帧再按下，脚本因此在
+                // down 之前就把「光标当前落在哪个按钮上」记好了，按钮吃掉这次点击、
+                // 对话层不响应。Android 的手指落下几乎是「瞬移到位」，down 之前没有
+                // 任何 move 帧，脚本判定「点的不是按钮」-> 对话也跟着过一句
+                // （表现：点右下角存档/菜单按钮时，按钮响应了、对话也动一次）。
+                //
+                // 在同一次 step() 之前把 move 排在 down 前面，引擎处理 down 时
+                // 光标位置已经刷新（cursor_x/y 先被 move 更新），脚本的状态判定
+                // 与 Windows 一致。move 与 down 同帧不影响其它逻辑（引擎按顺序处理）。
+                NativeRfvp.touch(handle, 1, x, y);
                 NativeRfvp.touch(handle, 0, x, y);
                 return true;
             case MotionEvent.ACTION_MOVE:
