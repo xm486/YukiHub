@@ -59,8 +59,9 @@ jobs:
           git apply --check ../rfvp-build/video-sys-cpu-read.patch
           git apply ../rfvp-build/video-sys-cpu-read.patch
           grep -q 'AMediaCodec_getOutputBuffer' video-sys/src/backend/mediacodec.rs
-          if grep -q 'AImageReader' video-sys/src/backend/mediacodec.rs; then
-            echo "::error::video-sys 仍含 AImageReader 路径 —— 补丁未生效"
+          # 负向校验：真正的旧路径 API 符号不应再出现在**代码**里（注释中提到名字不算）
+          if grep -vE '^[[:space:]]*//' video-sys/src/backend/mediacodec.rs | grep -qE 'AImageReader_new|AImageReader_getWindow|AImageReader_acquireLatestImage|AImage_getPlaneData'; then
+            echo "::error::video-sys 仍含 AImageReader/AImage 旧路径 API —— 补丁未生效"
             exit 1
           fi
           echo "video-sys ByteBuffer 补丁已应用 ✓"
