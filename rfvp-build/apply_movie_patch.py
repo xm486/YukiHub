@@ -150,32 +150,11 @@ pub struct VideoPlayerManager {
         self.audio_handle = Some(handle);""",
                 1,
             ),
-            # 6) MP4 音频轨查找失败日志
-            (
-                """    let track = match format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.sample_rate.is_some() && t.codec_params.channels.is_some())
-    {
-        Some(t) => t,
-        None => return Ok(None),
-    };""",
-                """    let track = match format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.sample_rate.is_some() && t.codec_params.channels.is_some())
-    {
-        Some(t) => t,
-        None => {
-            log::warn!(
-                "mp4 audio: no track with sample_rate+channels (tracks={})",
-                format.tracks().len()
-            );
-            return Ok(None);
-        }
-    };""",
-                1,
-            ),
+            # 6) 【已移除】MP4 音轨查找日志
+            #    原 #6 给 `let track = match format ... None => return Ok(None),` 加了
+            #    log::warn 块。但 apply_audio_fix_patch.py 已完整重写该区域（并自带
+            #    更详细的日志），两者会争抢同一段代码，导致锚点互相破坏。删掉此处，
+            #    音轨查找相关日志统一由 apply_audio_fix_patch.py 提供。
             # 7) MP4 音频解码结果日志
             (
                 """    if pcm.is_empty() {
