@@ -49,7 +49,29 @@ use symphonia::core::audio::{Channels, SampleBuffer, SignalSpec};
 use std::fs;""",
                 1,
             ),
-            # 1) 音轨查找：放宽条件 + 自行补齐 channels
+            # 1) decode_mp4_audio_to_wav_bytes：先把 impl AsRef<Path> 转成 owned PathBuf
+            #    （函数后面既要 File::open 又要传给 read_mp4_audio_channel_count，
+            #      直接传 mp4_path 会被 move，导致 E0382）
+            (
+                """fn decode_mp4_audio_to_wav_bytes(mp4_path: impl AsRef<Path>) -> Result<Option<Vec<u8>>> {
+    // Hint Symphonia that this is MP4.
+    let mut hint = Hint::new();
+    hint.with_extension("mp4");
+
+    let cursor = std::fs::File::open(mp4_path)?;""",
+                """fn decode_mp4_audio_to_wav_bytes(mp4_path: impl AsRef<Path>) -> Result<Option<Vec<u8>>> {
+    // YukiHub patch: take ownership once — `impl AsRef<Path>` is not `Copy`, and we need
+    // the path again below for the channel-count probe.
+    let mp4_path: std::path::PathBuf = mp4_path.as_ref().to_path_buf();
+
+    // Hint Symphonia that this is MP4.
+    let mut hint = Hint::new();
+    hint.with_extension("mp4");
+
+    let cursor = std::fs::File::open(&mp4_path)?;""",
+                1,
+            ),
+            # 2) 音轨查找：放宽条件 + 自行补齐 channels
             (
                 """    // Prefer an audio track. In MP4 files, the "default" track is often video.
     let track = match format
@@ -117,7 +139,7 @@ use std::fs;""",
     // happens, read it straight out of the MP4 sample entry.
     let mut track_for_decode = track.clone();
     if track_for_decode.codec_params.channels.is_none() {
-        match read_mp4_audio_channel_count(mp4_path.as_ref()) {
+        match read_mp4_audio_channel_count(&mp4_path) {
             Some(n) if n > 0 => {
                 log::info!("mp4 audio: backfilled {} channel(s) from container", n);
                 track_for_decode.codec_params.channels = Some(channels_from_count(n));
