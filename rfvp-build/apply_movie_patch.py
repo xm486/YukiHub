@@ -197,6 +197,142 @@ pub struct VideoPlayerManager {
     Ok(Some(build_wav_pcm16le(&pcm, ch as u16, sr)))""",
                 1,
             ),
+# 8) MP4 路径：层效果电影也要音频（原版 OP 就是 layer 电影且有声音）
+            (
+                """            MovieMode::LayerNoAudio => (None, None),
+        };
+
+        Ok(Self {
+            stream,""",
+                """            // YukiHub patch: layer-effect movies must keep their audio. The opening OP
+            // is played as `Movie(path, nil)` (layer mode) in the original engine and it
+            // *does* have sound; decoding audio here is harmless for effect clips without
+            // an audio track (decode_* returns Ok(None) in that case).
+            MovieMode::LayerNoAudio => {
+                let am = audio_manager;
+                let data = match am.as_ref() {
+                    None => {
+                        log::warn!("Movie audio decode skipped: no AudioManager");
+                        None
+                    }
+                    Some(_) => match decode_mp4_audio_to_wav_bytes(&mp4_path) {
+                        Ok(Some(wav_bytes)) => {
+                            let cursor = std::io::Cursor::new(wav_bytes);
+                            Some(
+                                StaticSoundData::from_cursor(cursor)
+                                    .context("kira StaticSoundData::from_cursor")?,
+                            )
+                        }
+                        Ok(None) => {
+                            log::warn!(
+                                "Movie audio: no decodable audio track: {}",
+                                mp4_path.as_ref().display()
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            // Audio is best-effort; keep video playing even if audio fails.
+                            log::warn!("Movie audio decode failed: {e:?}");
+                            None
+                        }
+                    },
+                };
+                (data, am)
+            }
+        };
+
+        Ok(Self {
+            stream,""",
+                1,
+            ),
+            # 9) WMV 路径：同上
+            (
+                """            MovieMode::LayerNoAudio => (None, None),
+        };
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = crossbeam_channel::bounded::<WmvRgbaFrame>(2);""",
+                """            // YukiHub patch: layer-effect movies keep their audio (see the MP4 branch).
+            MovieMode::LayerNoAudio => {
+                let am = audio_manager;
+                let data = match am.as_ref() {
+                    None => {
+                        log::warn!("WMV movie audio decode skipped: no AudioManager");
+                        None
+                    }
+                    Some(_) => match decode_wmv_audio_to_wav_bytes(&wmv_path) {
+                        Ok(Some(wav_bytes)) => {
+                            let cursor = std::io::Cursor::new(wav_bytes);
+                            Some(
+                                StaticSoundData::from_cursor(cursor)
+                                    .context("kira StaticSoundData::from_cursor")?,
+                            )
+                        }
+                        Ok(None) => {
+                            log::warn!(
+                                "WMV movie audio: no decodable audio track: {}",
+                                wmv_path.display()
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            log::warn!("WMV movie audio decode failed: {e:?}");
+                            None
+                        }
+                    },
+                };
+                (data, am)
+            }
+        };
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = crossbeam_channel::bounded::<WmvRgbaFrame>(2);""",
+                1,
+            ),
+            # 10) MPEG 路径：同上
+            (
+                """            MovieMode::LayerNoAudio => (None, None),
+        };
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = crossbeam_channel::bounded::<MpegRgbaFrame>(2);""",
+                """            // YukiHub patch: layer-effect movies keep their audio (see the MP4 branch).
+            MovieMode::LayerNoAudio => {
+                let am = audio_manager;
+                let data = match am.as_ref() {
+                    None => {
+                        log::warn!("MPEG movie audio decode skipped: no AudioManager");
+                        None
+                    }
+                    Some(_) => match decode_mpeg_audio_to_wav_bytes(&mpeg_path) {
+                        Ok(Some(wav_bytes)) => {
+                            let cursor = std::io::Cursor::new(wav_bytes);
+                            Some(
+                                StaticSoundData::from_cursor(cursor)
+                                    .context("kira StaticSoundData::from_cursor")?,
+                            )
+                        }
+                        Ok(None) => {
+                            log::warn!(
+                                "MPEG movie audio: no decodable audio track: {}",
+                                mpeg_path.display()
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            log::warn!("MPEG movie audio decode failed: {e:?}");
+                            None
+                        }
+                    },
+                };
+                (data, am)
+            }
+        };
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = crossbeam_channel::bounded::<MpegRgbaFrame>(2);""",
+                1,
+            ),
         ],
     ),
 ]
