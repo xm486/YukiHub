@@ -333,6 +333,92 @@ pub struct VideoPlayerManager {
         let (tx, rx) = crossbeam_channel::bounded::<MpegRgbaFrame>(2);""",
                 1,
             ),
+                ],
+    ),
+    (
+        "crates/rfvp/src/subsystem/components/syscalls/movie.rs",
+        [
+# 8) movie.rs：层效果电影也传 AudioManager（真正让音频进播放链）
+            (
+                """    let audio_manager = if matches!(mode, MovieMode::ModalWithAudio) {
+        Some(game_data.audio_manager())
+    } else {
+        None
+    };""",
+                """    // YukiHub patch: always hand the AudioManager to the movie player.
+    // The original engine plays sound for layer-effect movies too (the opening OP is
+    // `Movie(path, nil)`), so gating this on ModalWithAudio silenced every OP.
+    let audio_manager = Some(game_data.audio_manager());""",
+                1,
+            ),
+            # 9) movie.rs：候选解析改为「存在性优先」，避免为不存在的文件白白等待
+            (
+                """    if is_native {
+        let mp4 = replace_ext(path, "mp4");
+        if mp4 != path {
+            return vec![path.to_string(), mp4];
+        }
+        return vec![path.to_string()];
+    }""",
+                """    if is_native {
+        let mp4 = replace_ext(path, "mp4");
+        if mp4 != path {
+            // YukiHub patch: existence-first. Probing a file that does not exist first
+            // (e.g. a `.wmv` the user replaced with `.mp4`) costs a long black screen
+            // before the engine finally falls back to the real file.
+            let base = app_base_path();
+            let has_orig = base.join(path).get_path().exists();
+            let has_mp4 = base.join(&mp4).get_path().exists();
+            if has_mp4 && !has_orig {
+                return vec![mp4];
+            }
+            return vec![path.to_string(), mp4];
+        }
+        return vec![path.to_string()];
+    }""",
+                1,
+            ),
+            # 10) movie.rs：计时日志 —— 把「白屏多久、花在哪」变成数据
+            (
+                """    let mut started = false;
+    for cand in candidates {
+        let cand = normalize_vfs_path(&cand);""",
+                """    let mut started = false;
+    // YukiHub patch: time the whole startup so long black screens can be attributed.
+    let yh_t0 = std::time::Instant::now();
+    for cand in candidates {
+        let cand = normalize_vfs_path(&cand);""",
+                1,
+            ),
+            (
+                """                log::debug!("Movie: resolve failed for {} (orig {}): {e:?}", cand, path);
+                continue;""",
+                """                log::info!(
+                    "Movie: resolve failed for {} (orig {}) after {:?}: {e:?}",
+                    cand,
+                    path,
+                    yh_t0.elapsed()
+                );
+                continue;""",
+                1,
+            ),
+            (
+                """            Ok(()) => {
+                started = true;
+                break;
+            }""",
+                """            Ok(()) => {
+                // YukiHub patch: startup timing (resolve + decoder init + first frame).
+                log::info!(
+                    "Movie: started {} after {:?}",
+                    real_path.display(),
+                    yh_t0.elapsed()
+                );
+                started = true;
+                break;
+            }""",
+                1,
+            ),
         ],
     ),
 ]
