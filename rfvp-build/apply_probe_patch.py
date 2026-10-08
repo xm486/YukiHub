@@ -51,7 +51,27 @@ INPUT_EDITS = [
     Ok(Variant::Int(v as i32))
 }""",
     ),
-    # 1.2 InputGetEvent
+    # 1.2 InputGetUp（关键补充：确认脚本是否用 up 推进对话）
+    (
+        """pub fn input_get_up(game_data: &GameData) -> Result<Variant> {
+    Ok(Variant::Int(game_data.inputs_manager.get_input_up() as i32))
+}""",
+        """pub fn input_get_up(game_data: &GameData) -> Result<Variant> {
+    let v = game_data.inputs_manager.get_input_up();
+    // YHPROBE: 脚本查询「本帧抬起边沿」时打点（穿透诊断关键补充）
+    if v != 0 {
+        log::info!(
+            "YHPROBE InputGetUp -> 0x{:X} cursor_in={} cursor=({}, {})",
+            v,
+            if game_data.inputs_manager.get_cursor_in() { 1 } else { 0 },
+            game_data.inputs_manager.get_cursor_x(),
+            game_data.inputs_manager.get_cursor_y()
+        );
+    }
+    Ok(Variant::Int(v as i32))
+}""",
+    ),
+    # 1.3 InputGetEvent
     (
         """pub fn input_get_event(game_data: &mut GameData) -> Result<Variant> {
     if let Some(event) = game_data.inputs_manager.get_event() {
