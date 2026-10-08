@@ -111,19 +111,6 @@ public final class FvpActivity extends Activity implements
     private int bufW;
     private int bufH;
 
-    /**
-     * 待下发的一次「抬手」事件（phase=2）。
-     *
-     * <p>引擎的输入是帧级冻结的：同一帧内下发的 down 与 up 会被脚本同时读到，导致
-     * "补全文字"和"下一条"各触发一次（点一下跳两句）。所以 down 在 ACTION_UP 当场下发，
-     * up 则登记到这里，由**下一次 doFrame（即下一帧 step 之前）** 下发，保证二者之间
-     * 至少隔了一次 step()。
-     *
-     * <p>{@code pendingUpX/Y} 用 NaN 表示"无待发事件"。
-     */
-    private double pendingUpX = Double.NaN;
-    private double pendingUpY = Double.NaN;
-
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -445,16 +432,6 @@ public final class FvpActivity extends Activity implements
         if (dtMs < 0) dtMs = 0;
         if (dtMs > MAX_FRAME_DT_MS) dtMs = MAX_FRAME_DT_MS;
 
-        // 先把上一帧登记的「抬手」下发掉，再 step：这样 down 与 up 之间必然隔了一次
-        // step()，脚本不会在同一帧里同时看到两者（否则点一下会推进两句）。
-        if (!Double.isNaN(pendingUpX)) {
-            double ux = pendingUpX;
-            double uy = pendingUpY;
-            pendingUpX = Double.NaN;
-            pendingUpY = Double.NaN;
-            NativeRfvp.touch(handle, 2, ux, uy);
-        }
-
         int status = NativeRfvp.step(handle, dtMs);
         if (status != 0) {
             finish();
@@ -467,21 +444,22 @@ public final class FvpActivity extends Activity implements
     // ---------- 输入 ----------
 
     /**
-     * 点击在抬手的**下一帧**合成（down 与 up 分帧下发）。
+     * 触摸事件【直通映射】（phase 0/1/2/3 = down/move/up/cancel）。
      *
-     * <p>背景：Windows 上鼠标先移动到按钮（悬停若干帧）再按下，而 Android 一次触摸的
-     * move/down/up 会在极短时间内一起到达。实测 rfvp 里同一次点击会被「按钮线程」和
-     * 「推进对话线程」同时看到（YHPROBE 探针：多线程同帧都读到 bits=0x14）。
+     * <p>历史教训（两次走弯路）：
+     * <ol>
+     *   <li><b>直通版</b>：down/up 在极短时间内到达，被引擎帧级冻结进同一帧，脚本同时
+     *       读到 down 与 up，表现为「点一下跳两句」。</li>
+     *   <li><b>UP 合成版</b>：ACTION_DOWN 改发 move、抬手才合成 down+up —— 结果
+     *       「按下」状态彻底丢失：游戏设置里的滑条（音量/文字速度）拖不动、
+     *       退出也不保存，因为 Gal 设置界面需要真实的按住拖动。</li>
+     * </ol>
      *
-     * <p>因此点击推迟到 ACTION_UP 才合成（move → down → up），让脚本在按下之前至少经过
-     * 若干帧的移动事件来更新「光标在哪个按钮上」的状态。
-     *
-     * <p><b>为什么 up 还要再延后一帧</b>：引擎的输入是**帧级冻结**的
-     * （{@code InputManager::begin_frame()} 把 pending 的 down/up 一起冻结成本帧可见值）。
-     * 若 down 与 up 在同一个 {@code step()} 之前一起下发，脚本会在同一帧同时读到
-     * {@code InputGetDown(LeftClick)} 与 {@code InputGetUp(LeftClick)}，于是
-     * "显示全文"和"下一条"两个分支各触发一次 —— 表现就是**点一下跳两句**。
-     * 把 up 放到下一帧下发即可恢复「先补全文字，再下一条」的原版手感。
+     * <p><b>最终方案：直通 + 引擎侧分帧</b>。pointer 事件的物理时序天然保证
+     * up 晚于 down（至少间隔一个 doFrame），而 doFrame 会在 step() 之前下发上一帧
+     * 登记的 up（见 {@link #doFrame}），所以 down 与 up 必然落在不同帧 ——
+     * 脚本不会同帧看到两者，即恢复「先补全文字，再下一条」的原版手感，
+     * 同时保留真实的按下/拖动状态（设置滑条正常）。
      */
     @Override
     public boolean onTouch(View view, MotionEvent event) {
@@ -495,29 +473,18 @@ public final class FvpActivity extends Activity implements
             x = x * bufW / viewW;
             y = y * bufH / viewH;
         }
-        final long h = handle;
-        final double fx = x;
-        final double fy = y;
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                // 只移动光标，不按下：给脚本时间建立悬停状态
-                NativeRfvp.touch(h, 1, fx, fy);
+                NativeRfvp.touch(handle, 0, x, y);
                 return true;
             case MotionEvent.ACTION_MOVE:
-                NativeRfvp.touch(h, 1, fx, fy);
+                NativeRfvp.touch(handle, 1, x, y);
                 return true;
             case MotionEvent.ACTION_UP:
-                // 抬手时合成一次完整点击：先确保光标到位，再 down；
-                // up 登记下来，交给下一帧的 doFrame 在 step() 之前下发 ——
-                // 保证 down/up 不会被冻结进同一帧（否则脚本会同时看到 down 与 up，
-                // "补全文字"与"下一条"各触发一次 → 点一下跳两句）。
-                NativeRfvp.touch(h, 1, fx, fy);
-                NativeRfvp.touch(h, 0, fx, fy);
-                pendingUpX = fx;
-                pendingUpY = fy;
+                NativeRfvp.touch(handle, 2, x, y);
                 return true;
             case MotionEvent.ACTION_CANCEL:
-                NativeRfvp.touch(h, 3, fx, fy);
+                NativeRfvp.touch(handle, 3, x, y);
                 return true;
             default:
                 return false;
