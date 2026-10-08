@@ -50,14 +50,26 @@ android_logger = \"0.14\"""",
         return std::ptr::null_mut();
     };""",
                 """) -> *mut c_void {
-    // YukiHub patch: route Rust logs (log::error!/warn!/info!) to logcat under tag \"rfvp\".
+    // YukiHub patch: route Rust logs (log::error!/warn!/info!) to logcat under tag "rfvp".
+    // The default level is Info, but we keep rfvp at Debug for movie/audio diagnostics.
+    // wgpu_* is muted to Warn: it logs dozens of lines per frame, which blows past the
+    // per-process logcat quota (LOG_FLOWCTRL "LOGS OVER PROC QUOTA ... DROPPED") and
+    // silently discards the diagnostics we actually need.
     android_logger::init_once(
         android_logger::Config::default()
             .with_max_level(log::LevelFilter::Debug)
-            .with_tag(\"rfvp\"),
+            .with_tag("rfvp")
+            .with_filter(
+                android_logger::FilterBuilder::new()
+                    .filter_level(log::LevelFilter::Debug)
+                    .filter_module("wgpu_core", log::LevelFilter::Warn)
+                    .filter_module("wgpu_hal", log::LevelFilter::Warn)
+                    .filter_module("naga", log::LevelFilter::Warn)
+                    .build(),
+            ),
     );
     let Some(win) = NonNull::new(native_window_ptr) else {
-        log::error!(\"rfvp_android_create: native_window_ptr is null\");
+        log::error!("rfvp_android_create: native_window_ptr is null");
         return std::ptr::null_mut();
     };""",
                 1,
