@@ -60,11 +60,10 @@ jobs:
           # 让 rfvp 工作区改用本地补丁版 video-sys（覆盖 crates.io 版本）
           cd ../rfvp
           cat >> Cargo.toml <<'TOML'
-
-# YukiHub patch: use locally patched video-sys (CPU_READ usage fix, see workflow).
-[patch.crates-io]
-video-sys = { path = "../video-sys-src/video-sys" }
-TOML
+          # YukiHub patch: use locally patched video-sys (CPU_READ usage fix, see workflow).
+          [patch.crates-io]
+          video-sys = { path = "../video-sys-src/video-sys" }
+          TOML
           grep -A3 'patch.crates-io' Cargo.toml
 
       - name: Install Rust toolchain
