@@ -224,7 +224,8 @@ pub struct VideoPlayerManager {
             stream,""",
                 1,
             ),
-            # 9) WMV 路径：同上
+            # 9) WMV 路径：锚点存在性校验（不改动 —— WMV 播放逻辑严格遵循原版，
+            #    部分游戏的 wmv 视频是能正常播放的，不能因 MP4 修复而影响 WMV）
             (
                 """            MovieMode::LayerNoAudio => (None, None),
         };
@@ -243,7 +244,7 @@ pub struct VideoPlayerManager {
         let (tx, rx) = crossbeam_channel::bounded::<WmvRgbaFrame>(2);""",
                 1,
             ),
-            # 10) MPEG 路径：同上
+            # 10) MPEG 路径：锚点存在性校验（同 WMV —— 遵循原版，不做同步音频解码）
             (
                 """            MovieMode::LayerNoAudio => (None, None),
         };
