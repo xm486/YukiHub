@@ -112,17 +112,31 @@ public final class FvpActivity extends Activity implements
     private int bufH;
 
     /**
-     * 待下发的「按下」事件（phase=0），NaN 表示无待发。
+     * 待下发输入事件队列（每帧最多下发一个"边沿"）。
      *
-     * <p>脚本用 PrimHit（读**当前**光标）判定是否点在按钮上，用 InputGetDown
-     * （读**帧冻结**的边沿）判定是否推进对话。Android 的手指落下几乎瞬移到位，
-     * 若 move 与 down 同帧到达，脚本在 down 那一帧才首次知道光标在按钮上，
-     * 来不及跳过对话推进 → 按钮与对话同时响应（点击穿透）。
-     * 因此 ACTION_DOWN 只发 move，down 延后到下一帧（见 {@link #doFrame}），
-     * 让光标状态比 down 早一帧建立。
+     * <p>脚本侧实测（YHPROBE）：
+     * <ul>
+     *   <li>脚本**不用** {@code InputGetEvent}（探测 0 次），只靠
+     *       {@code InputGetDown} / {@code InputGetUp} / {@code PrimHit}；</li>
+     *   <li>脚本每帧先跑"推进对话"块（{@code InputGetDown}），**后**跑
+     *       "按钮判定"块（{@code PrimHit}）；</li>
+     *   <li>同一次物理点击若让 down 与 up 落在同一帧，脚本会在同一帧里
+     *       同时看到两者 —— 表现就是**"点了按钮，对话也过一句"**（穿透），
+     *       以及**点击直接跳下一句、没有"先补全文字"**（割裂感）。</li>
+     * </ul>
+     *
+     * <p>因此这里把 down/up 全部排队，由 {@link #doFrame} 在 step() 之前
+     * **每帧最多下发一个边沿**，从而保证：
+     * <ol>
+     *   <li>down 永远比 up 早至少一帧（脚本能先"补全文字"再"下一句"）；</li>
+     *   <li>down 之前一定先发过 move（光标先到位，缓解按钮穿透）。</li>
+     * </ol>
+     * {@code NaN} 表示队列为空。
      */
     private double pendingDownX = Double.NaN;
     private double pendingDownY = Double.NaN;
+    private double pendingUpX = Double.NaN;
+    private double pendingUpY = Double.NaN;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -445,14 +459,25 @@ public final class FvpActivity extends Activity implements
         if (dtMs < 0) dtMs = 0;
         if (dtMs > MAX_FRAME_DT_MS) dtMs = MAX_FRAME_DT_MS;
 
-        // 下发上一帧登记的「按下」：此时光标状态（由上一帧的 move 建立）已被脚本
-        // 通过 PrimHit 观察到，脚本会跳过对话推进，从而避免点击穿透。
+        // 输入事件队列：每帧最多下发一个「边沿」，且 down 优先于 up。
+        //
+        // 为什么必须"每帧最多一个"：脚本每帧依次执行「推进对话」(InputGetDown) 与
+        // 「按钮判定」(PrimHit)。若 down 与 up 落在同一帧（快速点击时极易发生），
+        // 脚本会在同一帧同时看到"按下"和"抬起" —— 表现就是点了按钮对话也过一句、
+        // 且点击直接跳下一句（没有"先补全文字"的层次感）。
+        // 拆成两帧后：第 N 帧只有 down（脚本补全文字），第 N+1 帧才 up（再点一次才下一句）。
         if (!Double.isNaN(pendingDownX)) {
             double dx = pendingDownX;
             double dy = pendingDownY;
             pendingDownX = Double.NaN;
             pendingDownY = Double.NaN;
             NativeRfvp.touch(handle, 0, dx, dy);
+        } else if (!Double.isNaN(pendingUpX)) {
+            double ux = pendingUpX;
+            double uy = pendingUpY;
+            pendingUpX = Double.NaN;
+            pendingUpY = Double.NaN;
+            NativeRfvp.touch(handle, 2, ux, uy);
         }
 
         int status = NativeRfvp.step(handle, dtMs);
@@ -508,8 +533,7 @@ public final class FvpActivity extends Activity implements
         }
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                // 本帧只发 move：让脚本先用 PrimHit 建立「光标落在按钮上」的状态，
-                // down 留到下一帧再发（见 doFrame），从而跳过对话推进。
+                // 立即发 move（光标先到位），down 排队等下一帧。
                 NativeRfvp.touch(handle, 1, x, y);
                 pendingDownX = x;
                 pendingDownY = y;
@@ -518,18 +542,17 @@ public final class FvpActivity extends Activity implements
                 NativeRfvp.touch(handle, 1, x, y);
                 return true;
             case MotionEvent.ACTION_UP:
-                // 若 down 还没发出去（极短点击，抬手早于下一帧），先补发 down 再发 up，
-                // 保证脚本一定能观察到「按下 -> 抬起」完整序列（滑条/确认按钮依赖它）。
-                if (!Double.isNaN(pendingDownX)) {
-                    NativeRfvp.touch(handle, 0, pendingDownX, pendingDownY);
-                    pendingDownX = Double.NaN;
-                    pendingDownY = Double.NaN;
-                }
-                NativeRfvp.touch(handle, 2, x, y);
+                // up 也排队：保证 down 与 up 永远不在同一帧（否则脚本会在同一帧
+                // 同时看到"按下"和"抬起" → 跳过打字与推进对话同时发生）。
+                NativeRfvp.touch(handle, 1, x, y);
+                pendingUpX = x;
+                pendingUpY = y;
                 return true;
             case MotionEvent.ACTION_CANCEL:
                 pendingDownX = Double.NaN;
                 pendingDownY = Double.NaN;
+                pendingUpX = Double.NaN;
+                pendingUpY = Double.NaN;
                 NativeRfvp.touch(handle, 3, x, y);
                 return true;
             default:
