@@ -366,9 +366,10 @@ pub struct VideoPlayerManager {
             // YukiHub patch: existence-first. Probing a file that does not exist first
             // (e.g. a `.wmv` the user replaced with `.mp4`) costs a long black screen
             // before the engine finally falls back to the real file.
-            let base = app_base_path();
-            let has_orig = base.join(path).get_path().exists();
-            let has_mp4 = base.join(&mp4).get_path().exists();
+            // NOTE: PathBuilder::join takes `self` by value, so we must not reuse a
+            // single builder for two joins.
+            let has_orig = app_base_path().join(path).get_path().exists();
+            let has_mp4 = app_base_path().join(&mp4).get_path().exists();
             if has_mp4 && !has_orig {
                 return vec![mp4];
             }
