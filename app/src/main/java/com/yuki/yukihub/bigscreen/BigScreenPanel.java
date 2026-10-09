@@ -264,6 +264,7 @@ public class BigScreenPanel {
             row.setClickable(true);
             row.setOnClickListener(v -> {
                 BigScreenSound.confirm();   // M12：触摸条目也要有音效
+                BigScreenSound.hapticKey(v); // M22：触摸条目补触感
                 index = idx;
                 applyFocus();
                 if (item.action != null) { item.action.run(); }

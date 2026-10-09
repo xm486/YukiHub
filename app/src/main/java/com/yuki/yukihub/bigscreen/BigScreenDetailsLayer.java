@@ -123,7 +123,7 @@ public class BigScreenDetailsLayer {
         // 触摸用户的关闭按钮（手柄按 Ⓑ）
         closeBtn = root.findViewById(R.id.bsDtClose);
         if (closeBtn != null) {
-            closeBtn.setOnClickListener(v -> { BigScreenSound.open(); hide(); });
+            closeBtn.setOnClickListener(v -> { BigScreenSound.open(); BigScreenSound.hapticKey(v); hide(); });
             closeBtn.setVisibility(View.GONE);   // M18-9：先藏起来，由 setTouchUi 决定显不显示
         }
         // M18-9：**详情层必须吃掉落在空白处的触摸**。
@@ -614,7 +614,7 @@ public class BigScreenDetailsLayer {
         btn.setTextColor(ContextCompat.getColor(activity,
                 primary ? R.color.bs_text : R.color.bs_text_muted));
         btn.setClickable(true);
-        btn.setOnClickListener(v -> { BigScreenSound.confirm(); action.run(); });
+        btn.setOnClickListener(v -> { BigScreenSound.confirm(); BigScreenSound.hapticKey(v); action.run(); });
         actsView.addView(btn);
     }
 

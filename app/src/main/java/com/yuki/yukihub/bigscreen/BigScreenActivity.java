@@ -2367,7 +2367,7 @@ List<Shelf> defs = new ArrayList<>();
         btn.setTextColor(ContextCompat.getColor(this,
                 primary ? R.color.bs_text : R.color.bs_text_muted));
         btn.setClickable(true);
-        btn.setOnClickListener(v -> { BigScreenSound.confirm(); action.run(); });
+        btn.setOnClickListener(v -> { BigScreenSound.confirm(); BigScreenSound.hapticKey(v); action.run(); });
         infoActions.addView(btn);
     }
 
