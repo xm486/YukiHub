@@ -10754,6 +10754,8 @@ private void showEditPlayTimeDialog(Game game) {
         CheckBox textHidpi = krCheckBox("文本高分辨率渲染（小字更清晰）", prefs.textHidpi);
         CheckBox systemFont = krCheckBox("启用系统字体回退（缺字时用系统字体补齐）", prefs.systemFont);
         CheckBox stretchFill = krCheckBox("画面铺满全屏（拉伸画面消除黑边，画面比例会轻微变形）", prefs.stretchFill);
+        CheckBox virtualKeys = krCheckBox("虚拟按键（左侧竖排：ESC 菜单 / 历史 / Ctrl 快进）", prefs.virtualKeys);
+        CheckBox virtualMouse = krCheckBox("虚拟鼠标（可拖动光标；配合触摸板模式，与 KRKR/Artemis 同一套）", prefs.virtualMouse);
         android.widget.Spinner screenScale = krSpinner(FvpLaunchPrefs.SCALE_LABELS,
                 FvpLaunchPrefs.labelOfScale(prefs.screenScale));
         android.widget.Spinner textScale = krSpinner(FvpLaunchPrefs.TEXT_SCALE_LABELS,
@@ -10789,6 +10791,10 @@ private void showEditPlayTimeDialog(Game game) {
         root.addView(textHidpi);
         root.addView(systemFont);
         root.addView(stretchFill);
+        root.addView(krLabel("虚拟控件（手机上没有键盘鼠标时使用；默认关闭）"));
+        root.addView(virtualKeys);
+        root.addView(virtualMouse);
+        root.addView(krLabel("虚拟鼠标的光标外观/大小/灵敏度请在「虚拟鼠标设置」里调整"));
         root.addView(krLabel("自定义字体（强制用指定字体渲染；留空则用游戏自带字体）"));
         root.addView(pickFont);
         root.addView(clearFont);
@@ -10823,6 +10829,8 @@ private void showEditPlayTimeDialog(Game game) {
             prefs.textHidpi = textHidpi.isChecked();
             prefs.systemFont = systemFont.isChecked();
             prefs.stretchFill = stretchFill.isChecked();
+            prefs.virtualKeys = virtualKeys.isChecked();
+            prefs.virtualMouse = virtualMouse.isChecked();
             // fontPath 由「选择/清除」按钮直接改 prefs，这里不能覆盖（否则会把刚选的字体抹掉）。
             prefs.save(this, game.id);
             Toast.makeText(MainActivity.this, "FVP 引擎设置已保存", Toast.LENGTH_SHORT).show();

@@ -24,12 +24,69 @@ public final class GameCursorManager {
 
     private GameCursorManager() { }
 
-    public static void attachKrkr(Activity host) {
+public static void attachKrkr(Activity host) {
         attach(host, true);
     }
-
     public static void attachArtemis(Activity host) {
         attach(host, false);
+    }
+
+    /**
+     * FVP（rfvp）虚拟鼠标。
+     *
+     * <p>与 KRKR/Artemis 的差别：
+     * <ul>
+     *   <li>注入通道走 rfvp 宿主 C ABI（{@code rfvp_android_touch}），不经过 GLSurfaceView
+     *       派发，也不需要无障碍；</li>
+     *   <li>FVP 是普通 Activity（SurfaceView 由系统合成），因此直接挂 DecorView 即可，
+     *       **不需要悬浮窗权限**（{@code showInDecor} 分支）；</li>
+     *   <li>引擎句柄晚于光标创建，所以用 {@code handleProvider} 懒取。</li>
+     * </ul>
+     *
+     * @param host      FvpActivity
+     * @param provider  返回当前引擎句柄（0 = 未就绪）
+     */
+    public static void attachFvp(Activity host, GameCursorInjector.FvpHandleProvider provider) {
+        try {
+            if (attachedHost == host && active != null && active.isAttached()) {
+                active.applyConfig();
+                return;
+            }
+            GameCursorConfig cfg = GameCursorConfig.load(host);
+            if (!cfg.fvpEnabled) return;
+            GameCursorOverlay previous = active;
+            if (previous != null) previous.dismiss();
+            active = null;
+            GameCursorInjector injector = new GameCursorInjector();
+            injector.setFvpTarget(provider);
+            registerAutoCleanup(host);
+            GameCursorOverlay overlay = new GameCursorOverlay(host, cfg, injector);
+            overlay.show();
+            if (overlay.isOverlayPermissionMissing()) {
+                android.util.Log.w(TAG, "fvp cursor unavailable");
+                return;
+            }
+            active = overlay;
+            attachedHost = host;
+            android.util.Log.i(TAG, "attached fvp");
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "attachFvp failed", t);
+        }
+    }
+
+    /** FVP 退出时主动清理（FvpActivity.onDestroy 调用，不依赖生命周期回调时机）。 */
+    public static void detachFvp(Activity host) {
+        try {
+            GameCursorOverlay o = active;
+            if (o != null && attachedHost == host) {
+                active = null;
+                attachedHost = null;
+                o.dismiss();
+                android.util.Log.i(TAG, "detached fvp");
+            }
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "detachFvp failed", t);
+        }
     }
 
     private static void attach(Activity host, boolean krkr) {
