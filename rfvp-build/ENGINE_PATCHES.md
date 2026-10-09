@@ -51,6 +51,9 @@ video-sys-cpu-read.patch       # 9. video-sys 解码器 ByteBuffer 模式
 | `apply_text_click_patch.py` | `app.rs` / `text_manager.rs` / `vm_runner.rs` | **点击补全点字动画** + `TextResume` 状态保护 |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
+> **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
+> 这些改动只需重编 APK，不需要跑 so 构建 workflow。
+
 ---
 
 ## 3. 各问题的根因与修复（按发现顺序）
@@ -453,6 +456,101 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
 
 ---
 
+### 3.8 FVP 虚拟按键 + 虚拟鼠标（**纯 Java，不动 so**）
+
+> 需求来源：rfvp 官方 Android 改版（`MengNiang/源码-1/rfvp-android-sakura-public`）
+> 有常显的 ESC / 鼠标 / Ctrl 三个悬浮按钮 + 虚拟光标。
+> 本仓库**不照搬**它的做法，而是复用自家 KRKR/Artemis 那套更完整的 `gamecursor`。
+
+#### 需求（用户确认版）
+
+| # | 需求 | 实现 |
+|---|---|---|
+| 1 | 开关进「FVP 引擎设置」，**默认关闭** | `FvpLaunchPrefs.virtualKeys/virtualMouse`（按游戏存）|
+| 2 | 左侧竖排三键：**ESC / 历史 / Ctrl** | `FvpVirtualKeys.java`（新建）|
+| 3 | 鼠标浮标右下角、可拖动、"开了就亮" | 复用 `GameCursorOverlay.ToggleView` |
+| 4 | **全量复用** KRKR/Artemis 的 gamecursor（含 Windows 光标包） | `GameCursorManager.attachFvp` |
+| 5 | **不抄**改版的触屏改动，保持 v4 直触 | 触屏逻辑一行未动 |
+
+#### 键码语义（关键，决定"历史"用什么键）
+
+`librfvp.so` 的 `app.rs::host_key_android` 用的是 **Windows VK 码**：
+
+```
+0x1B Escape  0x0D Enter  0x20 Space  0x25..0x28 方向键  0x11 Control
+phase: 0 = down, 1 = up
+```
+
+因此「历史记录」用 **`0x26` ArrowUp** —— 对应 PC 上「鼠标上滚轮 = 打开历史」。
+**实测确认方向键上确实生效**（用户实机验证）。
+
+#### 三个必要条件（早就齐了，所以纯 Java）
+
+| 组件 | 现状 |
+|---|---|
+| `librfvp.so` 导出 `rfvp_android_key` | ✅ symbol 表实测存在 |
+| C 桥 `rfvp_bridge.c` 的 `keyEvent` | ✅ 已实现（dlsym 取 `key` 符号）|
+| `NativeRfvp.keyEvent(long,int,int)` | ✅ 已声明 |
+
+#### 踩过的两个坑（都记下来）
+
+**坑 1：`Activity` 不是 `ViewGroup`，也没有 `getContext()`**
+
+为了拿 `DecorView` 把 host 从 `FrameLayout` 改成 `Activity`，
+漏改三处按旧类型用的代码 → javac 报错。修法：
+`Activity` 本身就是 `Context`，直接 `new LinearLayout(host)`；
+兜底父容器用 `host.findViewById(android.R.id.content)`。
+
+**坑 2：`attachFvp` 里读了一个永远为 false 的开关**（**虚拟鼠标"开了没反应"的真凶**）
+
+```java
+// 错误写法
+GameCursorConfig cfg = GameCursorConfig.load(host);
+if (!cfg.fvpEnabled) return;   // ← 读 SharedPreferences("game_cursor")
+```
+
+`KEY_ENABLED_FVP` 全项目**只有定义、没有任何 UI 写入它** → 永远 false → 静默 return。
+logcat 里 `YukiGameCursor` **一行都没有**，就是被这行挡的。
+
+正确做法：**是否启用由调用方决定**（`FvpActivity` 读「引擎设置」的开关），
+`GameCursorManager` 只负责取外观参数（大小/透明度/灵敏度/光标包）。
+
+> 教训：**开关有两个来源时，一定要确认哪一个是真正被写入的那个。**
+> 另一个症状是「FVP 设置里根本没有虚拟鼠标入口」——
+> `MainActivity` 的菜单项写死了只给 `KIRIKIRI/ARTEMIS`。
+
+#### 实现要点
+
+| 文件 | 改动 |
+|---|---|
+| `fvp/FvpVirtualKeys.java` | **新建**：左侧三键，ESC 单击 / 历史 ArrowUp / Ctrl 按住连发 |
+| `gamecursor/GameCursorInjector.java` | 加 `TARGET_FVP`（tap 50ms 按下再抬起、hover 走 phase=1）|
+| `gamecursor/GameCursorManager.java` | 加 `attachFvp/detachFvp`（普通 Activity 走 `showInDecor`，**无需悬浮窗权限**）|
+| `gamecursor/GameCursorConfig.java` | 加 `KEY_ENABLED_FVP` |
+| `fvp/FvpActivity.java` | EXTRA 开关、坐标换算 `toSurfaceCoords()`、onPause 释放按键 |
+| `MainActivity.java` | 设置 UI 两个 CheckBox + 「虚拟鼠标」菜单入口（含 FVP）|
+| `launcher/EmulatorLauncher.java` | 启动 Intent 带上开关 |
+
+**坐标换算**：光标用 `DecorView` 坐标，`rfvp_android_touch` 收 `SurfaceView` 坐标，
+开「画面放大」时两者不一致，必须减 `surfaceView.getLocationInWindow` 偏移。
+
+**按键外观（实测迭代 4 轮定稿）**：62×48dp、间距 40dp、左边距 12dp、
+常态不透明度 40% / 按下 60%、左侧垂直居中（FVP 手机上有黑边，贴左不挡画面）。
+
+#### 验证日志（实测）
+
+```
+FvpActivity: virtual controls: keys=true mouse=true
+YukiGameCursor: appearance = win cursor pack, frames=60 (幼刀鼠标方案)
+YukiGameCursor: overlay shown via decor mouseMode=false
+YukiGameCursor: attached fvp
+YukiGameCursor: mouseMode=true
+YukiGameCursor: fvp tap (1364,778)      ← 点击真的投给引擎了
+FvpVirtualKeys: virtual keys attached (ESC / 历史 / Ctrl)
+```
+
+---
+
 ## 4. YHPROBE 探针一览（诊断期）
 
 > 过滤：`adb logcat -s rfvp | grep YHPROBE`
@@ -490,6 +588,9 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
       `MdctNaive` 换成 FFT 实现（性能提升到实时以上），才值得重新评估
       "WMV 层效果也解音频"。**目前维持现状。**
 - [ ] 可选：把 3.3.1 的结论同步给用户文档（"WMV 想有声音请转 MP4"）。
+- [ ] **已知残留：上游贴图 bug**（与本仓库补丁无关，需上游自己修）。
+      FVP 模块除该项外，功能已基本完备（文本/视频/输入/虚拟控件）。
+- [ ] 虚拟控件相关均**在 APK 侧**（3.8），换 so 不影响；但**换 APK 必须重编**。
 
 ---
 
@@ -505,6 +606,14 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
    （文字/动作）→ 渲染。很多"时序"问题都由这个顺序决定。
 5. **验证四件套**：① 锚点唯一命中；② 幂等；③ 七补丁串行全绿；
    ④ 括号/结构增量与上游一致。
+6. **"日志里一行都没有"是最强的线索**。虚拟鼠标那次，
+   `YukiGameCursor` 完全没有输出 —— 直接说明**代码根本没被执行到**，
+   顺着第一行 guard 就找到了那个永远为 false 的开关。
+   反过来，如果日志有输出但行为不对，才是逻辑问题。
+7. **改 Java 前先用 stub + javac 真编译**。本轮因类型改动（`FrameLayout`→`Activity`）
+   漏改三处，让用户白跑了一轮编译。做法：`/tmp/jcheck` 下放一套最小 android stub，
+   `javac -sourcepath src ...` 验证；能提前发现 90% 的类型错误。
+8. **GUI 参数尽量做成常量**（本轮虚拟按键外观改了 4 轮），每轮只改一个数字。
 
 ---
 
@@ -516,7 +625,9 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
 | OP / 电影播放（**MP4**，含音频） | video-sys + movie + audio 补丁 | **推荐格式**：画面+音频+可跳过 全功能 |
 | 原版 `.wmv` 播放 | wmv 补丁 | **能播画面、可跳过、不卡死**；**无声音**（原版行为，见 3.3.1） |
 | 原版 `.mpg/.mpeg` | — | 不做同步音频解码（同 WMV 理由） |
-| **点击补全点字动画** | text_click 补丁 | 动画中点一下=显示完整句；再点一下才过 |
+| 点击补全点字动画 | text_click 补丁 | 动画中点一下=显示完整句；再点一下才过 |
+| **虚拟按键 ESC / 历史 / Ctrl** | APK 侧 `FvpVirtualKeys` | **与 so 无关**（键码走 `rfvp_android_key`），需重编 APK |
+| **虚拟鼠标（含光标包）** | APK 侧 `gamecursor` | 同上；光标点击走 `rfvp_android_touch`（见 3.8）|
 | 按钮点击不穿透 | APK 侧 `FvpActivity`（v4 输入映射） | **与 so 无关**，需重编 APK |
 | 设置滑条 / 文本速度保存 | APK 侧直通映射 | 同上 |
 
