@@ -26,6 +26,7 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.yuki.yukihub.ui.TapSafeSpinner;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -752,7 +753,7 @@ public class OnsButtonLayoutActivity extends Activity {
     }
 
     private Spinner formSpinner(String[] values, int selectedIndex) {
-        Spinner sp = new Spinner(this);
+        Spinner sp = new TapSafeSpinner(this);
         ArrayAdapter<String> ad = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, values);
         ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
