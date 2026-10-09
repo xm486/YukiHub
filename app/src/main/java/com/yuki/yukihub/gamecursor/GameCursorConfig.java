@@ -17,6 +17,8 @@ public final class GameCursorConfig {
     public static final String PREFS_NAME = "game_cursor";
     public static final String KEY_ENABLED_KRKR = "enabled_krkr";
     public static final String KEY_ENABLED_ARTEMIS = "enabled_artemis";
+    /** FVP（rfvp）虚拟鼠标开关。 */
+    public static final String KEY_ENABLED_FVP = "enabled_fvp";
     /** 光标图标缩放，1.0 = 基准 60dp 高。 */
     public static final String KEY_SCALE = "scale";
     /** 光标不透明度 0.2~1.0。 */
@@ -47,6 +49,7 @@ public final class GameCursorConfig {
 
     public boolean krkrEnabled;
     public boolean artemisEnabled;
+    public boolean fvpEnabled;
     public float scale = DEFAULT_SCALE;
     public float alpha = DEFAULT_ALPHA;
     public float sensitivity = DEFAULT_SENSITIVITY;
@@ -62,6 +65,7 @@ public final class GameCursorConfig {
             SharedPreferences p = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             c.krkrEnabled = p.getBoolean(KEY_ENABLED_KRKR, false);
             c.artemisEnabled = p.getBoolean(KEY_ENABLED_ARTEMIS, false);
+            c.fvpEnabled = p.getBoolean(KEY_ENABLED_FVP, false);
             c.scale = clamp(p.getFloat(KEY_SCALE, DEFAULT_SCALE), MIN_SCALE, MAX_SCALE);
             c.alpha = clamp(p.getFloat(KEY_ALPHA, DEFAULT_ALPHA), 0.2f, 1.0f);
             c.sensitivity = clamp(p.getFloat(KEY_SENSITIVITY, DEFAULT_SENSITIVITY), 0.5f, 3.0f);
@@ -78,6 +82,7 @@ public final class GameCursorConfig {
             ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
                     .putBoolean(KEY_ENABLED_KRKR, krkrEnabled)
                     .putBoolean(KEY_ENABLED_ARTEMIS, artemisEnabled)
+                    .putBoolean(KEY_ENABLED_FVP, fvpEnabled)
                     .putFloat(KEY_SCALE, scale)
                     .putFloat(KEY_ALPHA, alpha)
                     .putFloat(KEY_SENSITIVITY, sensitivity)

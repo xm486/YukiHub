@@ -62,6 +62,10 @@ public final class FvpLaunchPrefs {
      * 字形大小不受影响。
      */
     public float lineScale = 0.0f;
+    /** 虚拟按键（左侧竖排 ESC / 历史 / Ctrl）。 */
+    public boolean virtualKeys = false;
+    /** 虚拟鼠标（可拖动光标 + 触摸板模式；与 KRKR/Artemis 共用一套实现）。 */
+    public boolean virtualMouse = false;
     /** 是否已经跑过一次自动编码探测（true 后不再自动改，尊重用户手选）。 */
     public boolean nlsAuto = false;
 
@@ -104,6 +108,8 @@ public final class FvpLaunchPrefs {
             p.stretchFill = o.optBoolean("stretch_fill", false);
             p.textScale = normalizeScale(o.optString("text_scale", "1.0"));
             p.lineScale = normalizeLineScale(o.optString("line_scale", "0.0"));
+            p.virtualKeys = o.optBoolean("virtual_keys", false);
+            p.virtualMouse = o.optBoolean("virtual_mouse", false);
             p.nlsAuto = o.optBoolean("nls_auto", false);
         } catch (Throwable ignored) { }
         return p;
@@ -121,6 +127,8 @@ public final class FvpLaunchPrefs {
             o.put("stretch_fill", stretchFill);
             o.put("text_scale", String.valueOf(normalizeScale(String.valueOf(textScale))));
             o.put("line_scale", String.valueOf(normalizeLineScale(String.valueOf(lineScale))));
+            o.put("virtual_keys", virtualKeys);
+            o.put("virtual_mouse", virtualMouse);
             o.put("nls_auto", nlsAuto);
             context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     .edit().putString(KEY_PREFIX + gameId, o.toString()).apply();

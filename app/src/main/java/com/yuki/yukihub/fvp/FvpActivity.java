@@ -78,6 +78,11 @@ public final class FvpActivity extends Activity implements
     /** 行距跟随系数（1.0 = 与字号等比；0.5 = 放大增量减半；0.0 = 行距不变）。 */
     public static final String EXTRA_TEXT_LINE_SCALE = "fvpTextLineScale";
 
+    /** 虚拟按键（左侧竖排 ESC / 历史 / Ctrl）开关。 */
+    public static final String EXTRA_VIRTUAL_KEYS = "fvpVirtualKeys";
+    /** 虚拟鼠标（可拖动光标）开关。 */
+    public static final String EXTRA_VIRTUAL_MOUSE = "fvpVirtualMouse";
+
     /** 引擎侧取消/返回键（Windows VK）。 */
     private static final int VK_ESCAPE = 0x1B;
 
@@ -110,6 +115,11 @@ public final class FvpActivity extends Activity implements
     /** 铺满模式的渲染 buffer 尺寸（= 游戏虚拟分辨率）；0 = 未启用。 */
     private int bufW;
     private int bufH;
+
+    /** 虚拟按键（左侧竖排 ESC / 历史 / Ctrl）。null = 未启用。 */
+    private FvpVirtualKeys virtualKeys;
+    /** 虚拟鼠标是否启用（实际挂载由 GameCursorManager 负责）。 */
+    private boolean virtualMouse;
 
     /**
      * 待下发输入事件队列（每帧最多下发一个"边沿"）。
@@ -172,6 +182,8 @@ public final class FvpActivity extends Activity implements
                 String.valueOf(intent.getFloatExtra(EXTRA_TEXT_SCALE, 1.0f)));
         lineScale = FvpLaunchPrefs.normalizeLineScale(
                 String.valueOf(intent.getFloatExtra(EXTRA_TEXT_LINE_SCALE, 0.0f)));
+        virtualMouse = intent.getBooleanExtra(EXTRA_VIRTUAL_MOUSE, false);
+        boolean enableVirtualKeys = intent.getBooleanExtra(EXTRA_VIRTUAL_KEYS, false);
         if (stretchFill) {
             int[] virtual = parseFvpVirtualSize(gameRoot);
             if (virtual != null) {
@@ -200,6 +212,20 @@ public final class FvpActivity extends Activity implements
         surfaceView.setKeepScreenOn(true);
 
         applyImmersive();
+
+        // 虚拟控件（可选，由 FVP 引擎设置里的开关决定）。
+        // 位置：FVP 手机上是「保持宽高比居中」渲染，左右通常有黑边 ——
+        // 按键条贴左侧黑边、鼠标浮标默认右下角，都不遮挡游戏内容。
+        //
+        // 顺序要紧：虚拟鼠标的容器会 bringToFront()（盖住整个 DecorView），
+        // 所以必须先挂鼠标、再挂按键条，否则按键会被盖住点不到。
+        if (virtualMouse) {
+            installVirtualMouse();
+        }
+        if (enableVirtualKeys) {
+            installVirtualKeys();
+        }
+
         // 输入映射版本标记：便于在 logcat 中确认装的是哪一版 APK。
         //   v1 = 直通；v2 = UP 合成（有 bug）；v3 = down/up 按帧排队；
         //   v4 = v3 + down 前额外等一次完整 step()（让脚本先建立悬停状态）
@@ -209,6 +235,67 @@ public final class FvpActivity extends Activity implements
                 + " scale=" + screenScale
                 + " stretch=" + (bufW > 0 ? bufW + "x" + bufH : "off")
                 + " font=" + (fontPath.isEmpty() ? "-" : fontPath));
+    }
+
+    /**
+     * 安装虚拟按键条（左侧竖排：ESC / 历史 / Ctrl）。
+     *
+     * <p>注入走 {@link NativeRfvp#keyEvent}（C 桥 → rfvp_android_key）。
+     * 引擎侧是 Windows VK 语义：0x1B Escape / 0x11 Control / 0x26 ArrowUp。
+     * 句柄用惰性 provider 取，避免引擎尚未 create 时拿不到。
+     */
+    private void installVirtualKeys() {
+        try {
+            virtualKeys = new FvpVirtualKeys(this, () -> handle);
+            virtualKeys.attach();
+        } catch (Throwable t) {
+            Log.w(TAG, "installVirtualKeys failed", t);
+            virtualKeys = null;
+        }
+    }
+
+    /**
+     * 安装虚拟鼠标（复用 KRKR/Artemis 那套完整实现：光标包、触摸板、可拖动浮标）。
+     *
+     * <p>挂在 DecorView 上（{@code showInDecor}），**不需要悬浮窗权限** ——
+     * FvpActivity 是普通 Activity，SurfaceView 由系统合成，View 树正常参与绘制。
+     * 鼠标模式下的点击走 {@code rfvp_android_touch}，与手指触摸共用同一条引擎通道。
+     */
+    private void installVirtualMouse() {
+        try {
+            com.yuki.yukihub.gamecursor.GameCursorManager.attachFvp(this,
+                    new com.yuki.yukihub.gamecursor.GameCursorInjector.FvpHandleProvider() {
+                        @Override
+                        public long fvpHandle() {
+                            return handle;
+                        }
+
+                        @Override
+                        public float[] toContentCoords(float rawX, float rawY, float[] out) {
+                            // 光标用 DecorView 坐标；引擎要 SurfaceView 内坐标。
+                            // 平时两者一致（surfaceView 铺满），开画面放大后需减偏移。
+                            toSurfaceCoords(rawX, rawY, out);
+                            return out;
+                        }
+                    });
+        } catch (Throwable t) {
+            Log.w(TAG, "installVirtualMouse failed", t);
+        }
+    }
+
+    /**
+     * 把「DecorView 坐标」换算成「SurfaceView 坐标」。
+     *
+     * <p>虚拟光标用的是 {@code event.getRawX/getRawY}（屏幕/DecorView 坐标），
+     * 而 {@code rfvp_android_touch} 收的是 SurfaceView 内坐标。
+     * 平时 surfaceView 铺满（MATCH_PARENT）两者一致；但开启「画面放大」时
+     * surfaceView 会比屏幕大并居中（四周裁边），此时必须减去它在窗口内的偏移。
+     */
+    private void toSurfaceCoords(float rawX, float rawY, float[] out) {
+        int[] loc = new int[2];
+        surfaceView.getLocationInWindow(loc);
+        out[0] = rawX - loc[0];
+        out[1] = rawY - loc[1];
     }
 
     private View buildContentView() {
@@ -279,12 +366,19 @@ public final class FvpActivity extends Activity implements
 
     @Override
     protected void onPause() {
+        // 虚拟按键：离开时释放所有按下状态，否则 Ctrl 会一直"按住"导致快进停不下来。
+        if (virtualKeys != null) virtualKeys.releaseAll();
         stopFrameLoop();
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        if (virtualKeys != null) {
+            virtualKeys.detach();
+            virtualKeys = null;
+        }
+        com.yuki.yukihub.gamecursor.GameCursorManager.detachFvp(this);
         stopFrameLoop();
         destroyEngine();
         super.onDestroy();

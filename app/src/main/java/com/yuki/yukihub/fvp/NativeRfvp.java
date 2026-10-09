@@ -81,7 +81,10 @@ public final class NativeRfvp {
 
     /**
      * 注入按键事件（Windows VK 语义）。keyCode 0x1B = Escape、0x0D = Enter、0x20 = Space、
-     * 0x25..0x28 = 方向键；phase 0 = down、1 = up。
+     * 0x25..0x28 = 方向键（左/上/右/下）、0x11 = Control；phase 0 = down、1 = up。
+     *
+     * <p>用于 FVP 的虚拟按键：ESC（开菜单）、Ctrl（快进）、ArrowUp（历史记录，等价 PC 的鼠标上滚轮）。
+     * 引擎侧映射见 rfvp {@code app.rs::host_key_android}；未知 VK 码会被静默忽略。
      */
     public static native void keyEvent(long handle, int keyCode, int phase);
 
