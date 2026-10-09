@@ -154,6 +154,7 @@ import com.yuki.yukihub.scanner.FastGameScanner;
 import com.yuki.yukihub.scanner.GameScanner;
 import com.yuki.yukihub.scanner.ScanResult;
 import com.yuki.yukihub.ui.GameAdapter;
+import com.yuki.yukihub.ui.TapSafeSpinner;
 import com.yuki.yukihub.ui.CardGlowView;
 import com.yuki.yukihub.ui.DynamicSnowBackgroundView;
 import com.yuki.yukihub.ui.DynamicTheme;
@@ -6341,7 +6342,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         scanModeInfo.setPadding(0, dp(4), 0, dp(6));
         root.addView(scanModeInfo);
 
-        Spinner scanModeSpinner = new Spinner(this);
+        Spinner scanModeSpinner = new TapSafeSpinner(this);
         ArrayAdapter<String> scanModeAdapter = krSpinnerAdapter(new String[]{"快速模式", "兼容模式"});
         scanModeSpinner.setAdapter(scanModeAdapter);
         String savedScanMode = prefs == null ? SCAN_MODE_FAST : prefs.getString(KEY_SCAN_MODE, SCAN_MODE_FAST);
@@ -6467,7 +6468,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         sortInfo.setPadding(0, dp(4), 0, dp(6));
         root.addView(sortInfo);
 
-        Spinner sortSpinner = new Spinner(this);
+        Spinner sortSpinner = new TapSafeSpinner(this);
         ArrayAdapter<String> sortAdapter = krSpinnerAdapter(new String[]{"最近游玩", "最近添加", "名称排序"});
         sortSpinner.setAdapter(sortAdapter);
         String savedSortMode = prefs == null ? SORT_MODE_RECENT : prefs.getString(KEY_SORT_MODE, SORT_MODE_RECENT);
@@ -6532,7 +6533,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         engineLabelTitle.setPadding(0, dp(4), 0, dp(6));
         root.addView(engineLabelTitle);
 
-        Spinner engineLabelSpinner = new Spinner(this);
+        Spinner engineLabelSpinner = new TapSafeSpinner(this);
         ArrayAdapter<String> engineLabelAdapter = krSpinnerAdapter(new String[]{"游戏标题下方", "封面左下角"});
         engineLabelSpinner.setAdapter(engineLabelAdapter);
         String engineLabelPos = prefs == null ? "title" : prefs.getString(KEY_ENGINE_LABEL_POSITION, "title");
@@ -6721,7 +6722,7 @@ LinearLayout accountActions = new LinearLayout(this);
         sourceTitle.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(sourceTitle);
 
-        Spinner sourceSpinner = new Spinner(this);
+        Spinner sourceSpinner = new TapSafeSpinner(this);
         ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "NextMoe（推荐 · 未萌授权）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
@@ -11000,7 +11001,7 @@ return b;
     }
 
     private Spinner krSpinner(String[] values, String selected) {
-        Spinner sp = new Spinner(this);
+        Spinner sp = new TapSafeSpinner(this);
         ArrayAdapter<String> adapter = krSpinnerAdapter(values);
         sp.setAdapter(adapter);
         DynamicTheme dt = DynamicTheme.getInstance();

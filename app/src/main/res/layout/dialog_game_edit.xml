@@ -14,7 +14,7 @@
         <TextView android:id="@+id/editDialogTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="添加游戏" android:textColor="@color/yh_text" android:textSize="22sp" android:textStyle="bold" />
 <androidx.appcompat.widget.AppCompatEditText android:id="@+id/etGameTitle" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="12dp" android:hint="游戏标题" android:singleLine="true" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="游戏引擎类型" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
-        <androidx.appcompat.widget.AppCompatSpinner android:id="@+id/spEngine" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+        <com.yuki.yukihub.ui.TapSafeSpinner android:id="@+id/spEngine" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
 
         <LinearLayout android:id="@+id/layoutArtemisVersion" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Artemis 兼容版本" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
@@ -26,7 +26,7 @@
 </LinearLayout>
         </LinearLayout>
         <TextView android:id="@+id/tvLaunchTargetLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="启动文件 / 启动入口（从游戏目录真实扫描）" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
-        <androidx.appcompat.widget.AppCompatSpinner android:id="@+id/spLaunchTarget" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+        <com.yuki.yukihub.ui.TapSafeSpinner android:id="@+id/spLaunchTarget" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="10dp" android:orientation="horizontal">
 <androidx.appcompat.widget.AppCompatEditText android:id="@+id/etEmulatorPackage" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:hint="模拟器应用，可选" android:singleLine="true" android:focusable="false" android:clickable="true" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
 <TextView android:id="@+id/btnResetEmulatorPackage" android:layout_width="88dp" android:layout_height="match_parent" android:layout_marginStart="8dp" android:gravity="center" android:background="@drawable/bg_action_tool" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="默认" android:textColor="@color/yh_action_tool_text" android:textSize="12sp" android:textStyle="bold" android:tag="yh.action.tool" />
@@ -34,12 +34,12 @@
 </LinearLayout>
 <LinearLayout android:id="@+id/layoutWinlatorLaunchMode" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone">
 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Winlator 启动方式" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
-<androidx.appcompat.widget.AppCompatSpinner android:id="@+id/spWinlatorLaunchMode" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+<com.yuki.yukihub.ui.TapSafeSpinner android:id="@+id/spWinlatorLaunchMode" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="启动到游戏：默认直启；启动到程序：仅进入 Winlator 界面。" android:textColor="@color/yh_text_muted" android:textSize="10sp" />
 </LinearLayout>
 <LinearLayout android:id="@+id/layoutGameHubLaunch" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone">
 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="GameHub直启" android:textColor="@color/yh_text" android:textSize="13sp" android:textStyle="bold" android:background="@drawable/bg_label" />
-<androidx.appcompat.widget.AppCompatSpinner android:id="@+id/spGameHubLaunchMode" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
+<com.yuki.yukihub.ui.TapSafeSpinner android:id="@+id/spGameHubLaunchMode" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:background="@drawable/bg_input" />
 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="启动到游戏：需要补丁版GameHub并填写localGameId；启动到程序：仅打开GameHub。" android:textColor="@color/yh_text_muted" android:textSize="10sp" />
 <LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="4dp" android:orientation="horizontal">
 <androidx.appcompat.widget.AppCompatEditText android:id="@+id/etGameHubLocalGameId" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:hint="local_xxxxx 或 steam:123456" android:singleLine="true" android:textColor="@color/yh_text" android:textColorHint="@color/yh_text_muted" android:background="@drawable/bg_input" />
