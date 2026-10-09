@@ -51,12 +51,40 @@ TM_EDITS = [
         """        out
     }
 
-    /// YukiHub: 是否有「已加载且未暂停」的文字槽仍在逐字显示（用于点击补全文字）。
-    /// 判据直接复用引擎自己的 `reveal_is_complete()`，避免边缘情况不一致。
-    pub fn any_revealing(&self) -> bool {
-        self.items
-            .iter()
-            .any(|t| t.loaded && !t.is_suspended && !t.reveal_is_complete())
+    /// YukiHub: 列出「正在阻塞脚本、且逐字显示尚未完成」的文字槽。
+    ///
+    /// 只有这种槽才需要"点击补全文字并吞掉点击"：
+    ///   - `sync_wait_active`：脚本正被 `thread_text_wait` 卡住（text_print 的等待）
+    ///   - `visible_chars < total_chars`：这一句确实还没显示完
+    ///
+    /// 为什么不能简单用 `!reveal_is_complete()`：`set_speed(0)`（立即显示）会把
+    /// `next_wait_index` 归零，若该槽有 wait_points，`reveal_is_complete()` 会
+    /// **永久为 false**。设置页那类"静态显示"的文字槽正好命中这一点，导致判据
+    /// 恒真 -> 每次点击都被吞掉 -> 设置页按钮全部失效（实测 45 次误吞）。
+    pub fn sync_print_wait_revealing_ids(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+        for (i, t) in self.items.iter().enumerate() {
+            if t.sync_wait_active
+                && !t.is_suspended
+                && t.total_chars > 0
+                && t.visible_chars < t.total_chars
+            {
+                out.push(i);
+            }
+        }
+        out
+    }
+
+    /// YukiHub: 诊断用 —— 所有「已加载且未暂停、但按引擎判据未完成」的槽位。
+    /// 只用于日志，不参与决策（用于确认静态槽被误判的情况）。
+    pub fn incomplete_slot_ids(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+        for (i, t) in self.items.iter().enumerate() {
+            if t.loaded && !t.is_suspended && !t.reveal_is_complete() {
+                out.push(i);
+            }
+        }
+        out
     }
 
     /// YukiHub: 立即补全所有未暂停文字槽的逐字显示；返回是否真的补全了某个槽。
@@ -143,15 +171,27 @@ APP_EDITS = [
         // 第二次点击时已无正在显示的槽 -> 走原逻辑 -> 正常推进对话。
         if phase == 0 {
             let mut gd = gd_write(&self.game_data);
-            if gd.motion_manager.text_manager.any_revealing() {
+            // 只有“脚本真被阻塞在等文字显示”的槽才算需要补全；
+            // 用 !reveal_is_complete() 会把静态槽（set_speed(0) 后 next_wait_index 归零）
+            // 误判为未完成，导致所有点击被吞（设置页按钮全哑）。
+            let ids = gd
+                .motion_manager
+                .text_manager
+                .sync_print_wait_revealing_ids();
+            if !ids.is_empty() {
                 let changed = gd
                     .motion_manager
                     .text_manager
                     .force_reveal_all_non_suspended_checked();
                 if changed {
-                    log::info!("YHPROBE ClickCompletesText (touch swallowed)");
+                    log::info!("YHPROBE ClickCompletesText slots={:?}", ids);
                     return;
                 }
+            }
+            // 诊断：有没有“按引擎判据未完成、但并不阻塞脚本”的槽（静态槽误判证据）
+            let inc = gd.motion_manager.text_manager.incomplete_slot_ids();
+            if !inc.is_empty() {
+                log::info!("YHPROBE incomplete-but-no-wait slots={:?}", inc);
             }
         }
 """,
