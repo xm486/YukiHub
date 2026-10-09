@@ -21,14 +21,15 @@
 
 ```
 apply_text_scale_patch.py      # 1. 全局字号系数
-apply_android_log_patch.py     # 2. android logger + 压制 wgpu 噪音
-apply_movie_patch.py           # 3. 电影播放（音频/层效果）
-apply_audio_fix_patch.py       # 4. MP4 声道回填 + SampleBuffer 按需分配
-apply_wmv_decoder_patch.py     # 5. WMA 解码器负数下标防护
-apply_probe_patch.py           # 6. YHPROBE 输入探针（诊断期）
-apply_text_click_patch.py      # 7. 点击补全文字 + vm_runner resume 保护
+apply_text_patch.py            # 2. 外部文本替换表（patch.dat 查表）· YHFVP-TEXTPATCH-1.0
+apply_android_log_patch.py     # 3. android logger + 压制 wgpu 噪音
+apply_movie_patch.py           # 4. 电影播放（音频/层效果）
+apply_audio_fix_patch.py       # 5. MP4 声道回填 + SampleBuffer 按需分配
+apply_wmv_decoder_patch.py     # 6. WMA 解码器负数下标防护
+apply_probe_patch.py           # 7. YHPROBE 输入探针（诊断期）
+apply_text_click_patch.py      # 8. 点击补全文字 + vm_runner resume 保护
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 8. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 9. video-sys 解码器 ByteBuffer 模式
 ```
 
 > ⚠️ 顺序有依赖：`apply_movie_patch` 与 `apply_audio_fix_patch` 会争抢
@@ -41,6 +42,7 @@ video-sys-cpu-read.patch       # 8. video-sys 解码器 ByteBuffer 模式
 | 补丁 | 目标文件 | 解决的问题 |
 |---|---|---|
 | `apply_text_scale_patch.py` | `text_manager.rs` / `app.rs` / `android_host.rs` | 全局字号系数（1.0~2.0x），新增 C ABI `rfvp_android_set_text_scale` |
+| `apply_text_patch.py` | `text_patch.rs`(新) / `lib.rs` / `script/parser.rs` | **外部文本替换表**：按脚本字节偏移查表替换（Windows 注入式汉化的安卓化），标识 `YHFVP-TEXTPATCH-1.0` |
 | `apply_android_log_patch.py` | `main.rs` 等 | 接入 android_logger；压制 wgpu 日志（避免 logcat 配额把诊断日志挤掉） |
 | `apply_movie_patch.py` | `videoplayer.rs` | MP4 层效果电影保留音频；**WMV/MPEG 恢复原版 `(None, None)`**（不做同步音频解码） |
 | `apply_audio_fix_patch.py` | `videoplayer.rs` | ① 自研 MP4 box 解析器回填 `channels`；② `SampleBuffer` 按实际帧数惰性分配 |
@@ -274,6 +276,55 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
 3  TextResume ignored (tid=15 bits=0 not TEXT)    ← 崩溃保护在干活 ✓
 0  panic / unknown opcode / SIGABRT / FATAL       ← 无崩溃 ✓
 ```
+
+---
+
+### 3.7 樱花萌放中文文本（外部替换表）—— 借鉴"摸鱼补丁"的思路
+
+**背景**：《樱花，萌放。》的 PC 汉化是 **Windows 注入式**
+（`SakuraChs.exe` + `filter.dll` + `patch.dat`）：`Sakura.hcb` 本身仍是日文，
+靠 DLL 在运行时按偏移替换文本。rfvp 不加载 DLL，所以直接玩是日文。
+
+**早期方案（已废弃）**：把替换表离线写回 `Sakura.hcb`（等长重写）。
+缺点：① 必须等长 → 3758 句要裁标点、643 句放弃；② 改动了游戏文件。
+
+**现方案（`apply_text_patch.py`）**：**引擎侧查表**。
+
+- 在 `Parser::read_cstring(offset, len)` 开头查表：命中即返回替换文本；
+- `Sakura.hcb` **一个字节都不改** → 所有 `jmp`/`jz` 的 u32 绝对地址天然不变 → **零风险**；
+- 替换发生在内存里 → **长度不受限**（无需裁剪/放弃）；
+- 表来源：游戏根目录 `patch.dat`（16 字节头 + zlib，记录 `[00][u32 offA][u8 len][前导NUL+GBK]`）；
+- **自动挑表**：扫描目录所有 `.dat`，按与脚本实际字符串偏移的命中数评分取最高；
+  覆盖不足 20% 弃用（防外部补丁劫持）。
+
+**实测（v0.1.8 + HS 全部汉化版）**：57043 条替换 / 61529 个脚本字符串（**91%**），
+序章 **100% 中文**；未命中的 4231 条里真日文句子仅 **37 条**（且为同一句
+`？蝶ネクタイをしたすまし顔の猫` 的重复，属脚本残留）。
+
+**编码设置**：因未命中的非文本串以 SJIS 呈现，**文本编码应设 SJIS**
+（设 GBK 会让那 37 条真日文变乱码；正文因查表命中不受编码影响）。
+
+**与「摸鱼安卓补丁」的区别**（同为查表思路，但互不通用）：
+
+| | 摸鱼 | 我们 |
+|---|---|---|
+| patch.dat 结构 | `[u32 条数][u32 off,u16 len,文本]` | `[00][u32 offA][u8 len][文本]` |
+| 条目 | 57172 / 1.42MB | 57053 / 1.34MB |
+| 适配版本 | v0.2.0_0222_fix1 | **v0.1.8 + HS** |
+| 对本版本命中率 | 4.6%（会被自动弃用） | 91% |
+
+**日志异常项（本次实测，均非本补丁引入）**：
+
+| 现象 | 结论 |
+|---|---|
+| `app_name: "偝偔傜丄傕備丅 -as the Night's..."`（标题乱码） | **编码设为 GBK 所致**——标题取自 `Sakura.hcb` 头部，该处未做替换；改回 **SJIS** 即正常显示 `さくら、もゆ。` |
+| `Invalid duration` ×535 / `Invalid id` ×318 / `Invalid alpha motion id` ×122 | 上游原有噪音（引擎对非法参数宽容处理），**非本补丁引入** |
+| `prim_set_uv: invalid v : Nil` ×419 / `graph_load: invalid id : Nil` ×123 | 同上，脚本传 Nil 时引擎的既有告警 |
+| `YHPROBE TextResume ignored (tid=15 bits=0 not TEXT)` ×3 | **`apply_text_click_patch` 的崩溃保护在正常工作**（详见 3.6） |
+| `Font scan skipped: no font dir under ...` | 正常：游戏目录无字体目录，改用系统 CJK 回退 + 内置 snow.ttf |
+
+**产物辨识**：`librfvp.so` 内含 `YHFVP-TEXTPATCH-1.0` 字符串，
+`grep -a YHFVP-TEXTPATCH librfvp.so` 可确认补丁是否编入（CI 也用它做校验）。
 
 ---
 

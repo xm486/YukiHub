@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-rfvp 外部文本替换补丁（YukiHub 定制）。
+rfvp 外部文本替换补丁（YukiHub 定制）· YHFVP-TEXTPATCH-1.0
+================================================================================
 
 给引擎加一个「按脚本字节偏移查表替换文本」的能力，用于 Windows 注入式汉化
 （SakuraChs.exe + filter.dll + patch.dat 这类）：
@@ -10,12 +11,37 @@ rfvp 外部文本替换补丁（YukiHub 定制）。
   - 因此 hcb 里所有 jmp/jz 的 u32 绝对地址天然不变，零风险
   - 替换文本长度不受限制（不像等长重写需要裁剪/放弃）
 
+--------------------------------------------------------------------------------
+适配版本（已验证）
+--------------------------------------------------------------------------------
+
+  游戏      《樱花，萌放。》(さくら、もゆ。 -as the Night's, Reincarnation-)
+  游戏版本  v0.1.8 + HS 全部汉化版
+  汉化补丁  [F廚の米線個人製作] HS 文本中文化補丁（patch.dat 数据表）
+  引擎      rfvp (xmmezzz/rfvp) + YukiHub 定制
+
+  已实测指纹（对不上不代表不能用，只是未经我们验证；引擎会自行按覆盖率判定）：
+
+    patch.dat    1,337,320 bytes  SHA256 c642c8e06e29c991aaed22378a3e3e0981ca61ce83dbfea087c267cf3c5cd391
+    Sakura.hcb   5,002,852 bytes  SHA256 946877dd0ed8fbf318ba5c73d20afd46b9dcdc200aa7e8edc610c437cc1c789b
+
+  实测覆盖：57043 条替换 / 61529 个脚本字符串（91%），序章 100% 中文。
+
+  ⚠️ 与「摸鱼安卓补丁」不通用：那是另一套引擎（自带 patch.dat 解析）+
+     针对 v0.2.0_0222_fix1 的数据表，对本游戏版本命中率仅 4.6%，引擎会自动弃用。
+
+--------------------------------------------------------------------------------
+机制
+--------------------------------------------------------------------------------
+
 查表数据来自游戏根目录（FVP_BASE_PATH）下的 patch.dat：
     16 字节头 + zlib 流；解压后为记录流 [u8 0][u32 offA][u8 len][前导NUL + GBK文本]
-没有 patch.dat 的游戏不受任何影响（表为空 -> 行为与上游完全一致）。
+引擎扫描目录内所有 .dat，按「与脚本实际字符串偏移的命中数」评分，取最高者；
+覆盖不足 20% 直接弃用（防止外部补丁劫持文本）。没有可用表时行为与上游完全一致。
 
 用法（在 rfvp 仓库根目录）：
-    python3 apply_text_patch.py
+    python3 apply_text_patch.py            # 应用补丁
+    python3 apply_text_patch.py --info     # 只打印版本/指纹信息
 
 全部使用锚文本匹配并严格校验命中次数，任何锚点匹配失败都会以非零码退出。
 可重复执行（幂等）。
@@ -26,6 +52,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
+# ── 版本标识（与 Rust 内嵌的 PATCH_ID 必须一致） ──────────────────────────────
+PATCH_ID = "YHFVP-TEXTPATCH-1.0"
+PATCH_TARGET = "樱花，萌放。 v0.1.8 + HS 全部汉化版"
+
+KNOWN_FINGERPRINTS = {
+    "patch.dat": (
+        1337320,
+        "c642c8e06e29c991aaed22378a3e3e0981ca61ce83dbfea087c267cf3c5cd391",
+    ),
+    "Sakura.hcb": (
+        5002852,
+        "946877dd0ed8fbf318ba5c73d20afd46b9dcdc200aa7e8edc610c437cc1c789b",
+    ),
+}
+
 NEW_FILE_REL = "crates/rfvp/src/text_patch.rs"
 NEW_FILE_BODY = r'''//! YukiHub patch: external text replacement for Windows-injection Chinese
 //! patches (e.g. `SakuraChs.exe` + `filter.dll` + `patch.dat`).
@@ -35,12 +76,23 @@ NEW_FILE_BODY = r'''//! YukiHub patch: external text replacement for Windows-inj
 //! absolute address still points at the same instruction and the file size
 //! never changes. Unlike in-place rewriting there is no length limit at all,
 //! and nothing has to be clipped or skipped.
+//!
+//! Verified target: 《樱花，萌放。》(さくら、もゆ。) v0.1.8 + HS 全部汉化版
+//! (patch.dat 1,337,320 B / Sakura.hcb 5,002,852 B).
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+/// Patch identity. Embedded in the compiled object on purpose so a built
+/// `librfvp.so` can be identified without running it:
+/// `grep -a YHFVP-TEXTPATCH librfvp.so`
+pub const PATCH_ID: &str = "YHFVP-TEXTPATCH-1.0";
+
+/// Game version this patch was verified against (log-only).
+pub const PATCH_TARGET: &str = "樱花，萌放。 v0.1.8 + HS 全部汉化版";
 
 static TABLE: OnceLock<Mutex<Option<HashMap<u32, String>>>> = OnceLock::new();
 static LOAD_TRIED: AtomicBool = AtomicBool::new(false);
@@ -77,6 +129,7 @@ pub fn ensure_loaded() {
     if LOAD_TRIED.swap(true, Ordering::Relaxed) {
         return;
     }
+    log::info!("{} ({}) active", PATCH_ID, PATCH_TARGET);
     let base = match std::env::var("FVP_BASE_PATH") {
         Ok(v) if !v.is_empty() => v,
         _ => return,
@@ -300,7 +353,41 @@ pub mod soft_host;""",
 ]
 
 
+def print_info() -> int:
+    """打印版本与本机游戏文件指纹（不修改任何文件）。"""
+    import hashlib
+    import os
+
+    print(f"补丁标识  : {PATCH_ID}")
+    print(f"适配目标  : {PATCH_TARGET}")
+    print()
+    print("已实测指纹（引擎会自行按覆盖率判定，对不上只是未经我们验证）：")
+    for name, (size, sha) in KNOWN_FINGERPRINTS.items():
+        print(f"  {name:<12} {size:>10,} bytes  {sha}")
+
+    # 可选：--info <游戏目录> 时顺带核对本机文件
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if args:
+        game = Path(args[0])
+        print()
+        print(f"核对游戏目录: {game}")
+        for name, (size, sha) in KNOWN_FINGERPRINTS.items():
+            p = game / name
+            if not p.exists():
+                print(f"  {name:<12} ⚠️ 文件不存在")
+                continue
+            data = p.read_bytes()
+            got = hashlib.sha256(data).hexdigest()
+            same = (len(data) == size and got == sha)
+            mark = "✓ 与已验证版本一致" if same else "✗ 与已验证版本不同（引擎仍会按覆盖率判定）"
+            print(f"  {name:<12} {len(data):>10,} bytes  {got[:16]}…  {mark}")
+    return 0
+
+
 def main() -> int:
+    if "--info" in sys.argv[1:]:
+        return print_info()
+
     failed = False
 
     # 1) 新文件
@@ -347,7 +434,7 @@ def main() -> int:
     if failed:
         print("补丁应用失败，未修改的文件保持原样。请确认仓库版本与补丁匹配。")
         return 1
-    print("全部锚点应用成功 ✓（可重复执行，幂等）")
+    print(f"{PATCH_ID} 全部锚点应用成功 ✓（目标：{PATCH_TARGET}；可重复执行，幂等）")
     return 0
 
 
