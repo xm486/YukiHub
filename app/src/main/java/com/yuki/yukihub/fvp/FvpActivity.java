@@ -114,29 +114,37 @@ public final class FvpActivity extends Activity implements
     /**
      * 待下发输入事件队列（每帧最多下发一个"边沿"）。
      *
-     * <p>脚本侧实测（YHPROBE）：
+     * <p>脚本侧实测（YHPROBE，logcat 3335 行）：
      * <ul>
-     *   <li>脚本**不用** {@code InputGetEvent}（探测 0 次），只靠
-     *       {@code InputGetDown} / {@code InputGetUp} / {@code PrimHit}；</li>
-     *   <li>脚本每帧先跑"推进对话"块（{@code InputGetDown}），**后**跑
-     *       "按钮判定"块（{@code PrimHit}）；</li>
-     *   <li>同一次物理点击若让 down 与 up 落在同一帧，脚本会在同一帧里
-     *       同时看到两者 —— 表现就是**"点了按钮，对话也过一句"**（穿透），
-     *       以及**点击直接跳下一句、没有"先补全文字"**（割裂感）。</li>
+     *   <li>脚本**不用** {@code InputGetEvent}（探测 0 次）、**不用**
+     *       {@code InputGetUp}（探测 0 次），只靠 {@code InputGetDown} 与
+     *       {@code PrimHit}；</li>
+     *   <li>脚本每帧的执行顺序固定为：**先**"推进对话"块（{@code InputGetDown}），
+     *       **后**"按钮判定"块（{@code PrimHit}）；</li>
+     *   <li>因此"点在按钮上就不推进对话"只能靠**上一帧**留下的悬停状态 ——
+     *       而 Android 手指落下是"瞬移"到按钮上的，move 与 down 同帧时脚本
+     *       在 down 那一刻还不知道光标在按钮上 → 按钮与对话同时响应（穿透）。</li>
      * </ul>
      *
-     * <p>因此这里把 down/up 全部排队，由 {@link #doFrame} 在 step() 之前
-     * **每帧最多下发一个边沿**，从而保证：
-     * <ol>
-     *   <li>down 永远比 up 早至少一帧（脚本能先"补全文字"再"下一句"）；</li>
-     *   <li>down 之前一定先发过 move（光标先到位，缓解按钮穿透）。</li>
-     * </ol>
+     * <p>所以 down 不能只"延后一帧下发"就完事 —— 必须保证 move 与 down 之间
+     * **确实跑过一次完整的 {@code step()}**（否则两条命令仍在同一帧被脚本读到，
+     * 实测 frame=1054 就是这种情况）。用 {@link #downSettleFrames} 计数实现：
+     * <pre>
+     *   t0: ACTION_DOWN  -> 发 move（光标到位），登记 down，settle=1
+     *   t1: doFrame      -> settle 1->0，**不发 down**，step()  <- 脚本本帧读到「光标在按钮上」
+     *   t2: doFrame      -> 发 down，step()                     <- 脚本读到 down 且已知光标在按钮上 -> 跳过对话推进
+     * </pre>
+     *
+     * <p>up 同样排队，保证 down 与 up 永不落在同一帧（否则"补全文字"与
+     * "下一句"会在同一帧一起触发，即点击的割裂感）。
      * {@code NaN} 表示队列为空。
      */
     private double pendingDownX = Double.NaN;
     private double pendingDownY = Double.NaN;
     private double pendingUpX = Double.NaN;
     private double pendingUpY = Double.NaN;
+    /** down 下发前还需等待的 doFrame 次数（用于让 move 先单独跑一帧）。 */
+    private int downSettleFrames = 0;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -192,6 +200,10 @@ public final class FvpActivity extends Activity implements
         surfaceView.setKeepScreenOn(true);
 
         applyImmersive();
+        // 输入映射版本标记：便于在 logcat 中确认装的是哪一版 APK。
+        //   v1 = 直通；v2 = UP 合成（有 bug）；v3 = down/up 按帧排队；
+        //   v4 = v3 + down 前额外等一次完整 step()（让脚本先建立悬停状态）
+        Log.i(TAG, "YHINPUT-MAP v4 (down-settle + per-frame edge queue)");
         Log.i(TAG, "onCreate root=" + gameRoot + " nls=" + FvpLaunchPrefs.normalizeNls(nls)
                 + " hidpi=" + textHidpi + " systemFont=" + systemFont
                 + " scale=" + screenScale
@@ -459,19 +471,22 @@ public final class FvpActivity extends Activity implements
         if (dtMs < 0) dtMs = 0;
         if (dtMs > MAX_FRAME_DT_MS) dtMs = MAX_FRAME_DT_MS;
 
-        // 输入事件队列：每帧最多下发一个「边沿」，且 down 优先于 up。
+        // 输入事件队列：每帧最多下发一个「边沿」，down 优先于 up。
         //
-        // 为什么必须"每帧最多一个"：脚本每帧依次执行「推进对话」(InputGetDown) 与
-        // 「按钮判定」(PrimHit)。若 down 与 up 落在同一帧（快速点击时极易发生），
-        // 脚本会在同一帧同时看到"按下"和"抬起" —— 表现就是点了按钮对话也过一句、
-        // 且点击直接跳下一句（没有"先补全文字"的层次感）。
-        // 拆成两帧后：第 N 帧只有 down（脚本补全文字），第 N+1 帧才 up（再点一次才下一句）。
+        // 另外 down 需要"沉淀"：ACTION_DOWN 已经发过 move（光标到位），这里必须
+        // 先让脚本用新光标完整跑一帧（step()），再发 down —— 否则 move 与 down
+        // 仍落在同一帧，脚本在 down 那一刻还不知道光标在按钮上（实测 frame=1054
+        // 就是这样：光标瞬移到 (999,867) 的同一帧 down 就来了）。
         if (!Double.isNaN(pendingDownX)) {
-            double dx = pendingDownX;
-            double dy = pendingDownY;
-            pendingDownX = Double.NaN;
-            pendingDownY = Double.NaN;
-            NativeRfvp.touch(handle, 0, dx, dy);
+            if (downSettleFrames > 0) {
+                downSettleFrames--;
+            } else {
+                double dx = pendingDownX;
+                double dy = pendingDownY;
+                pendingDownX = Double.NaN;
+                pendingDownY = Double.NaN;
+                NativeRfvp.touch(handle, 0, dx, dy);
+            }
         } else if (!Double.isNaN(pendingUpX)) {
             double ux = pendingUpX;
             double uy = pendingUpY;
@@ -533,10 +548,12 @@ public final class FvpActivity extends Activity implements
         }
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                // 立即发 move（光标先到位），down 排队等下一帧。
+                // 立即发 move（光标先到位），down 排队；并设置"至少等 1 次完整
+                // step() 再发 down"，让脚本先在新光标位置跑一帧（建立悬停状态）。
                 NativeRfvp.touch(handle, 1, x, y);
                 pendingDownX = x;
                 pendingDownY = y;
+                downSettleFrames = 1;
                 return true;
             case MotionEvent.ACTION_MOVE:
                 NativeRfvp.touch(handle, 1, x, y);
@@ -553,6 +570,7 @@ public final class FvpActivity extends Activity implements
                 pendingDownY = Double.NaN;
                 pendingUpX = Double.NaN;
                 pendingUpY = Double.NaN;
+                downSettleFrames = 0;
                 NativeRfvp.touch(handle, 3, x, y);
                 return true;
             default:
