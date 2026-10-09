@@ -140,32 +140,6 @@
                     android:textColor="#B7C1DC" />
             </ScrollView>
 
-            <!-- INTRODUCTION：游戏截图带（无数据时整块隐藏） -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginTop="12dp">
-
-                <TextView
-                    android:id="@+id/bsDtShotsTitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="INTRODUCTION"
-                    android:letterSpacing="0.16"
-                    android:textSize="11sp"
-                    android:textColor="#6E7BA0"
-                    android:visibility="gone" />
-
-                <LinearLayout
-                    android:id="@+id/bsDtShots"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="horizontal"
-                    android:visibility="gone" />
-            </LinearLayout>
-
             <!-- 玻璃按钮组 -->
             <LinearLayout
                 android:id="@+id/bsDtActs"

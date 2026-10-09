@@ -1,14 +1,9 @@
 package com.yuki.yukihub.bigscreen;
 
 import android.app.Activity;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.net.Uri;
-import android.os.Handler;
-import android.os.Looper;
 import android.text.TextUtils;
-import android.util.LruCache;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -25,25 +20,25 @@ import androidx.core.content.ContextCompat;
 import com.yuki.yukihub.R;
 import com.yuki.yukihub.model.Game;
 
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * 游戏详情层（spec §S3）。
  *
  * <p>对齐实机截图：大标题 / 原文名 + 开发商行 / 分类 chips / 三栏统计 /
- * 可滚动描述 / <b>INTRODUCTION 截图画带</b> / 玻璃按钮组。
+ * 可滚动描述 / 玻璃按钮组。
  *
  * <p>数据：{@link Game}（本地库）+ {@link BigScreenMeta}（NextMoe/VNDB/Bangumi/Ymgal 合并）。
- * 截图画带按需从网络加载，**加载失败会整块隐藏**（不显示破图）。
+ *
+ * <p>M22：**移除了「INTRODUCTION 截图画带」**。原实现会从元数据源拉网络缩略图，
+ * 但它在实际使用中几乎永远是死的 —— NSFW 游戏（模糊开启，默认）+ 3/4 的游戏都命中，
+ * 直接整块不渲染；其余还得恰好命中元数据缓存且该源返回了 screenshots。
+ * 用户确认「不需要这个，也从没见过」，故连同数据合并分支一并清理（见 bigscreen 相关说明）。
+ * 注意：元数据里的 {@code screenshotUrls} **本身没有删** —— 游戏库侧栏还在用它。
  */
 public class BigScreenDetailsLayer {
 
@@ -61,9 +56,6 @@ public class BigScreenDetailsLayer {
         /** M15：请求全屏观看 PV（任意按键返回） */
         void onRequestWatchTrailer(Game game);
     }
-
-    /** 截图缩略图缓存（跨打开复用） */
-    private static final LruCache<String, Bitmap> SHOT_CACHE = new LruCache<>(24);
 
     private final Activity activity;
     private final FrameLayout root;
@@ -86,12 +78,6 @@ public class BigScreenDetailsLayer {
     /** 由 Activity 注入（设置变化时同步） */
     public void setNsfwBlurEnabled(boolean enabled) { this.nsfwBlur = enabled; }
 
-    /** 当前详情页是否需要遮挡（NSFW 且开了模糊） */
-    private boolean needBlur() {
-        Game g = current();
-        return g != null && g.nsfw && nsfwBlur;
-    }
-
     private final ImageView bg;
     private final TextView titleView;
     private final TextView subView;
@@ -103,8 +89,6 @@ public class BigScreenDetailsLayer {
     /** 简介小节标题与滚动区（简介为空时整块隐藏，M10） */
     private final View introLabel;
     private final View descScroll;
-    private final TextView shotsTitleView;
-    private final LinearLayout shotsView;
     private final LinearLayout actsView;
     private final ImageView coverView;
     private final TextView coverPlaceholder;
@@ -112,12 +96,6 @@ public class BigScreenDetailsLayer {
 
     private final List<Game> list = new ArrayList<>();
     private int index = -1;
-
-    private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
-    private final Handler ui = new Handler(Looper.getMainLooper());
-
-    private int shotsPending = 0;
-    private int shotsLoaded = 0;
 
     public BigScreenDetailsLayer(Activity activity, BigScreenMeta metaLoader, Listener listener) {
         this.activity = activity;
@@ -136,8 +114,6 @@ public class BigScreenDetailsLayer {
         introLabel = root.findViewById(R.id.bsDtIntroLabel);
         leftScroll = root.findViewById(R.id.bsDtLeftScroll);
         descScroll = root.findViewById(R.id.bsDtDescScroll);
-        shotsTitleView = root.findViewById(R.id.bsDtShotsTitle);
-        shotsView = root.findViewById(R.id.bsDtShots);
         actsView = root.findViewById(R.id.bsDtActs);
         coverView = root.findViewById(R.id.bsDtCover);
         coverPlaceholder = root.findViewById(R.id.bsDtCoverPlaceholder);
@@ -503,13 +479,7 @@ public class BigScreenDetailsLayer {
             // 描述优先用元数据
             if (!data.description.isEmpty()) { descView.setText(data.description); }
             setDescVisible(!TextUtils.isEmpty(descView.getText()));
-            // 截图带
-            renderScreenshots(data.screenshots);
         });
-
-        shotsTitleView.setVisibility(View.GONE);
-        shotsView.setVisibility(View.GONE);
-        shotsView.removeAllViews();
     }
 
     private String buildSubLine(Game game, BigScreenMeta.Data meta) {
@@ -648,96 +618,7 @@ public class BigScreenDetailsLayer {
         actsView.addView(btn);
     }
 
-    // ================= 截图画带 =================
-
-    private void renderScreenshots(List<String> urls) {
-        shotsView.removeAllViews();
-        // NSFW 且开启模糊：预览图整块不渲染（截图内容无从模糊，直接不给看）
-        if (needBlur()) {
-            shotsTitleView.setVisibility(View.GONE);
-            shotsView.setVisibility(View.GONE);
-            return;
-        }
-        if (urls == null || urls.isEmpty()) {
-            shotsTitleView.setVisibility(View.GONE);
-            shotsView.setVisibility(View.GONE);
-            return;
-        }
-        shotsPending = 0;
-        shotsLoaded = 0;
-        shotsTitleView.setVisibility(View.VISIBLE);
-        shotsView.setVisibility(View.VISIBLE);
-
-        final int limit = Math.min(urls.size(), 4);
-        for (int i = 0; i < limit; i++) {
-            final String url = urls.get(i);
-            ImageView iv = new ImageView(activity);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(196), dp(110));
-            lp.rightMargin = dp(8);
-            iv.setLayoutParams(lp);
-            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            iv.setBackgroundResource(R.drawable.bg_bs_cell);
-            iv.setClipToOutline(true);
-            iv.setVisibility(View.INVISIBLE);
-            shotsView.addView(iv);
-            shotsPending++;
-            loadShot(url, iv);
-        }
-    }
-
-    private void loadShot(final String url, final ImageView target) {
-        Bitmap cached = SHOT_CACHE.get(url);
-        if (cached != null) {
-            target.setImageBitmap(cached);
-            target.setVisibility(View.VISIBLE);
-            onShotDone(true);
-            return;
-        }
-        imageExecutor.execute(() -> {
-            Bitmap bitmap = null;
-            try {
-                bitmap = download(url);
-            } catch (Throwable ignored) { }
-            if (bitmap != null) { SHOT_CACHE.put(url, bitmap); }
-            final Bitmap result = bitmap;
-            ui.post(() -> {
-                if (result != null) {
-                    target.setImageBitmap(result);
-                    target.setVisibility(View.VISIBLE);
-                    onShotDone(true);
-                } else {
-                    target.setVisibility(View.GONE);
-                    onShotDone(false);
-                }
-            });
-        });
-    }
-
-    /** 一张都没加载出来时，把整块收起来（不留空标题） */
-    private void onShotDone(boolean success) {
-        shotsPending--;
-        if (success) { shotsLoaded++; }
-        if (shotsPending <= 0 && shotsLoaded == 0) {
-            shotsTitleView.setVisibility(View.GONE);
-            shotsView.setVisibility(View.GONE);
-        }
-    }
-
-    private static Bitmap download(String url) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setConnectTimeout(8000);
-        conn.setReadTimeout(12000);
-        conn.setRequestProperty("User-Agent", "YukiHub/1.0 (Android; big screen)");
-        try (InputStream in = conn.getInputStream()) {
-            return BitmapFactory.decodeStream(in);
-        } finally {
-            try { conn.disconnect(); } catch (Throwable ignored) { }
-        }
-    }
-
     // ================= 其它 =================
-
-    public void shutdown() { imageExecutor.shutdownNow(); }
 
     private String engineLabel(Game game) {
         if (game == null || game.engine == null) { return "未知引擎"; }
