@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -101,7 +102,7 @@ public final class FvpVirtualKeys {
         this.handleProvider = handleProvider;
 
         float d = host.getResources().getDisplayMetrics().density;
-        bar = new LinearLayout(host.getContext());
+        bar = new LinearLayout(host);
         bar.setOrientation(LinearLayout.VERTICAL);
 
         escButton = makeButton("ESC");
@@ -133,7 +134,17 @@ public final class FvpVirtualKeys {
         try {
             decor = (ViewGroup) host.getWindow().getDecorView();
         } catch (Throwable ignored) { }
-        ViewGroup parent = decor != null ? decor : host;
+        // 兵底：DecorView 拿不到时用内容视图（虽然会被鼠标容器盖住，但不至于崩）
+        View content = null;
+        try {
+            content = host.findViewById(android.R.id.content);
+        } catch (Throwable ignored) { }
+        ViewGroup parent = decor != null ? decor
+                : (content instanceof ViewGroup ? (ViewGroup) content : null);
+        if (parent == null) {
+            android.util.Log.w(TAG, "no parent for virtual keys");
+            return;
+        }
         float d = host.getResources().getDisplayMetrics().density;
         int w = Math.round(BAR_WIDTH_DP * d);
         int edge = Math.round(EDGE_DP * d);
@@ -173,7 +184,7 @@ public final class FvpVirtualKeys {
     // ---------------------------------------------------------------- 内部
 
     private TextView makeButton(String text) {
-        Context ctx = host.getContext();
+        Context ctx = host;
         TextView v = new TextView(ctx);
         v.setText(text);
         v.setTextSize(12f);
