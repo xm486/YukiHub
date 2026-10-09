@@ -83,6 +83,46 @@ TM_EDITS = [
         out
     }
 
+    /// YukiHub 诊断：无条件 dump 单个槽位（不过滤 loaded / reveal_complete）。
+    pub fn log_slot_state(&self, idx: usize, tag: &str) {
+        if idx >= self.items.len() {
+            return;
+        }
+        let t = &self.items[idx];
+        log::info!(
+            "YHPROBE SLOT {} i={} ld={} su={} sk={} sp={} v={}/{} swa={} th={} pwm={} nxt={} wp={}",
+            tag,
+            idx,
+            t.loaded as u8,
+            t.is_suspended as u8,
+            t.skip_mode,
+            t.speed,
+            t.visible_chars,
+            t.total_chars,
+            t.sync_wait_active as u8,
+            t.sync_wait_thread.map(|v| v as i64).unwrap_or(-1),
+            t.pending_wait_ms,
+            t.next_wait_index,
+            t.wait_points.len()
+        );
+    }
+
+    /// YukiHub 诊断：返回“正在逐字出现”的槽位掩码（bit i = slot i）。
+    pub fn revealing_mask(&self) -> u32 {
+        let mut cur: u32 = 0;
+        for (i, t) in self.items.iter().enumerate() {
+            if i < 32
+                && t.loaded
+                && !t.is_suspended
+                && t.total_chars > 0
+                && t.visible_chars < t.total_chars
+            {
+                cur |= 1u32 << i;
+            }
+        }
+        cur
+    }
+
     /// YukiHub: “视觉上还在逐字出现、且不会阻塞脚本”的槽位（skip_mode != 0）。
     ///
     /// should_use_sync_print_wait() 里 skip_mode != 0 直接返回 false => 这类槽
@@ -272,25 +312,19 @@ APP_EDITS = [
         """    pub fn host_touch_android(&mut self, phase: i32, x_px: f64, y_px: f64) {
         use crate::subsystem::resources::input_manager::KeyCode;
 
-        // YukiHub: 点字动画进行中点击 = “先把这一句显示完”（PC 原版行为）。
-        //
-        // 实测（logcat 探针）：
-        //   对话消息槽 slot 0： skip_mode=3 -> 打印【不阻塞】脚本 -> armed=[]
-        //       脚本能在本帧收到这次按下并顺势推进下一句 => 看起来“补全没生效”。
-        //   设置页描述槽 slot 31：skip_mode=0 -> 打印【阻塞】脚本 -> 点击天然丢失。
-        //
-        // 所以：
-        //  1) 把“还没显示完”的槽全部补全（force_reveal_slots）；
-        //  2) 如果补全的是【不阻塞】的槽（skip_mode!=0），说明脚本会看到这次点击，
-        //     必须把 down+up 吞掉（suppress_next_mouse_click），否则会“既补全又推进”。
-        //     注意：不 return、不跳过 notify_mouse_move，光标照常更新；
-        //     而设置页的槽 skip_mode=0 不会被吞 => 设置页/按钮零影响。
+        // YukiHub 诊断：按下瞬间无条件 dump 全部 32 个槽（不过滤 loaded），
+        // 用于确定“对话 message 到底用哪个槽、当时是什么状态”。
         if phase == 0 {
             let mut gd = gd_write(&self.game_data);
-            let vis = gd.motion_manager.text_manager.revealing_slot_ids();
+            for i in 0..32usize {
+                gd.motion_manager.text_manager.log_slot_state(i, "click");
+            }
             let incomplete = gd.motion_manager.text_manager.incomplete_slot_ids();
             if !incomplete.is_empty() {
                 gd.motion_manager.text_manager.force_reveal_slots(&incomplete);
+                log::info!("YHPROBE click force_reveal slots={:?}", incomplete);
+            } else {
+                log::info!("YHPROBE click nothing-to-complete");
             }
             let nb = gd
                 .motion_manager
@@ -298,18 +332,7 @@ APP_EDITS = [
                 .nonblocking_revealing_slot_ids();
             if !nb.is_empty() {
                 gd.inputs_manager.suppress_next_mouse_click();
-                log::info!(
-                    "YHPROBE click completes text + SWALLOW nb={:?} vis={:?} incomplete={:?}",
-                    nb,
-                    vis,
-                    incomplete
-                );
-            } else if !incomplete.is_empty() {
-                log::info!(
-                    "YHPROBE click completes text (no swallow) vis={:?} incomplete={:?}",
-                    vis,
-                    incomplete
-                );
+                log::info!("YHPROBE click SWALLOW nb={:?}", nb);
             }
         }
 """,
@@ -376,6 +399,38 @@ VM_EDITS = [
                             );
                         }
                     }""",
+        ONE,
+    ),
+]
+
+MOTION_MANAGER = "crates/rfvp/src/subsystem/resources/motion_manager/mod.rs"
+
+# 每帧追踪“哪些槽正在逐字出现”（唯一入口，update_text_reveal）
+MM_EDITS = [
+    (
+        """        if elapsed < 0 {
+            self.text_manager.force_reveal_all_non_suspended();
+        } else {
+            self.text_manager
+                .tick(elapsed as u32, global_speed_var0, release_special_wait);
+        }""",
+        """        if elapsed < 0 {
+            self.text_manager.force_reveal_all_non_suspended();
+        } else {
+            self.text_manager
+                .tick(elapsed as u32, global_speed_var0, release_special_wait);
+        }
+        // YHPROBE: 逐帧追踪“哪些槽正在逐字出现”，只在集合变化时打日志。
+        {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static YH_LAST_MASK: AtomicU32 = AtomicU32::new(0);
+            let cur = self.text_manager.revealing_mask();
+            let last = YH_LAST_MASK.load(Ordering::Relaxed);
+            if cur != last {
+                log::info!("YHPROBE REVEALMASK {:#010x} -> {:#010x}", last, cur);
+                YH_LAST_MASK.store(cur, Ordering::Relaxed);
+            }
+        }""",
         ONE,
     ),
 ]
@@ -499,6 +554,7 @@ def apply_edits(path: str, edits, label: str) -> int:
 def main() -> int:
     for path, edits, label in (
         (VM_RUNNER, VM_EDITS, "vm_runner.rs"),
+        (MOTION_MANAGER, MM_EDITS, "motion_manager.rs"),
         (TEXT_MANAGER, TM_EDITS, "text_manager.rs"),
         (APP_RS, APP_EDITS, "app.rs"),
         (INPUT_RS, INPUT_EDITS, "input.rs"),
