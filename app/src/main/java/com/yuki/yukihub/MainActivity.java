@@ -5801,7 +5801,7 @@ String rematchItem = "重新匹配" + sourceLabel;
         java.util.List<String> itemList = new java.util.ArrayList<>(java.util.Arrays.asList(
                 "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC || game.engine == EngineType.FVP) itemList.add("引擎设置");
-        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS) itemList.add("虚拟鼠标");
+        if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS || game.engine == EngineType.FVP) itemList.add("虚拟鼠标");
         // 桌面快捷方式：部分启动器（含部分定制 ROM）不支持固定快捷方式，不支持时不显示该项
         boolean shortcutSupported = com.yuki.yukihub.shortcut.GameShortcutManager.isSupported(this);
         String shortcutItem = "📌 添加到桌面";
@@ -9636,7 +9636,8 @@ private void showEditPlayTimeDialog(Game game) {
         if (game == null) return;
         boolean krkr = game.engine == EngineType.KIRIKIRI;
         boolean artemis = game.engine == EngineType.ARTEMIS;
-        if (!krkr && !artemis) {
+        boolean fvp = game.engine == EngineType.FVP;
+        if (!krkr && !artemis && !fvp) {
             Toast.makeText(this, "该引擎暂不支持虚拟鼠标", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -9651,7 +9652,7 @@ private void showEditPlayTimeDialog(Game game) {
         panel.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText(krkr ? "KRKR 虚拟鼠标" : "Artemis 虚拟鼠标");
+        title.setText(krkr ? "KRKR 虚拟鼠标" : (artemis ? "Artemis 虚拟鼠标" : "FVP 虚拟鼠标"));
         title.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
         title.setTextSize(22);
         title.setPadding(0, 0, 0, pad / 2);
@@ -9666,8 +9667,10 @@ private void showEditPlayTimeDialog(Game game) {
 
         CheckBox enable = krCheckBox(krkr
                         ? "启用 KRKR 虚拟鼠标（悬浮光标，拖动定位，抬手点击）"
-                        : "启用 Artemis 虚拟鼠标（悬浮光标，拖动定位，抬手点击）",
-                krkr ? cfg.krkrEnabled : cfg.artemisEnabled);
+                        : (artemis
+                        ? "启用 Artemis 虚拟鼠标（悬浮光标，拖动定位，抬手点击）"
+                        : "启用 FVP 虚拟鼠标（悬浮光标，拖动定位，抬手点击）"),
+                krkr ? cfg.krkrEnabled : (artemis ? cfg.artemisEnabled : cfg.fvpEnabled));
         root.addView(enable);
 
         // ===== 实时预览（与游戏内同一渲染代码）=====
@@ -9818,8 +9821,11 @@ private void showEditPlayTimeDialog(Game game) {
                 + "· 再点一次切回直接触摸（浮标变灰）：触摸原样给游戏，光标隐藏。\n"
                 + (krkr
                 ? "KRKR 的点击走引擎自身触摸管线，原引擎「虚拟光标缩放」等设置不受影响。"
-                : "Artemis 的点击与悬停直接写入引擎输入层，不经过系统输入派发，"
-                + "因此不需要无障碍权限。光标显示仍需要「显示在其他应用上层」权限。"));
+                : (artemis
+                ? "Artemis 的点击与悬停直接写入引擎输入层，不经过系统输入派发，"
+                + "因此不需要无障碍权限。光标显示仍需要「显示在其他应用上层」权限。"
+                : "FVP 的点击与悬停直接投给 rfvp 引擎（rfvp_android_touch），"
+                + "挂在游戏窗口 View 树上，不需要悬浮窗权限。")));
         tip.setTextColor(getColorCompat(com.yuki.yukihub.R.color.yh_text));
         tip.setTextSize(11);
         tip.setPadding(0, dp(10), 0, 0);
@@ -9836,8 +9842,16 @@ private void showEditPlayTimeDialog(Game game) {
             // krkr=false 会把 krkr 的开关直接清掉，导致"开一个关另一个"。
             if (krkr) {
                 cfg.krkrEnabled = enable.isChecked();
-            } else {
+            } else if (artemis) {
                 cfg.artemisEnabled = enable.isChecked();
+            } else {
+                cfg.fvpEnabled = enable.isChecked();
+                // 与「FVP 引擎设置」里的同名开关保持一致（那边是按游戏存的）
+                try {
+                    FvpLaunchPrefs fp = FvpLaunchPrefs.load(this, game.id, game.rootUri);
+                    fp.virtualMouse = enable.isChecked();
+                    fp.save(this, game.id);
+                } catch (Throwable ignored) { }
             }
             cfg.save(this);
             // 只在 native 直连不可用时才提示无障碍：

@@ -52,8 +52,9 @@ public static void attachKrkr(Activity host) {
                 active.applyConfig();
                 return;
             }
+            // 是否启用由调用方（FvpActivity，读「FVP 引擎设置」的开关）决定；
+            // 这里只取配置里的外观参数（大小/透明度/灵敏度/光标包）。
             GameCursorConfig cfg = GameCursorConfig.load(host);
-            if (!cfg.fvpEnabled) return;
             GameCursorOverlay previous = active;
             if (previous != null) previous.dismiss();
             active = null;

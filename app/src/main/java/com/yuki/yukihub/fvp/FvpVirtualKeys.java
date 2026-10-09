@@ -12,7 +12,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
@@ -56,10 +55,16 @@ public final class FvpVirtualKeys {
     private static final int PHASE_DOWN = 0;
     private static final int PHASE_UP = 1;
 
-    private static final float BAR_WIDTH_DP = 52f;
-    private static final float BTN_HEIGHT_DP = 40f;
-    private static final float BTN_GAP_DP = 8f;
-    private static final float EDGE_DP = 10f;
+    /** 按钮宽度。 */
+    private static final float BTN_WIDTH_DP = 66f;
+    /** 按钮高度。 */
+    private static final float BTN_HEIGHT_DP = 52f;
+    /** 按钮文字大小（sp）。 */
+    private static final float BTN_TEXT_SP = 15f;
+    /** 按钮离屏幕左边缘的距离（越大越靠右）。 */
+    private static final float EDGE_DP = 18f;
+    /** 左侧按键条总宽度：只覆盖左侧一条，其余区域触摸穿透。 */
+    private static final float BAR_WIDTH_DP = BTN_WIDTH_DP + EDGE_DP;
 
     /** Ctrl 长按连发的首次延迟（毫秒），模拟物理键盘的按键重复。 */
     private static final long CTRL_REPEAT_INITIAL_MS = 300L;
@@ -67,7 +72,7 @@ public final class FvpVirtualKeys {
     private static final long CTRL_REPEAT_INTERVAL_MS = 45L;
 
     private final Activity host;
-    private final LinearLayout bar;
+    private final FrameLayout bar;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     /** 引擎句柄提供者（懒取；0 = 未就绪）。 */
@@ -102,24 +107,32 @@ public final class FvpVirtualKeys {
         this.handleProvider = handleProvider;
 
         float d = host.getResources().getDisplayMetrics().density;
-        bar = new LinearLayout(host);
-        bar.setOrientation(LinearLayout.VERTICAL);
+        bar = new FrameLayout(host);
 
         escButton = makeButton("ESC");
         historyButton = makeButton("历史");
         ctrlButton = makeButton("Ctrl");
 
+        int bw = Math.round(BTN_WIDTH_DP * d);
         int bh = Math.round(BTN_HEIGHT_DP * d);
-        int gap = Math.round(BTN_GAP_DP * d);
-        bar.addView(escButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, bh));
-        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, bh);
-        hLp.topMargin = gap;
+        int edge = Math.round(EDGE_DP * d);
+
+        // 左侧竖排分散到「上 / 中 / 下」三个位置，互不挤在一起。
+        FrameLayout.LayoutParams escLp = new FrameLayout.LayoutParams(
+                bw, bh, Gravity.TOP | Gravity.START);
+        escLp.topMargin = edge;
+        escLp.leftMargin = edge;
+        bar.addView(escButton, escLp);
+
+        FrameLayout.LayoutParams hLp = new FrameLayout.LayoutParams(
+                bw, bh, Gravity.CENTER_VERTICAL | Gravity.START);
+        hLp.leftMargin = edge;
         bar.addView(historyButton, hLp);
-        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, bh);
-        cLp.topMargin = gap;
+
+        FrameLayout.LayoutParams cLp = new FrameLayout.LayoutParams(
+                bw, bh, Gravity.BOTTOM | Gravity.START);
+        cLp.bottomMargin = edge;
+        cLp.leftMargin = edge;
         bar.addView(ctrlButton, cLp);
 
         installListeners();
@@ -147,11 +160,10 @@ public final class FvpVirtualKeys {
         }
         float d = host.getResources().getDisplayMetrics().density;
         int w = Math.round(BAR_WIDTH_DP * d);
-        int edge = Math.round(EDGE_DP * d);
+        // 全高、只占左侧一条；按钮各自 TOP/CENTER/BOTTOM 定位。
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                w, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.START | Gravity.CENTER_VERTICAL);
-        lp.leftMargin = edge;
+                w, FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.START | Gravity.TOP);
         bar.setElevation(2000f);
         parent.addView(bar, lp);
         bar.bringToFront();
@@ -187,7 +199,7 @@ public final class FvpVirtualKeys {
         Context ctx = host;
         TextView v = new TextView(ctx);
         v.setText(text);
-        v.setTextSize(12f);
+        v.setTextSize(BTN_TEXT_SP);
         v.setTextColor(Color.WHITE);
         v.setGravity(Gravity.CENTER);
         v.setClickable(true);
@@ -201,7 +213,7 @@ public final class FvpVirtualKeys {
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.RECTANGLE);
         bg.setCornerRadius(12f * d);
-        bg.setColor(pressed ? 0xCC1976D2 : 0x88333333);
+        bg.setColor(pressed ? 0xBF1976D2 : 0x7B333333);
         bg.setStroke(Math.max(1, Math.round(d)), pressed ? 0xCCFFFFFF : 0x66FFFFFF);
         v.setBackground(bg);
     }
