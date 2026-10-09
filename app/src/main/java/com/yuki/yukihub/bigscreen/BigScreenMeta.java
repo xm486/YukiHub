@@ -119,6 +119,39 @@ public class BigScreenMeta {
         return cache.get(gameId);
     }
 
+    /**
+     * M22：把一整批游戏的元数据都读进缓存（搜索浮层用）。
+     *
+     * <p>搜索支持按**开发商/会社**匹配，而开发商只存在元数据里 —— 不预热的话
+     * 那个匹配对绝大多数游戏都不生效（只有恰好进过详情层、缓存命中过的那几款才行）。
+     * 这里一次性把全库读进来，之后 {@link #peek(long)} 在 UI 线程就是零开销的。
+     *
+     * <p>命中缓存的跳过；跑完在 UI 线程回调一次（可能已经被 hide 掉，调用方自己判空）。
+     */
+    public void loadAll(final List<Long> gameIds, final Runnable done) {
+        final List<Long> todo = new ArrayList<>();
+        if (gameIds != null) {
+            for (Long id : gameIds) {
+                if (id != null && !cache.containsKey(id)) { todo.add(id); }
+            }
+        }
+        executor.execute(() -> {
+            for (Long id : todo) {
+                if (cache.containsKey(id)) { continue; }
+                final Data data = new Data();
+                try {
+                    merge(data, repository.getNextMoe(id));
+                    merge(data, repository.getVndb(id));
+                    merge(data, repository.getBangumi(id));
+                    merge(data, repository.getYmgal(id));
+                    merge(data, repository.getHikarinagi(id));
+                } catch (Throwable ignored) { }
+                cache.put(id, data);
+            }
+            if (done != null) { ui.post(done); }
+        });
+    }
+
     public void shutdown() { executor.shutdownNow(); }
 
     public void clearCache() { cache.clear(); }

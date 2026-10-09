@@ -69,6 +69,8 @@ public class BigScreenShelfAdapter extends RecyclerView.Adapter<BigScreenShelfAd
     private int gapPx = 0;
     /** 整排入场动效的时间戳（M9） */
     private long entranceAt = 0L;
+    /** M22：是否启用"整排错峰浮入"入场动效（搜索浮层每次输入都会 submit，开着会闪） */
+    private boolean entranceEnabled = true;
 
     public void setGapPx(int gapPx) { this.gapPx = Math.max(0, gapPx); }
 
@@ -79,6 +81,9 @@ public class BigScreenShelfAdapter extends RecyclerView.Adapter<BigScreenShelfAd
     public void setCardScale(float cardScale) { this.cardScale = cardScale <= 0f ? 1f : cardScale; }
 
     public void setShowTitles(boolean showTitles) { this.showTitles = showTitles; }
+
+    /** M22：关闭入场动效（搜索浮层实时过滤时用，否则每敲一个字卡片都会重新浮入） */
+    public void setEntranceEnabled(boolean enabled) { this.entranceEnabled = enabled; }
 
     public void setKeys(BigScreenKeys keys) { this.keys = keys == null ? new BigScreenKeys(BigScreenKeys.STYLE_XBOX) : keys; }
 
@@ -262,7 +267,7 @@ public class BigScreenShelfAdapter extends RecyclerView.Adapter<BigScreenShelfAd
         applyFocusVisual(h, focused);
         // 入场动效（M9）：整排卡片错峰浮入（换分类/首次进入时会看到）
         long sinceEntrance = System.currentTimeMillis() - entranceAt;
-        if (entranceAt > 0 && sinceEntrance < 800L && position < 14) {
+        if (entranceEnabled && entranceAt > 0 && sinceEntrance < 800L && position < 14) {
             h.itemView.setAlpha(0f);
             h.itemView.setTranslationY(dp(h.itemView, 20));
             h.itemView.animate().alpha(1f).translationY(0f)
