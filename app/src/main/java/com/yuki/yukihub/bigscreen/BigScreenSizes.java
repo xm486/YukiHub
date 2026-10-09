@@ -23,8 +23,9 @@ import android.content.res.Configuration;
 public class BigScreenSizes {
 
     /** 侧栏分类数（用来摊分高度） */
-    // 侧栏条目数（M8：去掉引擎分组后是 6 个 —— 全部/收藏/最近/游玩中/已完成/未游玩）
-    private static final int RAIL_ENTRY_COUNT = 6;
+    // 侧栏条目数（M22：加回顶部「搜索」后是 7 个 —— 搜索/全部/收藏/最近/游玩中/已完成/未游玩）
+    // 注意：这个数字只用来"摊分高度"，必须与实际条目数一致，否则底部条目会被裁掉。
+    private static final int RAIL_ENTRY_COUNT = 7;
 
     public final int wDp;
     public final int hDp;
