@@ -83,6 +83,26 @@ TM_EDITS = [
         out
     }
 
+    /// YukiHub: “视觉上还在逐字出现、且不会阻塞脚本”的槽位（skip_mode != 0）。
+    ///
+    /// should_use_sync_print_wait() 里 skip_mode != 0 直接返回 false => 这类槽
+    /// 永远不会把脚本卡在文字等待上。实测对话消息槽 skip=3，而设置页描述槽 skip=0。
+    /// 因此“补全+吞点击”只应对这类槽做：不阻塞 => 脚本会看到这次按下并顺势推进。
+    pub fn nonblocking_revealing_slot_ids(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+        for (i, t) in self.items.iter().enumerate() {
+            if t.loaded
+                && !t.is_suspended
+                && t.skip_mode != 0
+                && t.total_chars > 0
+                && t.visible_chars < t.total_chars
+            {
+                out.push(i);
+            }
+        }
+        out
+    }
+
     /// YukiHub: 列出“视觉上还在逐字出现”的槽位（visible_chars < total_chars）。
     /// 不要求脚本处于阻塞态 —— 实测对话的 reveal 可能很快（armed 已空），
     /// 但玩家点击时画面上确实还在逐字出现，这时就应该补全。
@@ -254,26 +274,41 @@ APP_EDITS = [
 
         // YukiHub: 点字动画进行中点击 = “先把这一句显示完”（PC 原版行为）。
         //
-        // 只补全、绝不吞点击（设置页按钮因此完全不受影响）。
-        // 判据用“视觉上还在逐字出现的槽”（visible_chars < total_chars），
-        // 而不要求脚本处于阻塞态 —— 实测对话的 reveal 可能很快，armed 已空了。
+        // 实测（logcat 探针）：
+        //   对话消息槽 slot 0： skip_mode=3 -> 打印【不阻塞】脚本 -> armed=[]
+        //       脚本能在本帧收到这次按下并顺势推进下一句 => 看起来“补全没生效”。
+        //   设置页描述槽 slot 31：skip_mode=0 -> 打印【阻塞】脚本 -> 点击天然丢失。
         //
-        // 注意：补全会让 update_after_vm 里的 collect_completed_sync_print_waiters
-        // 去唤醒对应线程；vm_runner 已加“只在真的 TEXT 状态才 resume”的保护，
-        // 否则会复活已销毁的上下文 -> unknown opcode @ 0 -> SIGABRT。
+        // 所以：
+        //  1) 把“还没显示完”的槽全部补全（force_reveal_slots）；
+        //  2) 如果补全的是【不阻塞】的槽（skip_mode!=0），说明脚本会看到这次点击，
+        //     必须把 down+up 吞掉（suppress_next_mouse_click），否则会“既补全又推进”。
+        //     注意：不 return、不跳过 notify_mouse_move，光标照常更新；
+        //     而设置页的槽 skip_mode=0 不会被吞 => 设置页/按钮零影响。
         if phase == 0 {
             let mut gd = gd_write(&self.game_data);
-            let armed = gd
+            let vis = gd.motion_manager.text_manager.revealing_slot_ids();
+            let incomplete = gd.motion_manager.text_manager.incomplete_slot_ids();
+            if !incomplete.is_empty() {
+                gd.motion_manager.text_manager.force_reveal_slots(&incomplete);
+            }
+            let nb = gd
                 .motion_manager
                 .text_manager
-                .sync_print_wait_revealing_ids();
-            let ids = gd.motion_manager.text_manager.revealing_slot_ids();
-            if !ids.is_empty() {
-                gd.motion_manager.text_manager.force_reveal_slots(&ids);
+                .nonblocking_revealing_slot_ids();
+            if !nb.is_empty() {
+                gd.inputs_manager.suppress_next_mouse_click();
                 log::info!(
-                    "YHPROBE click completes text slots={:?} armed={:?}",
-                    ids,
-                    armed
+                    "YHPROBE click completes text + SWALLOW nb={:?} vis={:?} incomplete={:?}",
+                    nb,
+                    vis,
+                    incomplete
+                );
+            } else if !incomplete.is_empty() {
+                log::info!(
+                    "YHPROBE click completes text (no swallow) vis={:?} incomplete={:?}",
+                    vis,
+                    incomplete
                 );
             }
         }
