@@ -83,6 +83,26 @@ TM_EDITS = [
         out
     }
 
+    /// YukiHub: 只把指定槽位的逐字显示补全（“点击补全文字”的核心动作）。
+    pub fn force_reveal_slots(&mut self, ids: &[usize]) {
+        for &i in ids {
+            if i >= self.items.len() {
+                continue;
+            }
+            let t = &mut self.items[i];
+            let target = t.total_chars;
+            t.visible_chars = target;
+            t.pending_wait_ms = 0;
+            t.pending_special_wait = false;
+            t.reveal_carry = 0;
+            t.next_wait_index = t.wait_points.len();
+            if !t.layout_dirty {
+                t.apply_reveal_delta_to_current_target();
+            }
+            t.dirty = true;
+        }
+    }
+
     /// YukiHub 诊断：所有「已加载、未暂停、但按引擎判据未完成」的槽位。
     pub fn incomplete_slot_ids(&self) -> Vec<usize> {
         let mut out = Vec::new();
@@ -215,17 +235,25 @@ APP_EDITS = [
         """    pub fn host_touch_android(&mut self, phase: i32, x_px: f64, y_px: f64) {
         use crate::subsystem::resources::input_manager::KeyCode;
 
-        // YukiHub 诊断（不改行为）：按下瞬间 dump 文字槽状态，用于给
-        // “点击补全文字” 定一个精确、不会误伤 UI 按钮的判据。
+        // YukiHub: 点字动画进行中点击 = “先把这一句显示完”（PC 原版行为）。
+        //
+        // 为什么“只补全、不吞点击”就够了（由帧内顺序保证，已核对源码）：
+        //   no_std_core: vm_runner.tick()（脚本先跑）-> 之后 scene.update_after_vm()
+        //   才 tick reveal / 唤醒 text 等待线程。
+        //   帧 N：我们在这里把这一句补全；脚本本帧运行时仍阻塞 -> 看不到这次按下。
+        //   帧 N+1：begin_frame 已清掉 down 边沿；脚本被唤醒后自然也看不到。
+        //   => 本次点击天然被“阻塞”吃掉，需要再点一次才过对话。
+        // 绝不吞点击 => 设置页 / 按钮完全不受影响。
         if phase == 0 {
-            let gd = gd_write(&self.game_data);
-            let armed = gd
+            let mut gd = gd_write(&self.game_data);
+            let ids = gd
                 .motion_manager
                 .text_manager
                 .sync_print_wait_revealing_ids();
-            let inc = gd.motion_manager.text_manager.incomplete_slot_ids();
-            log::info!("YHPROBE click armed={:?} incomplete={:?}", armed, inc);
-            gd.motion_manager.text_manager.log_slot_dump("click");
+            if !ids.is_empty() {
+                gd.motion_manager.text_manager.force_reveal_slots(&ids);
+                log::info!("YHPROBE click completes text slots={:?}", ids);
+            }
         }
 """,
         ONE,
