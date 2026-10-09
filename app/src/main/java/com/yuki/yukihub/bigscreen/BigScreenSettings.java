@@ -120,7 +120,7 @@ public class BigScreenSettings {
         closeBtn.setPadding(dp(18), dp(10), dp(18), dp(10));
         closeBtn.setBackgroundResource(R.drawable.bg_bs_glass);
         closeBtn.setClickable(true);
-        closeBtn.setOnClickListener(v -> { BigScreenSound.open(); hide(); });
+        closeBtn.setOnClickListener(v -> { BigScreenSound.open(); BigScreenSound.hapticKey(v); hide(); });
         closeBtn.setVisibility(View.GONE);
         FrameLayout.LayoutParams cbLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -293,6 +293,7 @@ public class BigScreenSettings {
             tv.setClickable(true);
             tv.setOnClickListener(v -> {
                 BigScreenSound.confirm();   // M12：触摸分区也要有音效
+                BigScreenSound.hapticKey(v); // M22：触摸分区补触感
                 sectionIndex = idx;
                 column = COL_ITEM;
                 rebuildItems();
@@ -325,6 +326,7 @@ public class BigScreenSettings {
             row.setClickable(true);
             row.setOnClickListener(v -> {
                 BigScreenSound.confirm();   // M12：触摸条目也要有音效
+                BigScreenSound.hapticKey(v); // M22：触摸条目补触感
                 column = COL_ITEM;
                 itemIndex = idx;
                 applyFocus();

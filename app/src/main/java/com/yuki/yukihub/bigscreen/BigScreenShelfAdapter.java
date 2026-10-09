@@ -289,17 +289,20 @@ public class BigScreenShelfAdapter extends RecyclerView.Adapter<BigScreenShelfAd
                 // 注意：这里**不要**自己改 focusedPosition / notifyItemChanged ——
                 // Activity 收到回调后会走 FocusEngine → setFocusedPosition(同一个值)，
                 // 于是 early-return，旧卡的焦点视觉永远清不掉（就是"选中状态永久存在"）。
-                BigScreenSound.tick();          // M12：触摸也要有音效
+                BigScreenSound.tick();              // M12：触摸也要有音效
+                BigScreenSound.hapticKey(v);        // M22：触摸选中也要震（大屏原来完全没有触感）
                 listener.onCardFocused(pos, game);
             } else {
                 BigScreenSound.confirm();
+                BigScreenSound.hapticKey(v);        // M22：启动游戏也要震
                 listener.onCardConfirmed(game);
             }
         });
         // 长按卡片 = 打开详情层（触摸用户的 Ⓨ）
         h.itemView.setOnLongClickListener(v -> {
             if (listener == null || pos == RecyclerView.NO_POSITION) { return true; }
-            BigScreenSound.open();              // M12
+            BigScreenSound.open();                  // M12
+            BigScreenSound.hapticLong(v);           // M22：长按用重一档的触感（与游戏库一致）
             if (focusedPosition != pos) {
                 listener.onCardFocused(pos, game);   // 同上，焦点统一交给 Activity 驱动
             }

@@ -207,6 +207,7 @@ public class BigScreenRailView extends LinearLayout {
             // 触摸：点一下就应用该筛选（手柄则靠方向键 + Ⓐ）
             item.setOnClickListener(v -> {
                 BigScreenSound.confirm();       // M12：触摸点侧栏也要发声
+                BigScreenSound.hapticKey(v);    // M22：触摸按钮统一补触感
                 focusedIndex = index;
                 applyFocusVisual();
                 // 触摸点击 = 手柄的「焦点移过去 + Ⓐ」，所以两个回调都发

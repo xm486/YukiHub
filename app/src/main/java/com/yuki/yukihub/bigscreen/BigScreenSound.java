@@ -3,11 +3,13 @@ package com.yuki.yukihub.bigscreen;
 import android.content.Context;
 import android.media.AudioManager;
 import android.media.SoundPool;
+import android.view.HapticFeedbackConstants;
+import android.view.View;
 
 import com.yuki.yukihub.R;
 
 /**
- * 大屏界面音效（spec §4.4）。
+ * 大屏界面反馈（音效 + 触感）。
  *
  * <p>**复用项目既有音效资源**（`res/raw/ui_click·ui_confirm·ui_switch`，Kenney UI Audio，CC0）——
  * 不新增素材。若之后要换成原型那套音效，把文件放进 `res/raw` 再改这里的映射即可。
@@ -41,6 +43,33 @@ public class BigScreenSound {
     public static void tick() { BigScreenSound s = sInstance; if (s != null) { s.play(Sfx.FOCUS); } }
     public static void confirm() { BigScreenSound s = sInstance; if (s != null) { s.play(Sfx.CONFIRM); } }
     public static void open() { BigScreenSound s = sInstance; if (s != null) { s.play(Sfx.OPEN); } }
+
+    // ================= 触感（M22）=================
+    /** 触摸点击的轻震（与游戏库 {@code GameAdapter} 同一档 {@code VIRTUAL_KEY}） */
+    public static void hapticKey(View v) { haptic(v, HapticFeedbackConstants.VIRTUAL_KEY); }
+
+    /** 长按 / 重按的震动（与游戏库长按同一档 {@code LONG_PRESS}） */
+    public static void hapticLong(View v) { haptic(v, HapticFeedbackConstants.LONG_PRESS); }
+
+    /**
+     * 在指定 View 上触发触感。
+     *
+     * <p>用 {@code performHapticFeedback()} 而不是 {@code Vibrator}：不需要 VIBRATE 权限
+     * （Manifest 里本来也没声明），而且会自动尊重系统的"触摸时振动"开关与强度设置。
+     *
+     * <p>**只给触摸用**——手柄的按键不给手机发震：手柄用户物理上已经在按了，
+     * 多一次机身震动只是噪音（真正的手柄"马达震动"是另一套机制，要走
+     * {@code InputDevice.getVibrator()}，不在本次范围）。
+     *
+     * <p>档位只用 {@code VIRTUAL_KEY} / {@code LONG_PRESS}：这两个从 API 3 就有，
+     * 而 {@code CONFIRM} 等新常量在旧系统上没有对应实现（本项目 minSdk 26）。
+     */
+    private static void haptic(View v, int type) {
+        if (v == null) { return; }
+        try {
+            v.performHapticFeedback(type);
+        } catch (Throwable ignored) { }
+    }
 
     private boolean enabled = true;
     private float leftVolume = 0.65f;
