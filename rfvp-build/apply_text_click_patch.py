@@ -312,27 +312,35 @@ APP_EDITS = [
         """    pub fn host_touch_android(&mut self, phase: i32, x_px: f64, y_px: f64) {
         use crate::subsystem::resources::input_manager::KeyCode;
 
-        // YukiHub 诊断：按下瞬间无条件 dump 全部 32 个槽（不过滤 loaded），
-        // 用于确定“对话 message 到底用哪个槽、当时是什么状态”。
+        // YukiHub: 点字动画进行中点击 = “先把这一句显示完”（PC 原版行为）。
+        //
+        // 顺序很重要：**先判断要不要吞点击，再补全**。
+        // 上一版先补全、后判断 -> 补全后 visible==total，判据已失效 -> 从不吞。
+        //
+        // 判据（按下这一刻的状态）：
+        //   incomplete   = 有任何槽 visible<total（含设置页）-> 需要补全
+        //   nb_to_swallow= 正在逐字出现 且 skip_mode!=0 -> 脚本会看到这次点击，必须吞
+        //     （对话消息槽 slot 0：sk=3；设置页描述槽 slot 31：sk=0，永不吞）
+        //   实测数据：slot 0 sp=-1 sk=3；REVEALMASK 0x1 表示 slot 0 正在逐字显示。
         if phase == 0 {
             let mut gd = gd_write(&self.game_data);
-            for i in 0..32usize {
-                gd.motion_manager.text_manager.log_slot_state(i, "click");
-            }
             let incomplete = gd.motion_manager.text_manager.incomplete_slot_ids();
-            if !incomplete.is_empty() {
-                gd.motion_manager.text_manager.force_reveal_slots(&incomplete);
-                log::info!("YHPROBE click force_reveal slots={:?}", incomplete);
-            } else {
-                log::info!("YHPROBE click nothing-to-complete");
-            }
             let nb = gd
                 .motion_manager
                 .text_manager
                 .nonblocking_revealing_slot_ids();
+            if !incomplete.is_empty() {
+                gd.motion_manager.text_manager.force_reveal_slots(&incomplete);
+            }
             if !nb.is_empty() {
                 gd.inputs_manager.suppress_next_mouse_click();
-                log::info!("YHPROBE click SWALLOW nb={:?}", nb);
+                log::info!(
+                    "YHPROBE click complete+SWALLOW incomplete={:?} nb={:?}",
+                    incomplete,
+                    nb
+                );
+            } else if !incomplete.is_empty() {
+                log::info!("YHPROBE click complete only incomplete={:?}", incomplete);
             }
         }
 """,
