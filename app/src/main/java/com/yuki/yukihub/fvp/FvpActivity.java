@@ -183,7 +183,7 @@ public final class FvpActivity extends Activity implements
         lineScale = FvpLaunchPrefs.normalizeLineScale(
                 String.valueOf(intent.getFloatExtra(EXTRA_TEXT_LINE_SCALE, 0.0f)));
         virtualMouse = intent.getBooleanExtra(EXTRA_VIRTUAL_MOUSE, false);
-        boolean enableVirtualKeys = intent.getBooleanExtra(EXTRA_VIRTUAL_KEYS, false);
+        final boolean enableVirtualKeys = intent.getBooleanExtra(EXTRA_VIRTUAL_KEYS, false);
         if (stretchFill) {
             int[] virtual = parseFvpVirtualSize(gameRoot);
             if (virtual != null) {
@@ -219,6 +219,7 @@ public final class FvpActivity extends Activity implements
         //
         // 顺序要紧：虚拟鼠标的容器会 bringToFront()（盖住整个 DecorView），
         // 所以必须先挂鼠标、再挂按键条，否则按键会被盖住点不到。
+        Log.i(TAG, "virtual controls: keys=" + enableVirtualKeys + " mouse=" + virtualMouse);
         if (virtualMouse) {
             installVirtualMouse();
         }
@@ -281,6 +282,7 @@ public final class FvpActivity extends Activity implements
         } catch (Throwable t) {
             Log.w(TAG, "installVirtualMouse failed", t);
         }
+        Log.i(TAG, "virtual mouse requested (see YukiGameCursor for attach result)");
     }
 
     /**
