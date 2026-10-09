@@ -83,6 +83,23 @@ TM_EDITS = [
         out
     }
 
+    /// YukiHub: 列出“视觉上还在逐字出现”的槽位（visible_chars < total_chars）。
+    /// 不要求脚本处于阻塞态 —— 实测对话的 reveal 可能很快（armed 已空），
+    /// 但玩家点击时画面上确实还在逐字出现，这时就应该补全。
+    pub fn revealing_slot_ids(&self) -> Vec<usize> {
+        let mut out = Vec::new();
+        for (i, t) in self.items.iter().enumerate() {
+            if t.loaded
+                && !t.is_suspended
+                && t.total_chars > 0
+                && t.visible_chars < t.total_chars
+            {
+                out.push(i);
+            }
+        }
+        out
+    }
+
     /// YukiHub: 只把指定槽位的逐字显示补全（“点击补全文字”的核心动作）。
     pub fn force_reveal_slots(&mut self, ids: &[usize]) {
         for &i in ids {
@@ -237,22 +254,27 @@ APP_EDITS = [
 
         // YukiHub: 点字动画进行中点击 = “先把这一句显示完”（PC 原版行为）。
         //
-        // 为什么“只补全、不吞点击”就够了（由帧内顺序保证，已核对源码）：
-        //   no_std_core: vm_runner.tick()（脚本先跑）-> 之后 scene.update_after_vm()
-        //   才 tick reveal / 唤醒 text 等待线程。
-        //   帧 N：我们在这里把这一句补全；脚本本帧运行时仍阻塞 -> 看不到这次按下。
-        //   帧 N+1：begin_frame 已清掉 down 边沿；脚本被唤醒后自然也看不到。
-        //   => 本次点击天然被“阻塞”吃掉，需要再点一次才过对话。
-        // 绝不吞点击 => 设置页 / 按钮完全不受影响。
+        // 只补全、绝不吞点击（设置页按钮因此完全不受影响）。
+        // 判据用“视觉上还在逐字出现的槽”（visible_chars < total_chars），
+        // 而不要求脚本处于阻塞态 —— 实测对话的 reveal 可能很快，armed 已空了。
+        //
+        // 注意：补全会让 update_after_vm 里的 collect_completed_sync_print_waiters
+        // 去唤醒对应线程；vm_runner 已加“只在真的 TEXT 状态才 resume”的保护，
+        // 否则会复活已销毁的上下文 -> unknown opcode @ 0 -> SIGABRT。
         if phase == 0 {
             let mut gd = gd_write(&self.game_data);
-            let ids = gd
+            let armed = gd
                 .motion_manager
                 .text_manager
                 .sync_print_wait_revealing_ids();
+            let ids = gd.motion_manager.text_manager.revealing_slot_ids();
             if !ids.is_empty() {
                 gd.motion_manager.text_manager.force_reveal_slots(&ids);
-                log::info!("YHPROBE click completes text slots={:?}", ids);
+                log::info!(
+                    "YHPROBE click completes text slots={:?} armed={:?}",
+                    ids,
+                    armed
+                );
             }
         }
 """,
@@ -263,6 +285,66 @@ APP_EDITS = [
 # ─────────────────────────────────────────────────────────────────────────────
 # 3) input.rs：ControlPulse 探针
 # ─────────────────────────────────────────────────────────────────────────────
+VM_RUNNER = "crates/rfvp/src/vm_runner.rs"
+
+# 崩溃修复：thread_text_resume 只能作用于“真的在等文字”的线程。
+# 实测：slot 的 sync_wait_active 会是残留值，而该线程的上下文可能已被
+# thread_exit/thread_start(0) 重建（pc=0）。这时强行置 RUNNING，会让它
+# 从地址 0 取指 -> "unknown opcode: 0x2b @ 0x000000" -> SIGABRT。
+VM_EDITS = [
+    (
+        """                ThreadRequest::TextResume(id) => {
+                    let mut st = self.tm.get_context_status(id);
+                    st.remove(ThreadState::CONTEXT_STATUS_TEXT);
+                    st.insert(ThreadState::CONTEXT_STATUS_RUNNING);
+                    self.tm.set_context_status(id, st);
+                }""",
+        """                ThreadRequest::TextResume(id) => {
+                    // YukiHub: 只有确实处于 CONTEXT_STATUS_TEXT 的线程才允许恢复。
+                    // 否则会复活已销毁/已重置的上下文（pc=0）-> unknown opcode -> SIGABRT。
+                    let st = self.tm.get_context_status(id);
+                    if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
+                        let mut st2 = st.clone();
+                        st2.remove(ThreadState::CONTEXT_STATUS_TEXT);
+                        st2.insert(ThreadState::CONTEXT_STATUS_RUNNING);
+                        self.tm.set_context_status(id, st2);
+                    } else {
+                        log::warn!(
+                            "YHPROBE TextResume ignored (tid={} bits={} not TEXT)",
+                            id,
+                            st.bits()
+                        );
+                    }
+                }""",
+        ONE,
+    ),
+    (
+        """                    ThreadRequest::TextResume(id) => {
+                        let mut st = self.tm.get_context_status(id);
+                        st.remove(ThreadState::CONTEXT_STATUS_TEXT);
+                        st.insert(ThreadState::CONTEXT_STATUS_RUNNING);
+                        self.tm.set_context_status(id, st);
+                    }""",
+        """                    ThreadRequest::TextResume(id) => {
+                        // YukiHub: 同上，只在真的 TEXT 状态时才恢复。
+                        let st = self.tm.get_context_status(id);
+                        if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
+                            let mut st2 = st.clone();
+                            st2.remove(ThreadState::CONTEXT_STATUS_TEXT);
+                            st2.insert(ThreadState::CONTEXT_STATUS_RUNNING);
+                            self.tm.set_context_status(id, st2);
+                        } else {
+                            log::warn!(
+                                "YHPROBE TextResume ignored (tid={} bits={} not TEXT)",
+                                id,
+                                st.bits()
+                            );
+                        }
+                    }""",
+        ONE,
+    ),
+]
+
 INPUT_EDITS = [
     (
         """pub fn control_pulse(game_data: &mut GameData) -> Result<Variant> {
@@ -381,6 +463,7 @@ def apply_edits(path: str, edits, label: str) -> int:
 
 def main() -> int:
     for path, edits, label in (
+        (VM_RUNNER, VM_EDITS, "vm_runner.rs"),
         (TEXT_MANAGER, TM_EDITS, "text_manager.rs"),
         (APP_RS, APP_EDITS, "app.rs"),
         (INPUT_RS, INPUT_EDITS, "input.rs"),
