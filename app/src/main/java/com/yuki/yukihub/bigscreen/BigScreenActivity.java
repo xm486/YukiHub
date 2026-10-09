@@ -91,6 +91,8 @@ public class BigScreenActivity extends AppCompatActivity
     private static final String F_PLAYING = "PLAYING";
     private static final String F_DONE = "DONE";
     private static final String F_TODO = "TODO";
+    /** M22：侧栏顶部的「搜索」项（不是筛选，选中即打开搜索浮层） */
+    private static final String F_SEARCH = "SEARCH";
     private static final String ENGINE_PREFIX = "ENGINE:";
 
     /** 单排最多放多少张卡（RecyclerView 复用，几千张也不卡） */
@@ -152,6 +154,8 @@ public class BigScreenActivity extends AppCompatActivity
     /** M13：原地启动后待收尾的游玩会话（0 = 无） */
     private long pendingLaunchSessionId = 0L;
     private long pendingLaunchAt = 0L;
+    /** M22：本次启动的游戏 id —— 回到大屏后要重新读库并聚焦到它 */
+    private long pendingLaunchGameId = 0L;
     /** M14：焦点在信息层按钮排（启动/收藏/详情/更多）里 */
     private boolean infoZone = false;
     private int infoFocusIndex = 0;
@@ -211,6 +215,8 @@ public class BigScreenActivity extends AppCompatActivity
     // ===== 浮层 =====
     private BigScreenDetailsLayer detailsLayer;
     private BigScreenPanel panel;
+    /** M22：搜索浮层 */
+    private BigScreenSearchLayer searchLayer;
 
     // ===== PV视频（M2.5 / spec §S10）=====
     private TrailerManager trailerManager;
@@ -382,6 +388,22 @@ public class BigScreenActivity extends AppCompatActivity
                     Math.max(34, Math.round(sizes.hDp * 0.115f)));
         }
         panel = new BigScreenPanel(overlayLayer, this);
+        // M22：搜索浮层放在最上层（它是模态的；与设置/菜单不会同时打开）
+        searchLayer = new BigScreenSearchLayer(this, overlayLayer, metaLoader,
+                new BigScreenSearchLayer.Listener() {
+            @Override public void onSearchShown() { updateHints(); }
+            @Override public void onSearchHidden() { updateHints(); }
+            @Override public void onDetails(Game game) { openDetailsFromSearch(); }
+            @Override public void onJumpToGame(Game game) { jumpToGameInLibrary(game); }
+            @Override public void onToggleFavorite(Game game) {
+                toggleFavorite(game);
+                searchLayer.refreshCurrent();
+            }
+        });
+        searchLayer.setKeyStyle(prefs.keyStyle());
+        searchLayer.setNsfwBlur(prefs.nsfwBlur());
+        searchLayer.setFocusScalePercent(prefs.focusScale());
+        applySearchMetrics();
         // M16：两个浮层都建好了，这里补一次度量（宽度/内边距按屏幕缩放）
         applyLayerMetrics();
         applyTouchUi();
@@ -409,6 +431,13 @@ public class BigScreenActivity extends AppCompatActivity
         // 遮罩设置改了要立刻生效（PV 正在播就用播放中状态重算）
         applyVideoScrim(trailerPlayer != null && trailerPlayer.isPlaying());
         if (rail != null) { rail.setPinned(prefs.railExpanded()); }
+        if (searchLayer != null) {
+            searchLayer.setKeyStyle(prefs.keyStyle());
+            searchLayer.setNsfwBlur(prefs.nsfwBlur());
+            searchLayer.setFocusScalePercent(prefs.focusScale());
+        }
+        // M22：「卡片大小」改了，搜索浮层的卡片也要跟着变
+        applySearchMetrics();
         if (detailsLayer != null) {
             detailsLayer.setKeyStyle(prefs.keyStyle());
             detailsLayer.setNsfwBlurEnabled(prefs.nsfwBlur());
@@ -514,6 +543,23 @@ public class BigScreenActivity extends AppCompatActivity
         if (settings != null) {
             settings.setMetrics(dp(sizes.setPadH), dp(sizes.setLeftColW));
         }
+        applySearchMetrics();
+    }
+
+    /**
+     * M22：搜索浮层的卡片度量。
+     *
+     * <p>卡片尺寸与主区 shelf **同一套基准**（{@code sizes.cardW/H}）× 用户在设置里的
+     * 「卡片大小」倍率 —— 与 {@code BigScreenShelfAdapter.onBindViewHolder} 的算法一致，
+     * 这样两边卡片大小永远同步，而且在设置里改了「卡片大小」搜索框也会跟着变。
+     */
+    private void applySearchMetrics() {
+        if (searchLayer == null || sizes == null) { return; }
+        final float scale = prefs != null ? prefs.cardScale() : 1f;
+        searchLayer.setMetrics(
+                Math.round(dp(sizes.cardW) * scale),
+                Math.round(dp(sizes.cardH) * scale),
+                dp(Math.max(sizes.gap, 9)));
     }
 
     /** M16：触摸专用 UI（关闭按钮）只在触摸模式显示 —— 手柄玩家看着它反而乱 */
@@ -523,6 +569,8 @@ public class BigScreenActivity extends AppCompatActivity
         if (settings != null) { settings.setTouchUi(touchUi); }
         // M18-5：详情页按钮焦点也跟随（触摸模式下不预选"游玩"）
         if (detailsLayer != null) { detailsLayer.setTouchUi(touchUi); }
+        // M22：搜索浮层的关闭按钮同理
+        if (searchLayer != null) { searchLayer.setTouchUi(touchUi); }
     }
 
     /**
@@ -1554,6 +1602,10 @@ public class BigScreenActivity extends AppCompatActivity
 
     private void buildRailEntries() {
         List<BigScreenRailView.Entry> entries = new ArrayList<>();
+        // M22：搜索放在最顶部 —— 手柄用户 ↑ 顶到头就是它，Ⓐ 打开搜索浮层
+        BigScreenRailView.Entry search = new BigScreenRailView.Entry(
+                F_SEARCH, "搜索", R.drawable.ic_st_search);
+        entries.add(search);
         entries.add(new BigScreenRailView.Entry(F_ALL, "全部游戏", R.drawable.bs_ic_all));
         entries.add(new BigScreenRailView.Entry(F_FAV, "收藏", R.drawable.bs_ic_star));
         entries.add(new BigScreenRailView.Entry(F_RECENT, "最近游玩", R.drawable.bs_ic_clock));
@@ -1565,8 +1617,8 @@ public class BigScreenActivity extends AppCompatActivity
         // 过滤逻辑 filterGames 仍然支持 ENGINE:xxx（以后要加回只需在这里 add 一行）
 
         for (BigScreenRailView.Entry e : entries) {
-            e.count = filterGames(e.id).size();
-            e.active = e.id.equals(filter);
+            e.count = F_SEARCH.equals(e.id) ? 0 : filterGames(e.id).size();
+            e.active = !F_SEARCH.equals(e.id) && e.id.equals(filter);
         }
         rail.setEntries(entries);
     }
@@ -1931,23 +1983,160 @@ List<Shelf> defs = new ArrayList<>();
     @Override
     public void onEntryFocused(BigScreenRailView.Entry entry) {
         if (entry == null) { return; }
+        // M22：「搜索」不是筛选 —— 焦点经过它时不要动 filter / 重建列表
+        if (F_SEARCH.equals(entry.id)) {
+            if (railZone) {
+                infoTitleView.setText(entry.label);
+                infoMetaView.setText("按 " + keys.confirm() + " 打开搜索");
+            }
+            return;
+        }
         if (railZone) {
             infoTitleView.setText(entry.label);
             infoMetaView.setText("该分类共 " + entry.count + " 款游戏");
         }
         // 焦点移动即生效筛选（Steam 式）；只有真变了才重建
         if (!entry.id.equals(filter)) {
-            filter = entry.id;
-            if (prefs.rememberFilter()) { prefs.setLastFilter(filter); }
-            for (BigScreenRailView.Entry e : rail.entries()) { e.active = e.id.equals(filter); }
-            rail.refreshStates();
-            buildShelves();
+            // M22：走统一的切分类入口（侧栏高亮 / 记住筛选 / 重建 都在里面）
+            switchFilterTo(entry.id);
         }
     }
 
     @Override
     public void onEntrySelected(BigScreenRailView.Entry entry) {
         setRailZone(false);
+        // M22：「搜索」项 = 打开搜索浮层（不是切筛选）
+        if (entry != null && F_SEARCH.equals(entry.id)) { openSearch(); }
+    }
+
+    // ================= 搜索（M22）=================
+
+    /** 打开搜索浮层（顶栏按钮 / 侧栏「搜索」项 共用） */
+    private void openSearch() {
+        if (searchLayer == null) { return; }
+        // 打开时若正停在侧栏/按钮排，先退出来，避免两套焦点打架
+        setInfoZone(false);
+        setRailZone(false);
+        if (panel.isVisible()) { panel.hide(); }
+        if (settings != null && settings.isVisible()) { settings.hide(); }
+        if (detailsLayer.isVisible()) { detailsLayer.hide(); }
+        searchLayer.show(new ArrayList<>(allGames));
+    }
+
+    /** 搜索里点「详情」：把结果列表整体交给详情层，这样 ←→ 能在结果里翻 */
+    private void openDetailsFromSearch() {
+        final List<Game> games = searchLayer != null ? searchLayer.resultGames() : null;
+        if (games == null || games.isEmpty()) { return; }
+        final int idx = searchLayer.focusedIndex();
+        searchLayer.hide();
+        detailsLayer.show(games, Math.max(0, idx));
+        syncTrailer(detailsLayer.current());
+    }
+
+    /**
+     * M22：切到指定分类（切完刷新侧栏选中态 + 重建列表）。
+     *
+     * <p>侧栏的「焦点即生效」只覆盖手柄移动；搜索结果、「按最近游玩排序」这类
+     * **程序化**切分类必须走这里，否则侧栏高亮会和实际分类对不上。
+     */
+    private void switchFilterTo(String id) {
+        if (id == null) { id = F_ALL; }
+        filter = id;
+        if (prefs.rememberFilter()) { prefs.setLastFilter(filter); }
+        for (BigScreenRailView.Entry e : rail.entries()) {
+            e.active = !F_SEARCH.equals(e.id) && e.id.equals(filter);
+        }
+        rail.refreshStates();
+        buildShelves();
+    }
+
+    /**
+     * M22：把主界面的**焦点真正移到这款游戏上**（用户要求"外面也展示那个游戏"）。
+     *
+     * <p>做法：分类切到「全部游戏」→ 重建列表 → 在 shelf 里找到它的下标 → 移动焦点引擎。
+     * 走完这套，信息浮层 / 背景大图 / PV 预览全部会跟着切过去（它们都读 {@code focusedGame()}）。
+     *
+     * <p>注意是**定位到那一张卡**，不是把列表第一张换掉 —— 列表内容不变，只是焦点跳过去，
+     * 之后用 ←→ 还能从它旁边继续逛。
+     */
+    private void jumpToGameInLibrary(Game game) {
+        if (game == null) { return; }
+        // ① 分类切到「全部游戏」（搜索命中可能来自任何分类，全部游戏保证它一定在里面）
+        if (!F_ALL.equals(filter)) { switchFilterTo(F_ALL); }
+        focusGameInShelves(game);
+    }
+
+    /**
+     * M22：在当前 shelf 列表里把焦点移到这款游戏上（找不到就什么都不做）。
+     *
+     * <p>从 {@link #jumpToGameInLibrary} 里拆出来 —— 「刚玩完回到大屏要自动聚焦上次那款」
+     * 也要用同一套"定位到那一张卡"的逻辑。
+     */
+    private void focusGameInShelves(Game game) {
+        if (game == null) { return; }
+        // 在 shelf 里找到它的下标
+        int row = -1;
+        int col = -1;
+        outer:
+        for (int r = 0; r < shelves.size(); r++) {
+            List<Game> gs = shelves.get(r).games;
+            if (gs == null) { continue; }
+            for (int c = 0; c < gs.size(); c++) {
+                Game g = gs.get(c);
+                if (g != null && g.id == game.id) { row = r; col = c; break outer; }
+            }
+        }
+        if (row < 0) { return; }
+        // 焦点跳过去（setPosition 返回 true 时会回调 onFocusChanged → applyContentFocus 刷新整个界面）
+        setRailZone(false);
+        setInfoZone(false);
+        if (!focusEngine.setPosition(row, col)) {
+            // 返回 false = 位置没变、不会回调 → 手动刷新一次，保证信息层/背景是最新的
+            applyContentFocus();
+        }
+        // 让卡片横向滚到可见位置（焦点引擎不会自己滚 RecyclerView）
+        Shelf s = shelves.get(row);
+        if (s != null && s.rv != null) {
+            final int target = col;
+            s.rv.post(() -> centerOn(s.rv, target));
+        }
+    }
+
+    /**
+     * M22：从游戏回到大屏后，**重新读库 + 重建列表 + 聚焦刚玩的那款**。
+     *
+     * <p>这是"刚玩的游戏没回到第一个位置、必须重进大屏才刷新"的修复。
+     * 原来的 {@code onResume} 只调了 {@code buildShelves()}，而它排序用的是
+     * 内存里的 {@link #allGames} —— 那是 {@code loadGames()} 在**启动时读一次的旧快照**，
+     * {@code lastPlayedAt} 还是启动那一刻的值。只重建列表 = 拿着旧数据重排一遍，顺序当然不变。
+     * 必须重新 {@code repository.getAll()} 才能拿到刚更新的 {@code last_played_at}。
+     *
+     * <p>顺序上还有一个坑：切到「按最近游玩」→ 重建 → 再聚焦，这三步必须**先后依次**做完；
+     * 如果在重建后立刻聚焦，会读到重建中途的旧 shelf 列表，焦点落空。
+     */
+    private void refreshAfterPlay(long justPlayedId) {
+        // ① 重新读库（拿到新的 last_played_at / total_play_time）
+        allGames.clear();
+        try {
+            allGames.addAll(repository.getAll());
+        } catch (Throwable t) {
+            toast("刷新游戏库失败：" + t.getMessage());
+        }
+        buildRailEntries();
+
+        // ② 「刚玩完」= 默认排序（按最近游玩），否则"回到第一个位置"根本无从谈起。
+        //    用户中途手动改过排序（名称/最新）就尊重他的选择，只重建不切排序。
+        if (!"recent".equals(sortMode)) { sortMode = "recent"; }
+
+        // ③ 分类切到「全部游戏」并按最近游玩重建（switchFilterTo 内部会 buildShelves）
+        switchFilterTo(F_ALL);
+
+        // ④ 最后把焦点移到刚玩的那款 —— 它现在必然在这条列表的最前面。
+        //    注意要在**重新读库之后**再按 id 取（拿到的是刷新后的新对象）。
+        focusGameInShelves(findGameById(justPlayedId));
+
+        updateHeader();
+        updateHints();
     }
 
     // ================= 卡片回调 =================
@@ -2212,6 +2401,8 @@ List<Shelf> defs = new ArrayList<>();
         if (r.inPlace) {
             pendingLaunchSessionId = r.sessionId;
             pendingLaunchAt = r.startedAt;
+            // M22：记下这次玩的是哪款 —— 回到大屏后要重新读库并把焦点落回它身上
+            pendingLaunchGameId = game.id;
         }
     }
 
@@ -2543,7 +2734,9 @@ List<Shelf> defs = new ArrayList<>();
         playSoundFor(intent);
         resetHintFade();
 
-        // 1) 菜单优先
+        // 1) 搜索浮层（模态，优先级最高 —— 它盖在所有东西之上）
+        if (searchLayer != null && searchLayer.isVisible()) { searchLayer.handleIntent(intent); return; }
+        // 2) 菜单
         if (panel.isVisible()) { panel.handleIntent(intent); return; }
         // 2) 设置面板
         if (settings != null && settings.isVisible()) { settings.handleIntent(intent); return; }
@@ -2584,7 +2777,12 @@ List<Shelf> defs = new ArrayList<>();
                 else { focusEngine.move(FocusEngine.DIR_RIGHT); }
                 break;
             case CONFIRM:
-                if (railZone) { setRailZone(false); }
+                if (railZone) {
+                    // M22：侧栏「搜索」项 —— Ⓐ = 打开搜索浮层（它不是筛选，没法靠"焦点即生效"）
+                    BigScreenRailView.Entry fe = rail.focusedEntry();
+                    setRailZone(false);
+                    if (fe != null && F_SEARCH.equals(fe.id)) { openSearch(); }
+                }
                 else if (infoZone) { runInfoAction(); }
                 else { launch(focusedGame()); }
                 break;
@@ -2647,6 +2845,11 @@ List<Shelf> defs = new ArrayList<>();
         if (banner == null) { return; }
         BigScreenRailView.Entry e = rail.focusedEntry();
         if (e == null) { return; }
+        // M22：「搜索」项没有计数，别显示"0 款"
+        if (F_SEARCH.equals(e.id)) {
+            banner.show("搜索 · 按 " + keys.confirm() + " 打开");
+            return;
+        }
         banner.show(e.label + " · " + e.count + " 款");
     }
 
@@ -2654,6 +2857,11 @@ List<Shelf> defs = new ArrayList<>();
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // M22：搜索框正在打字 —— 字母 / 回车 / 退格要进输入框，
+        // 不能被 InputRouter 的"键盘兜底映射"截走（否则打字会变成移动焦点/启动游戏）
+        if (searchLayer != null && searchLayer.shouldBypassRouter(event)) {
+            return super.dispatchKeyEvent(event);
+        }
         if (inputRouter != null && inputRouter.handleKeyEvent(event)) { return true; }
         return super.dispatchKeyEvent(event);
     }
@@ -2666,6 +2874,7 @@ List<Shelf> defs = new ArrayList<>();
 
     @Override
     public void onBackPressed() {
+        if (searchLayer != null && searchLayer.isVisible()) { searchLayer.hide(); return; }
         if (panel.isVisible()) { panel.hide(); return; }
         if (settings != null && settings.isVisible()) { settings.hide(); return; }
         if (detailsLayer.isVisible()) { detailsLayer.hide(); return; }
@@ -2811,7 +3020,10 @@ List<Shelf> defs = new ArrayList<>();
         }
         applyTouchUi();
         hintView.setAlpha(1f);
-        if (panel.isVisible()) {
+        if (searchLayer != null && searchLayer.isVisible()) {
+            hintView.setText("方向键 选择　" + keys.confirm() + " 选中并返回　" + keys.fourth()
+                    + " 详情　" + keys.back() + " 关闭");
+        } else if (panel.isVisible()) {
             hintView.setText("↑↓ 选择　" + keys.confirm() + " 确认　" + keys.back() + " 关闭");
         } else if (settings != null && settings.isVisible()) {
             hintView.setText("← → 分区　↑↓ 条目　" + keys.confirm() + " 修改　" + keys.back() + " 关闭");
@@ -2819,7 +3031,7 @@ List<Shelf> defs = new ArrayList<>();
             hintView.setText("← → 切换　" + keys.confirm() + " 启动　" + keys.third() + " 收藏　"
                     + keys.fourth() + " 菜单　" + keys.back() + " 关闭");
         } else if (railZone) {
-            hintView.setText("↑↓ 选分类　" + keys.confirm() + "/→ 回游戏　" + keys.fourth() + " 展开　"
+            hintView.setText("↑↓ 选分类（含「搜索」）　" + keys.confirm() + "/→ 回游戏　" + keys.fourth() + " 展开　"
                     + keys.lb() + "/" + keys.rb() + " 切分类　" + keys.menu() + " 主菜单");
         } else if (infoZone) {
             hintView.setText("← → 选择　" + keys.confirm() + " 执行　↓/" + keys.back() + " 回到游戏");
@@ -2904,14 +3116,27 @@ List<Shelf> defs = new ArrayList<>();
         // M13：刚从游戏里回来 → 结束游玩会话（本地时长统计）并刷新列表
         // （"最近游玩 / 游玩中"分类和卡片副行都依赖时长数据）
         if (pendingLaunchSessionId > 0L) {
+            final long gameId = pendingLaunchGameId;
             BigScreenLauncher.finishSession(this, repository, pendingLaunchSessionId, pendingLaunchAt);
             pendingLaunchSessionId = 0L;
             pendingLaunchAt = 0L;
-            buildRailEntries();
-            buildShelves();
+            pendingLaunchGameId = 0L;
+            // M22：必须**重新读库**再重建 —— 光调 buildShelves() 用的是内存里的旧快照
+            // （loadGames() 只在启动时读过一次），刚更新的 last_played_at 根本拿不到，
+            // 所以以前"刚玩的游戏不会回到第一个位置，得重进大屏才刷新"。
+            refreshAfterPlay(gameId);
         }
         updateHeader();
         updateHints();
+    }
+
+    /** 按 id 在内存库里找游戏（找不到返回 null） */
+    private Game findGameById(long id) {
+        if (id <= 0L) { return null; }
+        for (Game g : allGames) {
+            if (g != null && g.id == id) { return g; }
+        }
+        return null;
     }
 
     @Override
