@@ -143,10 +143,10 @@ jobs:
             echo "无探针（本次构建未注入诊断探针）"
           fi
           # 外部文本替换补丁必须编进去（防止缓存命中导致补丁丢失、却上传旧产物）
-          if grep -qa 'YukiHub text patch' "$SO"; then
-            echo "外部文本替换补丁已编入 ✓"
+          if grep -qa 'YHFVP-TEXTPATCH' "$SO"; then
+            echo "外部文本替换补丁已编入 ✓ ($(grep -ao 'YHFVP-TEXTPATCH-[0-9.]*' "$SO" | head -1))"
           else
-            echo "::error::librfvp.so 未包含 text_patch 补丁 —— apply_text_patch.py 未生效"
+            echo "::error::librfvp.so 未包含 text_patch 补丁（缺 YHFVP-TEXTPATCH 标识）—— apply_text_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"
