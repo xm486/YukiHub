@@ -63,7 +63,7 @@ public final class FvpVirtualKeys {
     /** 按钮文字大小（sp）。 */
     private static final float BTN_TEXT_SP = 15f;
     /** 按钮间距。 */
-    private static final float BTN_GAP_DP = 20f;
+    private static final float BTN_GAP_DP = 40f;
     /** 按钮离屏幕左边缘的距离。 */
     private static final float EDGE_DP = 12f;
 
