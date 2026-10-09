@@ -35,11 +35,10 @@ public class BigScreenMeta {
         public String rating = "";
         public String lengthText = "";
         public final List<String> tags = new ArrayList<>();
-        public final List<String> screenshots = new ArrayList<>();
 
         public boolean isEmpty() {
             return developer.isEmpty() && released.isEmpty() && description.isEmpty()
-                    && tags.isEmpty() && screenshots.isEmpty();
+                    && tags.isEmpty();
         }
     }
 
@@ -169,13 +168,6 @@ public class BigScreenMeta {
         if (d.lengthText.isEmpty()) { d.lengthText = nz(m.lengthText); }
         if (d.tags.isEmpty() && !nz(m.tagsText).isEmpty()) {
             d.tags.addAll(splitTags(m.tagsText));
-        }
-        if (d.screenshots.isEmpty() && m.screenshotUrls != null) {
-            for (String s : m.screenshotUrls) {
-                if (s != null && !s.trim().isEmpty() && d.screenshots.size() < 8) {
-                    d.screenshots.add(s.trim());
-                }
-            }
         }
     }
 

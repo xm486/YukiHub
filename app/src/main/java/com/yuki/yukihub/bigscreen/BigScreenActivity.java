@@ -3159,7 +3159,6 @@ List<Shelf> defs = new ArrayList<>();
             focusEngine.rememberSelection();
             if (prefs.rememberFilter()) { prefs.setLastFilter(filter); }
         }
-        if (detailsLayer != null) { detailsLayer.shutdown(); }
         if (metaLoader != null) { metaLoader.shutdown(); }
         if (trailerPlayer != null) { trailerPlayer.release(); }
         if (intro != null) { intro.cancel(); }
