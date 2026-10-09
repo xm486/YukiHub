@@ -39,6 +39,7 @@ jobs:
       - name: Apply YukiHub patches (text scale + logcat logging + movie + audio)
         run: |
           cp rfvp-build/apply_text_scale_patch.py rfvp/
+          cp rfvp-build/apply_text_patch.py rfvp/
           cp rfvp-build/apply_android_log_patch.py rfvp/
           cp rfvp-build/apply_movie_patch.py rfvp/
           cp rfvp-build/apply_audio_fix_patch.py rfvp/
@@ -47,6 +48,7 @@ jobs:
           cp rfvp-build/apply_text_click_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
+          python3 apply_text_patch.py
           python3 apply_android_log_patch.py
           python3 apply_movie_patch.py
           python3 apply_audio_fix_patch.py
@@ -139,6 +141,13 @@ jobs:
             echo "::warning::librfvp.so 含 YHPROBE 诊断探针（诊断期预期行为，非错误）"
           else
             echo "无探针（本次构建未注入诊断探针）"
+          fi
+          # 外部文本替换补丁必须编进去（防止缓存命中导致补丁丢失、却上传旧产物）
+          if grep -qa 'YukiHub text patch' "$SO"; then
+            echo "外部文本替换补丁已编入 ✓"
+          else
+            echo "::error::librfvp.so 未包含 text_patch 补丁 —— apply_text_patch.py 未生效"
+            exit 1
           fi
           echo "补丁校验通过 ✓"
 
