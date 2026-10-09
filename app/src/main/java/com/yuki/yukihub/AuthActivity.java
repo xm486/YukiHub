@@ -676,10 +676,12 @@ private void onSendCode() {
 
     new Thread(() -> {
         try {
+            // 验证码也走 POST：只改请求方式，邮箱地址仍在 body 里，
+            // 服务端 send_code / send_reset_code 同时支持两种方式，旧版不受影响。
             String path = resetMode ? "/auth/send_reset_code" : "/auth/send_code";
-            String url = AUTH_BASE_URL + path + "?email="
-                    + java.net.URLEncoder.encode(email, "UTF-8");
-            getJson(url);
+            JSONObject body = new JSONObject();
+            body.put("email", email);
+            postJson(AUTH_BASE_URL + path, body);
 
             runOnUiThread(() -> {
                 sendCodeInFlight = false;
