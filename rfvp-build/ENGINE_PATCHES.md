@@ -102,10 +102,16 @@ mp4 audio: decoded 10741760 samples, 48000 Hz, 2 ch
 **现象**：玩家没转换视频、直接用原版 `.wmv` 时卡死在白屏，且**跳不过去**。
 （此前只是白屏一会儿就能过。）
 
-**根因**：上一轮把 WMV/MPEG 的 `LayerNoAudio` 分支也改成"照常解码音频"，
-而 `decode_wmv_audio_to_wav_bytes` 是**主线程同步全量解码** → 阻塞 + panic。
-另外 `wma/decoder.rs` 存在**负数下标 panic**（`ptab[-3 as usize]`）——
-FFmpeg 用无符号比较 `(unsigned)last_exp >= 96` 拦截负数，Rust 移植只查了上界。
+**根因（两层，主因见 3.3.1）**：
+
+1. **主因：WMA 解码性能灾难**。上一轮把 WMV/MPEG 的 `LayerNoAudio` 分支也改成
+   "照常解码音频"，而 `decode_wmv_audio_to_wav_bytes` 是**主线程同步全量解码**；
+   而 `na_wmv_player` 的 WMA 解码器比实时慢 5.3×（`MdctNaive` 非 FFT）
+   → 一个 130 秒的 OP 要解约 11 分钟 → 主线程永久阻塞。
+   **详细实测数据见 [3.3.1](#331-wmv-没声音结论保持现状不修)。**
+2. **次因：`wma/decoder.rs` 负数下标 panic**（`ptab[-3 as usize]`）——
+   FFmpeg 用无符号比较 `(unsigned)last_exp >= 96` 拦截负数，Rust 移植只查了上界。
+   这会在大文件解码中途崩溃（更早暴露问题）。
 
 **修复**：
 
@@ -117,6 +123,125 @@ FFmpeg 用无符号比较 `(unsigned)last_exp >= 96` 拦截负数，Rust 移植�
 > 实测部分游戏的原版 wmv 是可以正常播放的，不要为了 MP4 而改动 WMV 路径。
 
 **验证日志**：`Movie: started` 仅 7ms（原为 15ms+ 同步解码）。
+
+---
+
+### 3.3.1 WMV 没声音（结论：**保持现状，不修**）
+
+> 这一节是**排查记录 + 明确结论**。以后再遇到"WMV 能播画面但没声音"，
+> 直接看这里，**不要重新排查**。
+
+#### 现象
+
+- 部分游戏（如《樱花萌放》）OP 是 `.wmv`：**画面能正常播放，但没有声音**。
+- 转成 MP4 后一切正常 → 说明不是游戏资源问题。
+
+#### 排查过程（含实测数据）
+
+**① 确认文件真实格式**（解析 ASF 容器头）：
+
+```bash
+# 结果（sakramoyu/movie/01.wmv）
+视频：biCompression = "WMV2"   1280x720
+音频：wFormatTag = 0x0161 (WMAv2)  2ch / 48000Hz / 160kbps
+      block_align=853  bits=16  cbSize=10
+```
+
+**两种格式 rfvp 都声明支持**（`na_wmv_player/src/api.rs`）：
+
+```rust
+// The decoder selects the first audio stream with format tag 0x0160 (WMAv1) or 0x0161 (WMAv2).
+if matches!(a.format_tag, 0x0160 | 0x0161) { ... }
+```
+
+→ **不是"不支持这种编码"**。
+
+**② 真编译真跑**（把 `na_wmv_player` 单独编译，直接解码该文件）：
+
+```text
+# 音频（WMAv2）—— AsfWmaDecoder::next_frame()
+opened: sr=48000 ch=2
+  frames=500  samples=2048000  elapsed=56.9s    pts=21291   (≈21s 音频)
+  frames=1000 samples=4096000  elapsed=112.0s   pts=42624
+exit=124   ← 120 秒超时，只解出 ~21 秒音频
+
+# 视频（WMV2）—— AsfWmv2Decoder::next_frame()
+VIDEO DONE frames=3909 elapsed=37.7s video_sec=130.4      ← 快 3.5× 实时
+```
+
+**结论（关键数据）**：
+
+| 流 | 内容时长 | 解码耗时 | 相对实时 |
+|---|---|---|---|
+| 视频 WMV2 | 130.4 s | **37.7 s** | 3.5× 快 ✓ |
+| 音频 WMAv2 | ~21 s | **112 s** | **5.3× 慢** ✗ |
+
+→ **音频解码比实时慢 5.3 倍**。一个 130 秒的 OP，全量解码需要 **约 11 分钟**
+（PC 上；手机上更慢）。
+
+**③ 为什么会卡死白屏**
+
+`decode_wmv_audio_to_wav_bytes()` 是**主线程同步**调用：
+
+```rust
+while let Some(fr) = dec.next_frame()? {   // 主线程死等，直到整个文件解完
+    ...
+}
+```
+
+11 分钟主线程阻塞 = 永久白屏 + 跳不过去（这就是 3.3 白屏问题的**真正原因**，
+比"负数下标 panic"更根本）。
+
+**④ 性能灾难的根因**
+
+`crates/na_wmv_player/src/wma/mdct.rs` 用的是 **`MdctNaive`（朴素实现，未用 FFT）**。
+功能正确，但性能不可接受。
+
+#### 为什么不做（方案评估）
+
+| 方案 | 可行性 | 说明 |
+|---|---|---|
+| A. 直接开 WMV 音频解码 | ❌ | 慢 5.3×，主线程同步 → 卡死 11 分钟 |
+| B. 后台线程边解边播 | ⚠️ 且无效 | 需重写解码线程+环形缓冲+时钟同步；但速度仅 **0.19× 实时**，**根本追不上**（OP 播 10 秒才解出 2 秒音频） |
+| C. 用系统 MediaCodec 解 WMA | ❌ | Android MediaCodec **不支持 WMA**（专利原因已移除） |
+| D. 引入 FFmpeg 软解 | ❌ 重 | ffmpeg-kit 使 APK +30MB，且授权复杂 |
+| **E. 保持现状（MP4 方案）** | ✅ **推荐** | 玩家自行转 MP4 即可获得**完整功能** |
+
+**最终决定：维持现状。** 理由：
+
+1. **收益/成本极差**：为"原版 wmv 出声"要么卡死 11 分钟，要么重写整条音频管线（还追不上）。
+2. **MP4 方案已是完整解**：转换格式即可获得画面+音频+跳过+防穿透+点字动画全套功能。
+3. **"WMV 没声音"属于原版行为**（见下），不是我们引入的 bug。
+4. 强行改动会引入新风险：层效果期间脚本仍在运行 → 音频与 BGM 冲突、
+   时钟不同步、退出时资源泄漏等。
+
+#### 补充：`MovieMode` 与"层效果"（LayerNoAudio）
+
+```rust
+// movie.rs
+let is_layer_effect = flag.is_nil();          // 脚本 MoviePlay(path, flag) 的 flag
+let mode = if is_layer_effect {
+    MovieMode::LayerNoAudio                    // 层效果：视频 only，脚本继续跑
+} else {
+    MovieMode::ModalWithAudio                  // 模态：视频+音频，脚本暂停
+};
+```
+
+| | `LayerNoAudio`（层效果） | `ModalWithAudio`（模态） |
+|---|---|---|
+| 触发 | `MoviePlay(path)`，flag = **Nil** | `MoviePlay(path, 1)`，flag **非 Nil** |
+| 画面 | 画在图层上，**脚本继续运行** | 全屏模态，`set_halt(true)` 暂停脚本 |
+| 典型用途 | **OP**、演出特效、背景动画 | 强制过场动画 |
+| 原版音频 | **不解码**（设计如此，避免与 BGM 打架） | 解码 |
+
+> 注意：原版 OP 恰恰是走 `LayerNoAudio` 的，而 Windows 版 OP **有声音**。
+> 因此我们**给 MP4 的层效果分支补上了音频解码**（`apply_movie_patch.py` 第 8 条），
+> 但 **WMV 的层效果分支保持原版 `(None, None)`**（原因见上：解码性能不可接受）。
+
+#### 给用户的话
+
+> **WMV 视频想有声音？请自行转成 MP4。**
+> 转换后即可获得完整功能；原版 WMV 则保持"能播画面、可跳过、不卡死"。
 
 ---
 
@@ -361,6 +486,10 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
       `motion: Invalid duration`、`Invalid alpha motion id`、`Invalid id`、
       `float_to_int: Invalid value type`、`history_set: unexpected value ... Nil`。
 - [ ] `TextResume` 保护可考虑反馈给上游（这是真实崩溃点）。
+- [ ] **WMV 音频：明确不做**（见 3.3.1）。若将来上游把 `wma/mdct.rs` 的
+      `MdctNaive` 换成 FFT 实现（性能提升到实时以上），才值得重新评估
+      "WMV 层效果也解音频"。**目前维持现状。**
+- [ ] 可选：把 3.3.1 的结论同步给用户文档（"WMV 想有声音请转 MP4"）。
 
 ---
 
@@ -384,8 +513,12 @@ if st.contains(ThreadState::CONTEXT_STATUS_TEXT) {
 | 功能 | 依赖 | 说明 |
 |---|---|---|
 | 文字大小 1.0~2.0x | `rfvp_android_set_text_scale` | 引擎设置里选，下次启动生效 |
-| OP / 电影播放（含音频） | video-sys + movie + audio 补丁 | MP4 优先；WMV 遵循原版 |
-| 原版 .wmv 可跳过 | wmv 补丁 | 不再卡死白屏 |
+| OP / 电影播放（**MP4**，含音频） | video-sys + movie + audio 补丁 | **推荐格式**：画面+音频+可跳过 全功能 |
+| 原版 `.wmv` 播放 | wmv 补丁 | **能播画面、可跳过、不卡死**；**无声音**（原版行为，见 3.3.1） |
+| 原版 `.mpg/.mpeg` | — | 不做同步音频解码（同 WMV 理由） |
 | **点击补全点字动画** | text_click 补丁 | 动画中点一下=显示完整句；再点一下才过 |
 | 按钮点击不穿透 | APK 侧 `FvpActivity`（v4 输入映射） | **与 so 无关**，需重编 APK |
 | 设置滑条 / 文本速度保存 | APK 侧直通映射 | 同上 |
+
+> **给用户的一句话**：想要 OP 有声音，**把 `movie/*.wmv` 转成 `.mp4`** 即可
+> （同目录同名，引擎会优先用 `.mp4`）。
