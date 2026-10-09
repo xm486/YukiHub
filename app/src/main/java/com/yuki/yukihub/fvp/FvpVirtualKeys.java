@@ -63,14 +63,14 @@ public final class FvpVirtualKeys {
     /** 按钮文字大小（sp）。 */
     private static final float BTN_TEXT_SP = 15f;
     /** 按钮间距。 */
-    private static final float BTN_GAP_DP = 8f;
+    private static final float BTN_GAP_DP = 20f;
     /** 按钮离屏幕左边缘的距离。 */
     private static final float EDGE_DP = 12f;
 
-    /** 常态不透明度 60%（0x99/255）。 */
-    private static final int BG_NORMAL = 0x99333333;
-    /** 按下时不透明度 70%（0xB3/255）。 */
-    private static final int BG_PRESSED = 0xB31976D2;
+    /** 常态不透明度 40%（0x66/255）。 */
+    private static final int BG_NORMAL = 0x66333333;
+    /** 按下时不透明度 60%（0x99/255）。 */
+    private static final int BG_PRESSED = 0x991976D2;
 
     /** Ctrl 长按连发的首次延迟（毫秒），模拟物理键盘的按键重复。 */
     private static final long CTRL_REPEAT_INITIAL_MS = 300L;
