@@ -387,6 +387,91 @@ public class MetadataController {
         else delegate.metadataRepository().saveVndb(gameId, meta);
     }
 
+    /**
+     * 扫描入库后的「按当前资料源自动匹配」。
+     *
+     * 以前这条路径硬编码走 VNDB（不管用户设置里选了什么），导致扫描出来的游戏
+     * 永远被标成 VNDB 源；手动添加走 fetchCurrentSourceMetadata() 所以是正常的。
+     * 现在统一按 metadataSource() 决定用哪个源。
+     *
+     * 行为：
+     * - 只取首个候选（自动匹配求稳，不弹候选框）；
+     * - 有封面且本地还没有封面时才缓存封面；
+     * - 全部在 IO 线程调用（内部为同步网络请求）。
+     *
+     * @return 实际写入元数据的游戏数量
+     */
+    public int autoMatchCurrentSourceForImportedGames(List<Game> games) {
+        if (games == null || games.isEmpty()) return 0;
+        if (delegate.metadataRepository() == null || delegate.gameRepository() == null) return 0;
+        String source = metadataSource();
+        int matched = 0;
+        for (Game g : games) {
+            if (g == null || g.id <= 0 || g.title == null || g.title.trim().isEmpty()) continue;
+            try {
+                VnMetadata meta = searchFirstCandidateForSource(source, buildMetadataSearchKeyword(g.title));
+                if (meta == null || meta.id == null || meta.id.isEmpty()) continue;
+                // NextMoe 搜索命中只有摘要，详情（简介/标签/截图）要再拉一次；
+                // 拉失败就退回摘要，不让整条流程失败。
+                if (SOURCE_NEXTMOE.equals(source)) {
+                    try {
+                        VnMetadata full = com.yuki.yukihub.nextmoe.NextMoeClient.getWork(meta.id, meta);
+                        if (full != null) meta = full;
+                    } catch (Throwable ignored) { }
+                }
+                saveMetadataForSource(g.id, source, meta);
+                matched++;
+                if (!hasLocalCover(g) && meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
+                    String cover = cacheRemoteImageSync(meta.coverUrl, "scan_cover_" + delegate.emptyText(meta.id, String.valueOf(g.id)));
+                    if (cover != null && !cover.isEmpty()) {
+                        g.coverUri = cover;
+                        g.coverPersistUri = cover;
+                        g.coverSourceType = 1;
+                        delegate.gameRepository().update(g);
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w("YukiHub", "auto " + source + " match failed: " + g.title, t);
+            }
+        }
+        return matched;
+    }
+
+    /**
+     * 按指定源取首个候选。各源的同步搜索入口签名不一致，这里统一收口。
+     * 任一步失败都返回 null（自动匹配是尽力而为，不抛异常打断整批）。
+     */
+    private VnMetadata searchFirstCandidateForSource(String source, String keyword) {
+        try {
+            List<VnMetadata> data;
+            if (SOURCE_YMGAL.equals(source)) {
+                data = YmgalClient.searchCandidates(keyword, 1);
+            } else if (SOURCE_HIKARINAGI.equals(source)) {
+                data = HikarinagiClient.searchCandidates(keyword, 1);
+            } else if (SOURCE_NEXTMOE.equals(source)) {
+                if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) return null;
+                data = com.yuki.yukihub.nextmoe.NextMoeClient.searchCandidates(keyword, 1);
+            } else if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) {
+                String token = bangumiToken();
+                if (token == null || token.trim().isEmpty()) return null;
+                data = BangumiClient.searchCandidates(keyword, token, 1, SOURCE_BANGUMI_MIRROR.equals(source));
+            } else {
+                data = VndbClient.searchCandidates(keyword, 1);
+            }
+            return (data == null || data.isEmpty()) ? null : data.get(0);
+        } catch (Throwable t) {
+            Log.w("YukiHub", "search first candidate failed source=" + source + " kw=" + keyword, t);
+            return null;
+        }
+    }
+
+    /** 本地是否已有封面（与 MainActivity.hasCover 同口径）。 */
+    private boolean hasLocalCover(Game g) {
+        if (g == null) return false;
+        return (g.coverPersistUri != null && !g.coverPersistUri.trim().isEmpty())
+                || (g.coverUri != null && !g.coverUri.trim().isEmpty());
+    }
+
     public boolean sameMetadataIdentity(VnMetadata a, VnMetadata b) {
         if (a == null || b == null) return false;
         String ai = a.id == null ? "" : a.id.trim();
