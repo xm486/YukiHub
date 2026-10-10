@@ -188,6 +188,7 @@ public class SocialApiClient {
             info.avatarUrl = f.optString("avatarUrl", "");
             info.signature = f.optString("signature", "");
             info.status = f.optString("status", "offline");
+            info.platform = f.optString("platform", "");
             info.activity = f.optString("activity", "");
             info.unreadCount = f.optInt("unreadCount", 0);
             info.lastHeartbeat = f.optString("lastHeartbeat", "");

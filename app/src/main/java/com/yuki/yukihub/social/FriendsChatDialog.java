@@ -530,6 +530,15 @@ public class FriendsChatDialog {
         dl.setMargins(dp(6), 0, 0, 0);
         dot.setBackgroundResource(presenceDotRes(friend.status));
         nameRow.addView(dot, dl);
+        // 平台标识（手机 / 电脑 / 网页）：离线时不显示
+        if (!friend.isOffline()) {
+            ImageView platIc = new ImageView(activity);
+            platIc.setImageResource(platformIconRes(friend.platform));
+            platIc.setColorFilter(0xFF7A8599);
+            LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(dp(13), dp(13));
+            pl.setMargins(dp(5), 0, 0, 0);
+            nameRow.addView(platIc, pl);
+        }
         col.addView(nameRow);
 
         // Steam 风格：仅 online + 有 activity 时显示绿色「正在玩」
@@ -3121,7 +3130,15 @@ public class FriendsChatDialog {
         LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(8), dp(8));
         dotLp.setMargins(0, 0, dp(5), 0);
         statusRow.addView(statusDot, dotLp);
-
+        // 平台标识（手机 / 电脑 / 网页）：离线时不显示
+        if (!"offline".equals(status)) {
+            ImageView platIc = new ImageView(activity);
+            platIc.setImageResource(platformIconRes(profile.optString("platform", "")));
+            platIc.setColorFilter(0xFF9AA4BF);
+            LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(dp(13), dp(13));
+            pl.setMargins(0, 0, dp(5), 0);
+            statusRow.addView(platIc, pl);
+        }
         TextView statusText = new TextView(activity);
         if (isDisabled) {
             statusText.setText("已封禁  ·  UID " + uid);
@@ -4277,6 +4294,12 @@ public class FriendsChatDialog {
             case "busy":    return R.drawable.bg_presence_busy;
             default:        return R.drawable.bg_presence_offline;
         }
+    }
+    /** 平台标识 → 图标资源。未知按手机处理，与网页端口径一致。 */
+    private int platformIconRes(String platform) {
+        if ("pc".equals(platform))  return R.drawable.ic_platform_pc;
+        if ("web".equals(platform)) return R.drawable.ic_platform_web;
+        return R.drawable.ic_platform_android;
     }
 
     private String formatTime(String isoDate) {
