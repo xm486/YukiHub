@@ -11,6 +11,7 @@ public class FriendInfo {
     public String signature;
     public String note;        // 我对该好友的备注
     public String status;      // online / away / busy / offline
+    public String platform;    // android / pc / web（客户端平台，服务端已兜底，不会为空）
     public String activity;    // "正在玩：Clannad"
     public int unreadCount;    // 未读消息数
     public String lastHeartbeat; // 最后心跳时间（ISO 格式，用于离线时显示"最后在线"）
@@ -31,4 +32,11 @@ public class FriendInfo {
     public boolean isAway()    { return "away".equals(status); }
     public boolean isBusy()    { return "busy".equals(status); }
     public boolean isOffline() { return "offline".equals(status); }
+
+    /** 平台中文短标签（未知按手机处理，与网页端口径一致） */
+    public String platformLabel() {
+        if ("pc".equals(platform)) return "电脑";
+        if ("web".equals(platform)) return "网页";
+        return "手机";
+    }
 }

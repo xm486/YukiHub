@@ -307,6 +307,9 @@ public class PresenceManager {
             body.put("status", status);
             // 始终带上 activity 字段：空字符串表示清除
             body.put("activity", activity == null ? "" : activity);
+            // 平台标识：让服务端能区分手机 / 电脑在线。
+            // 服务端语义是「非空才覆盖」，所以旧版本客户端不发这个字段也不会把已记录的平台清掉。
+            body.put("platform", "android");
 
             byte[] bodyBytes = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) {
