@@ -37,10 +37,17 @@ public class MetadataController {
 
     public static final String SOURCE_VNDB = "vndb";
     public static final String SOURCE_BANGUMI = "bangumi";
-    public static final String SOURCE_BANGUMI_MIRROR = "bangumi_mirror";
     public static final String SOURCE_YMGAL = "ymgal";
     public static final String SOURCE_HIKARINAGI = "hikarinagi";
     public static final String SOURCE_NEXTMOE = "nextmoe";
+    /**
+     * 已下线的 Bangumi 镜像源标识（历史遗留）。
+     *
+     * 镜像站长期不稳定（bangumi.lol → bangumi.pro 都挂过），且已有 NextMoe 源替代，
+     * 故移除该源。此常量只为兼容迁移保留：读取到旧值时归一为 Bangumi 官源，
+     * 不再作为可选数据源对外暴露。
+     */
+    public static final String LEGACY_SOURCE_BANGUMI_MIRROR = "bangumi_mirror";
 
     public static final String KEY_METADATA_SOURCE = "metadata_source";
     public static final String KEY_VISIBLE_METADATA_SOURCE_PREFIX = "visible_metadata_source_";
@@ -144,34 +151,41 @@ public class MetadataController {
     // ======================== metadata source ========================
 
     public String metadataSource() {
-        return delegate.prefs() == null ? SOURCE_VNDB : delegate.prefs().getString(KEY_METADATA_SOURCE, SOURCE_VNDB);
+        String source = delegate.prefs() == null ? SOURCE_VNDB : delegate.prefs().getString(KEY_METADATA_SOURCE, SOURCE_VNDB);
+        // 兼容迁移：镜像源已下线（镜像站长期不稳定，且已有 NextMoe 源替代）。
+        // 旧版存过 "bangumi_mirror" 的用户，这里静默降级到 Bangumi 官源，
+        // 避免设置面板读到无效值而回退到 VNDB。
+        if (LEGACY_SOURCE_BANGUMI_MIRROR.equals(source)) return SOURCE_BANGUMI;
+        return source;
     }
-
     public String metadataSourceLabel() {
         return metadataSourceLabel(metadataSource());
     }
-
     public String metadataSourceLabel(String source) {
         if (SOURCE_BANGUMI.equals(source)) return "Bangumi";
-        if (SOURCE_BANGUMI_MIRROR.equals(source)) return "Bangumi镜像";
         if (SOURCE_YMGAL.equals(source)) return "月幕Gal";
         if (SOURCE_HIKARINAGI.equals(source)) return "Hikarinagi";
         if (SOURCE_NEXTMOE.equals(source)) return "NextMoe";
         return "VNDB";
     }
-
     public String normalizeMetadataSource(String source) {
-        if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source)) return source;
+        // 镜像源已下线，旧值一律归一到 Bangumi 官源
+        if (LEGACY_SOURCE_BANGUMI_MIRROR.equals(source)) return SOURCE_BANGUMI;
+        if (SOURCE_BANGUMI.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source)) return source;
         return SOURCE_VNDB;
     }
-
     public boolean isValidMetadataSource(String source) {
-        return SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source);
+        // 镜像源不再有效（旧值在读取处已归一，这里不接受它）
+        return SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source);
     }
 
     public String visibleMetadataSource(long gameId) {
         if (delegate.prefs() == null || gameId <= 0) return "";
         String source = delegate.prefs().getString(KEY_VISIBLE_METADATA_SOURCE_PREFIX + gameId, "");
+        // 兼容迁移：该 key 是历史写入的，老用户可能存过已下线的 "bangumi_mirror"。
+        // 直接判无效会退化成「无可见源」，虽然靠身份匹配兜底也能显示对，
+        // 但这里显式归一更稳妥，避免依赖兜底路径。
+        if (LEGACY_SOURCE_BANGUMI_MIRROR.equals(source)) return SOURCE_BANGUMI;
         return isValidMetadataSource(source) ? source : "";
     }
 
@@ -191,7 +205,7 @@ public class MetadataController {
         if (SOURCE_YMGAL.equals(s)) return delegate.metadataRepository().getYmgal(gameId);
         if (SOURCE_HIKARINAGI.equals(s)) return delegate.metadataRepository().getHikarinagi(gameId);
         if (SOURCE_NEXTMOE.equals(s)) return delegate.metadataRepository().getNextMoe(gameId);
-        if (SOURCE_BANGUMI.equals(s) || SOURCE_BANGUMI_MIRROR.equals(s)) return delegate.metadataRepository().getBangumi(gameId);
+        if (SOURCE_BANGUMI.equals(s)) return delegate.metadataRepository().getBangumi(gameId);
         return delegate.metadataRepository().getVndb(gameId);
     }
 
@@ -240,14 +254,9 @@ public class MetadataController {
     }
 
     public boolean usingBangumi() {
-        String source = metadataSource();
-        return SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source);
+        // 镜像源已下线，usingBangumi 现在等价于「当前源是 Bangumi 官源」
+        return SOURCE_BANGUMI.equals(metadataSource());
     }
-
-    public boolean usingBangumiMirror() {
-        return SOURCE_BANGUMI_MIRROR.equals(metadataSource());
-    }
-
     public boolean usingYmgal() {
         return SOURCE_YMGAL.equals(metadataSource());
     }
@@ -327,7 +336,7 @@ public class MetadataController {
             meta = delegate.metadataRepository().getVndb(gameId);
             if (meta != null) return meta;
         }
-        if (!SOURCE_BANGUMI.equals(current) && !SOURCE_BANGUMI_MIRROR.equals(current)) {
+        if (!SOURCE_BANGUMI.equals(current)) {
             meta = delegate.metadataRepository().getBangumi(gameId);
             if (meta != null) return meta;
         }
@@ -354,7 +363,7 @@ public class MetadataController {
         if (SOURCE_YMGAL.equals(source)) delegate.metadataRepository().saveYmgal(gameId, meta);
         else if (SOURCE_HIKARINAGI.equals(source)) delegate.metadataRepository().saveHikarinagi(gameId, meta);
         else if (SOURCE_NEXTMOE.equals(source)) delegate.metadataRepository().saveNextMoe(gameId, meta);
-        else if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) delegate.metadataRepository().saveBangumi(gameId, meta);
+        else if (SOURCE_BANGUMI.equals(source)) delegate.metadataRepository().saveBangumi(gameId, meta);
         else delegate.metadataRepository().saveVndb(gameId, meta);
         setVisibleMetadataSource(gameId, source);
     }
@@ -383,7 +392,7 @@ public class MetadataController {
         if (SOURCE_YMGAL.equals(s)) delegate.metadataRepository().saveYmgal(gameId, meta);
         else if (SOURCE_HIKARINAGI.equals(s)) delegate.metadataRepository().saveHikarinagi(gameId, meta);
         else if (SOURCE_NEXTMOE.equals(s)) delegate.metadataRepository().saveNextMoe(gameId, meta);
-        else if (SOURCE_BANGUMI.equals(s) || SOURCE_BANGUMI_MIRROR.equals(s)) delegate.metadataRepository().saveBangumi(gameId, meta);
+        else if (SOURCE_BANGUMI.equals(s)) delegate.metadataRepository().saveBangumi(gameId, meta);
         else delegate.metadataRepository().saveVndb(gameId, meta);
     }
 
@@ -451,10 +460,10 @@ public class MetadataController {
             } else if (SOURCE_NEXTMOE.equals(source)) {
                 if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) return null;
                 data = com.yuki.yukihub.nextmoe.NextMoeClient.searchCandidates(keyword, 1);
-            } else if (SOURCE_BANGUMI.equals(source) || SOURCE_BANGUMI_MIRROR.equals(source)) {
+            } else if (SOURCE_BANGUMI.equals(source)) {
                 String token = bangumiToken();
                 if (token == null || token.trim().isEmpty()) return null;
-                data = BangumiClient.searchCandidates(keyword, token, 1, SOURCE_BANGUMI_MIRROR.equals(source));
+                data = BangumiClient.searchCandidates(keyword, token, 1);
             } else {
                 data = VndbClient.searchCandidates(keyword, 1);
             }
@@ -560,9 +569,8 @@ public class MetadataController {
         delegate.setSideDescription("正在从 Bangumi 获取资料…");
         AppExecutors.runOnIo(() -> {
             try {
-                VnMetadata meta = BangumiClient.searchFirst(keyword, token, usingBangumiMirror());
+                VnMetadata meta = BangumiClient.searchFirst(keyword, token);
                 if (!isActivityAlive()) return;
-
                 delegate.runOnUiThread(() -> {
                     if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
                     if (meta == null) {
@@ -958,7 +966,7 @@ public class MetadataController {
         delegate.setSideDescription("正在按自定义关键词搜索 Bangumi…");
         AppExecutors.runOnIo(() -> {
             try {
-                List<VnMetadata> data = BangumiClient.searchCandidates(keyword, token, 8, usingBangumiMirror());
+                List<VnMetadata> data = BangumiClient.searchCandidates(keyword, token, 8);
                 if (!isActivityAlive()) return;
 
                 delegate.runOnUiThread(() -> {
@@ -1601,7 +1609,7 @@ public class MetadataController {
         if (usingBangumi()) {
             String token = bangumiToken();
             if (token == null || token.trim().isEmpty()) throw new Exception("Bangumi未配置 Token");
-            VnMetadata meta = BangumiClient.searchFirst(keyword, token, usingBangumiMirror());
+            VnMetadata meta = BangumiClient.searchFirst(keyword, token);
             if (meta == null) return 2;
             saveCurrentSourceMetadata(id, meta);
             return 0;

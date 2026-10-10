@@ -110,7 +110,6 @@ public class AiReviewController {
         boolean usingHikarinagi();
         boolean usingNextMoe();
         boolean usingBangumi();
-        boolean usingBangumiMirror();
         String bangumiToken();
         String buildMetadataSearchKeyword(String title);
         boolean isConfidentMatch(String localTitle, VnMetadata meta);
@@ -806,7 +805,7 @@ private VnMetadata lookupAiReviewMetadataOnline(Game game) {
         } else if (delegate.usingBangumi()) {
             String token = delegate.bangumiToken();
             if (token == null || token.trim().isEmpty()) return null;
-            List<VnMetadata> list = BangumiClient.searchCandidates(keyword, token, 3, delegate.usingBangumiMirror());
+            List<VnMetadata> list = BangumiClient.searchCandidates(keyword, token, 3);
             VnMetadata chosen = chooseAiMetadataCandidate(game.title, list);
             if (chosen != null) delegate.metadataRepository().saveBangumi(game.id, chosen);
             return chosen;
