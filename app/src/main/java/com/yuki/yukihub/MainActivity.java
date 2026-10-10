@@ -143,7 +143,6 @@ import com.yuki.yukihub.launcher.PcLaunchPrefs;
 import com.yuki.yukihub.launcher.WinlatorPcLauncher;
 import com.yuki.yukihub.metadata.BangumiClient;
 import com.yuki.yukihub.metadata.MetadataController;
-import com.yuki.yukihub.metadata.VndbClient;
 import com.yuki.yukihub.metadata.VnMetadata;
 import com.yuki.yukihub.metadata.YmgalClient;
 import com.yuki.yukihub.model.EngineType;
@@ -11246,7 +11245,7 @@ private void showScanResults(List<ScanResult> results) {
             if (stats.added > 0) AppExecutors.runOnIo(() -> autoMatchVndbForImportedGames(stats.importedGames));
             d.dismiss();
             loadGames();
-            Toast.makeText(this, "新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配" + metadataSourceLabel() + "封面" : ""), Toast.LENGTH_SHORT).show();
         });
         d.show();
     }
@@ -11283,7 +11282,7 @@ if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size
                 autoLibraryScanRunning = false;
                 setScanLoading(false);
                 loadGames();
-                if (showToast) Toast.makeText(this, "扫描[" + scanModeLabel + "] " + scanRoots.size() + " 个目录：新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配 VNDB 封面" : ""), Toast.LENGTH_SHORT).show();
+                if (showToast) Toast.makeText(this, "扫描[" + scanModeLabel + "] " + scanRoots.size() + " 个目录：新增 " + stats.added + " 个，已存在 " + stats.skipped + " 个" + (stats.added > 0 ? "，正在自动匹配" + metadataSourceLabel() + "封面" : ""), Toast.LENGTH_SHORT).show();
                 // 覆盖已绑定目录的老用户：扫描完成后检查一次是否需要询问 .nomedia。
                 // 只在用户主动扫描时触发，开机自动扫描不打扰。
                 if (showToast) maybePromptNoMediaForActiveRoots();
@@ -11326,36 +11325,14 @@ if (showToast) Toast.makeText(MainActivity.this, "正在扫描 " + rootUris.size
 
     private void autoMatchVndbForImportedGames(List<Game> games) {
         if (games == null || games.isEmpty()) return;
-        int changed = 0;
-        for (Game g : games) {
-            if (g == null || g.id <= 0 || g.title == null || g.title.trim().isEmpty()) continue;
-            try {
-                List<VnMetadata> candidates = VndbClient.searchCandidates(g.title, 1);
-                if (candidates == null || candidates.isEmpty()) continue;
-                VnMetadata meta = candidates.get(0);
-                saveMetadataForSource(g.id, MetadataController.SOURCE_VNDB, meta);
-                boolean updated = false;
-                if (!hasCover(g) && meta.coverUrl != null && !meta.coverUrl.isEmpty()) {
-                    String cover = cacheRemoteImageSync(meta.coverUrl, "scan_cover_" + emptyText(meta.id, String.valueOf(g.id)));
-                    if (cover != null && !cover.isEmpty()) {
-                        g.coverUri = cover;
-                        g.coverPersistUri = cover;
-                        g.coverSourceType = 1;
-                        updated = true;
-                    }
-                }
-                if (updated) {
-                    repository.update(g);
-                    changed++;
-                }
-            } catch (Throwable t) {
-                Log.w("YukiHub", "auto VNDB match failed: " + g.title, t);
-            }
-        }
-        int finalChanged = changed;
-        if (finalChanged > 0) runOnUiThread(() -> {
+        // 按「设置 → 右侧资料源」当前选择的源来匹配，不再硬编码 VNDB。
+        // （以前这里固定走 VNDB，导致扫描出来的游戏永远被标成 VNDB 源，
+        //   而手动添加走 fetchCurrentSourceMetadata() 所以是正常的。）
+        String sourceLabel = metadataSourceLabel();
+        int matched = metadataController.autoMatchCurrentSourceForImportedGames(games);
+        if (matched > 0) runOnUiThread(() -> {
             loadGames();
-            Toast.makeText(MainActivity.this, "已自动补全 " + finalChanged + " 个 VNDB 封面", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已自动补全 " + matched + " 个" + sourceLabel + "封面", Toast.LENGTH_SHORT).show();
         });
     }
 
