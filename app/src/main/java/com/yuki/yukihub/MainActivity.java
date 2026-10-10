@@ -444,7 +444,6 @@ prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             @Override public boolean usingHikarinagi() { return MainActivity.this.usingHikarinagi(); }
             @Override public boolean usingNextMoe() { return metadataController.usingNextMoe(); }
             @Override public boolean usingBangumi() { return MainActivity.this.usingBangumi(); }
-            @Override public boolean usingBangumiMirror() { return MainActivity.this.usingBangumiMirror(); }
             @Override public String bangumiToken() { return MainActivity.this.bangumiToken(); }
             @Override public String buildMetadataSearchKeyword(String title) { return MainActivity.this.buildMetadataSearchKeyword(title); }
             @Override public boolean isConfidentMatch(String localTitle, VnMetadata meta) { return MainActivity.this.isConfidentMatch(localTitle, meta); }
@@ -5229,10 +5228,6 @@ private boolean usingBangumi() {
     return metadataController.usingBangumi();
 }
 
-private boolean usingBangumiMirror() {
-    return metadataController.usingBangumiMirror();
-}
-
 private boolean usingYmgal() {
     return metadataController.usingYmgal();
 }
@@ -6722,15 +6717,16 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(sourceTitle);
 
         Spinner sourceSpinner = new TapSafeSpinner(this);
-        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "NextMoe（推荐 · 未萌授权）", "Bangumi（需要 Token）", "Bangumi 镜像（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
+        // 下拉项：VNDB / NextMoe / Bangumi / 月幕Gal / Hikarinagi
+        // （原「Bangumi 镜像」项已移除：镜像站长期不稳定，且已有 NextMoe 源替代）
+        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "NextMoe（推荐 · 未萌授权）", "Bangumi（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
         if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(2);
-else if (MetadataController.SOURCE_BANGUMI_MIRROR.equals(currentSource)) sourceSpinner.setSelection(3);
-else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(4);
-else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(5);
-else if (MetadataController.SOURCE_NEXTMOE.equals(currentSource)) sourceSpinner.setSelection(1);
-else sourceSpinner.setSelection(0);
+        else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
+        else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(4);
+        else if (MetadataController.SOURCE_NEXTMOE.equals(currentSource)) sourceSpinner.setSelection(1);
+        else sourceSpinner.setSelection(0);
         root.addView(sourceSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         // NextMoe 连接状态与授权入口（环回回调 + PKCE，令牌走 Android Keystore 加密存储）
@@ -7078,14 +7074,14 @@ else sourceSpinner.setSelection(0);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             int sourceSelection = sourceSpinner.getSelectedItemPosition();
-            boolean bangumi = sourceSelection == 2;
-            boolean bangumiMirror = sourceSelection == 3;
-            boolean ymgal = sourceSelection == 4;
-            boolean hikarinagi = sourceSelection == 5;
+            // 索引对应下拉项：0=VNDB 1=NextMoe 2=Bangumi 3=月幕Gal 4=Hikarinagi
             boolean nextmoe = sourceSelection == 1;
-            String selectedMetadataSource = nextmoe ? MetadataController.SOURCE_NEXTMOE : (hikarinagi ? MetadataController.SOURCE_HIKARINAGI : (ymgal ? MetadataController.SOURCE_YMGAL : (bangumiMirror ? MetadataController.SOURCE_BANGUMI_MIRROR : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB))));
+            boolean bangumi = sourceSelection == 2;
+            boolean ymgal = sourceSelection == 3;
+            boolean hikarinagi = sourceSelection == 4;
+            String selectedMetadataSource = nextmoe ? MetadataController.SOURCE_NEXTMOE : (hikarinagi ? MetadataController.SOURCE_HIKARINAGI : (ymgal ? MetadataController.SOURCE_YMGAL : (bangumi ? MetadataController.SOURCE_BANGUMI : MetadataController.SOURCE_VNDB)));
             String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
-            if ((bangumi || bangumiMirror) && token.isEmpty()) {
+            if (bangumi && token.isEmpty()) {
                 Toast.makeText(MainActivity.this, "选择 Bangumi 时需要填写 Token", Toast.LENGTH_SHORT).show();
                 return;
             }
@@ -7128,7 +7124,7 @@ else sourceSpinner.setSelection(0);
                 dt.setCustomColorEnabled(customColorEnabled.isChecked());
                 dt.saveCustomColorSettings(this);
             applyCustomBackground();
-            Toast.makeText(MainActivity.this, "已保存资料源：" + (nextmoe ? "NextMoe" : (hikarinagi ? "Hikarinagi" : (ymgal ? "月幕Gal" : (bangumiMirror ? "Bangumi镜像" : (bangumi ? "Bangumi" : "VNDB"))))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "已保存资料源：" + (nextmoe ? "NextMoe" : (hikarinagi ? "Hikarinagi" : (ymgal ? "月幕Gal" : (bangumi ? "Bangumi" : "VNDB")))) + "，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
 recreate();
         });
