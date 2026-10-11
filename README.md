@@ -27,7 +27,7 @@
 
 它的目标是把“游戏库管理、快捷启动、数据同步、资料查询”整合到一个统一的移动界面中。
 
-同时欢迎各位开发者积极构建不同的分支版本，作为移动端的第一个gal前端，还有很多不足，一起加油喵(⌯ᵔᗜᵔ⌯)/
+同时欢迎各位开发者积极构建不同的分支版本，作为移动端的第一个视觉小说管理前端，还有很多不足，一起加油喵(⌯ᵔᗜᵔ⌯)/
 
 > 本项目采用 **GPL-3.0** 开源协议。
 
@@ -51,9 +51,13 @@
 
 - 多种导入方式：支持手动添加、批量导入文件夹以及从第三方平台迁移（如 <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>、<a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>、<a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>、<a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>）。
 - 类steam的社交在线服务，在这里，你可以与好友尽情享受Gal的快乐，并且可以像steam一样记录时长，并且查看好友的游玩动态，以及正在游玩的游戏
-- 支持鲲 Galgame、Hikarinagi 第三方账号快捷登录与绑定
-- 支持好友聊天、游玩动态、在线状态等社交功能
-- 集合了 VNDB、Bangumi、月幕 Gal、Hikarinagi 的游戏资料刮削源
+- 支持 NextMoe·未萌(原 鲲Galgame)、Hikarinagi 第三方账号快捷登录与绑定
+- 支持好友聊天、游玩动态、在线状态（区分手机 / 电脑端）等社交功能
+- 支持 NextMoe 表情包，聊天时可以更愉快地带表情包发言
+- 集合了 NextMoe、VNDB、Bangumi、月幕 Gal、Hikarinagi 的游戏资料刮削源
+- 首页接入 Gal 资讯，打开 App 即可浏览最新 Galgame 动态
+- 大屏模式：全屏卡片式浏览与启动游戏，支持搜索
+- 内置 3D 游戏展厅，以及网页端多人在线展厅（影院 / 音乐间等多人互动玩法）
 - 拥有一个相对来说比较完整的ocr翻译功能，可以让你在游玩gal的途中，减少硬啃生肉游戏的烦恼，可以自选多种翻译api，并且支持高自由度的api自定义设置(原项目来自<a href="https://github.com/murangogo/MoeTranslate">MoeTranslate(萌译)</a>)
 - 支持添加、编辑、删除游戏条目，并且支持多选和一键清空
 - 支持目录为空的游戏条目
@@ -127,12 +131,39 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 - 当前的游戏时长记录模式为，从软件点击启动对应游戏后，开始计时，直到你回到软件前台，计时结束，中途后台掉了也没关系，重进软件也能记上。(但是，别因为好奇玩一半又回到前台然后直接回游戏，这样你后半段时间就不算了，你得重新在软件里进游戏才行)
 
 ### 6. 游戏资料刮削
-- 支持从 VNDB、Bangumi、月幕 Gal、Hikarinagi 等源获取封面、简介、标签与角色信息，
+- 支持从 NextMoe、VNDB、Bangumi、月幕 Gal、Hikarinagi 等源获取封面、简介、标签与角色信息，
 可在设置中选择资料源与显示优先级，刮削结果可本地缓存，供离线查看。
 
 ### 7. 应用图标切换
 - 可在首页设置的「应用图标」中切换桌面图标（新图标 / 经典图标），
 切换后桌面图标可能需要稍后刷新，属于本机个性化设置，不参与云同步。
+
+### 8. 大屏模式
+- 提供全屏卡片式的大屏浏览体验，适合在电视、平板或横屏大屏设备上使用。
+- 分类栏最上方提供搜索功能，支持按游戏名与会社名检索。
+- 大屏模式下的游玩时长同样会计入游玩记录，并正常上报社区经验与每日任务。
+
+### 9. 展厅
+- 内置 **3D 游戏展厅**：以"逛博物馆"的仪式感重新设计，游戏以实体盒子陈列在虚拟 3D 房间中。
+- **网页端多人在线展厅**：和朋友一起在线逛街、聊天、互动，包含影院（共同观影、点播排队、投票换片）、音乐间（播放玩家自行导入的游戏专辑音乐）等玩法。
+- 离线展厅同步升级音乐间。
+
+### 10. 引擎支持
+内置多种游戏引擎与启动入口，可在添加游戏时手动选择，也支持自动识别：
+
+| 引擎 | 说明 |
+|---|---|
+| KRKR / Kirikiri | 内置 Kirikiri 类游戏支持 |
+| ONS | 内置 ONScripter |
+| Tyrano | 内置 TyranoBuilder / TyranoScript |
+| Artemis | Artemis 引擎游戏 |
+| FVP | FVP 引擎，含虚拟按键与虚拟鼠标 |
+| PSP / PPSSPP | PSP 游戏入口管理 |
+| Winlator | 配合 Winlator 及改版直启动 |
+| PC | PC 引擎，兼容 Winlator-CN 快捷启动（需 Winlator-CN 1005+） |
+| GameHub | GameHub 快捷方式导入 |
+| Android | 安卓应用型条目 |
+| Auto | 自动识别引擎类型 |
 
 ---
 
@@ -154,11 +185,19 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 ## 教程区
 
+### YukiHub教程合集(持续更新)
+
+<p>
+  <a href=" ">
+    <img src="https://img.shields.io/badge/Bilibili-暂未播出-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="Tutorial Collection" />
+  </a>
+</p>
+
 ### 导入 Winlator 和盖世的游戏并直启动
 
 <p>
   <a href="https://b23.tv/Qixj22k">
-    <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white" alt="Bilibili Tutorial" />
+    <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="Bilibili Tutorial" />
   </a>
   <a href="https://github.com/xm486/YukiHub/releases/tag/v0.1.0">
   <img src="https://img.shields.io/badge/改版模拟器-直链下载-181717?logo=github&logoColor=blue" alt="GitHub Download" />
@@ -173,20 +212,36 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 <p>
   <a href="https://b23.tv/wuOvs5l">
-    <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white" alt="WebDAV Tutorial" />
+    <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="WebDAV Tutorial" />
+  </a>
+</p>
+
+### 一个通用的添加所有任意游戏，管理计时的教程
+
+<p>
+  <a href="https://b23.tv/flp9ZYz">
+    <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="universal" />
+  </a>
+</p>
+
+### 使用内置 FVP 引擎的教程及游玩测试
+
+<p>
+  <a href="https://b23.tv/a0215xx">
+    <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="FVP tutorial" />
   </a>
 </p>
 
 ---
 
-### 目前已知的问题
-- 1.目前用tf疑似不能直启动krkr的游戏(截止0.125+3版本，已修复，在运行sd卡游戏时，自动开启镜像目录运行游戏，存档和独立存档模式位置一致)
+### 历史问题（已修复）
+- 1.用 TF 卡疑似不能直启动 krkr 的游戏（截止 0.12.5+3 版本，已修复：在运行 SD 卡游戏时，自动开启镜像目录运行游戏，存档和独立存档模式位置一致）
 
-- 2.华为等手机由于存储读写限制，不能正常游玩krkr，atermis等引擎的游戏。(现在做了外部私有存档选项，可以勾选试试，或许有用?还做了轻量级SAF🤔，就是不知道有没有用了，得看你们测试了)(功能入口如下图↓) ✓ (截止0.12.5+1版本，已修复，如仍有问题请反馈)
+- 2.华为等手机由于存储读写限制，不能正常游玩 krkr、artemis 等引擎的游戏。（现已提供外部私有存档选项，可勾选尝试；另提供轻量级 SAF）（截止 0.12.5+1 版本，已修复，如仍有问题请反馈）
 
 <img src="screenshots/save1.webp" width="720" />
 
--以上，欢迎有能力的拉拉pr喵😽😽😽
+- 以上问题均已在后续版本修复，若仍遇到请附带设备型号与复现步骤反馈。欢迎有能力的拉拉 pr 喵😽😽😽
 
 ---
 
@@ -274,7 +329,7 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 - Min SDK: `26`
 - Target SDK: `33`
 - Compile SDK: `33`
-- 当前版本：`0.1`
+- 当前版本：`0.3.5`
 
 ---
 
@@ -349,6 +404,7 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 
 ## 相关项目 / 生态 (Related Projects)
 
+- **[YukiHub Desktop](https://github.com/xm486/YukiHub-for-Desktop)**：YukiHub Desktop是本项目的桌面端版本，包含Windows和Linux双版本，目前正处于早期开发阶段，期望很快就会与大家见面吧。
 - **[Rinne Mobile](https://github.com/Weiss-UltimateSavior/RinneMobile)**：Rinne Mobile是本项目的一个分支，主攻移动端竖屏ui，同时，这是一个 YukiHub 重构 开发 的版本，使用更加现代化的技术栈与MVVM架构，目前正在三次重构向kotlin迁移。
 - **[KamiGAL](https://github.com/ruizhishenri-commits/KamiGAL)**：无意间发现的一个YukiHub分支，感觉很有意思，便收录进来，好像还打算做ios版本，不过好像已经停止更新。令人感叹。
 - **[KireiBox](https://github.com/Yukin0a/KireiBox)**：KireiBox 是基于 YukiHub 的 RinneMobile 分支开发。并在ui设计上独具创新，颇有一番风味，个人感觉在横屏模式的ui下，非常好看，值得一用。
