@@ -2373,7 +2373,10 @@ private void showProfileDialog() {
                             : ("Lv." + level + " · " + totalExp + "/" + nextTotal + " EXP") + (checked ? " · 已签到" : ""));
                     levelView.setTextColor(levelColorForLevel(level));
                 });
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                // 等级信息拿不到就保留原显示，不打扰用户；但留痕便于排查
+                Log.w("YukiHub", "level info fetch failed: " + t.getMessage(), t);
+            }
         });
     }
     info.addView(statsView);
@@ -2947,7 +2950,10 @@ private void updateChatBadge() {
                     badge.setVisibility(View.GONE);
                 }
             });
-        } catch (Throwable ignored) { }
+        } catch (Throwable t) {
+            // 角标拿不到就保持原样，不打扰用户；但留痕便于排查
+            Log.w("YukiHub", "profile badge fetch failed: " + t.getMessage(), t);
+        }
     });
 }
 
@@ -12081,8 +12087,9 @@ return startActivitySafely(intent);
                 if (awarded > 0) {
                     Log.i("YukiHub", "Play session reported: exp +" + awarded + ", level " + res.optInt("level", 1));
                 }
-            } catch (Throwable ignored) {
-                // 静默失败，不影响游戏退出流程
+            } catch (Throwable t) {
+                // 不阻塞游戏退出流程，但要留痕：用户开日志时能查到上报失败原因
+                Log.w("YukiHub", "Play session report failed: " + t.getMessage(), t);
             }
         });
     }

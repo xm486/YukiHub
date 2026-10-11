@@ -167,7 +167,10 @@ public class ChatNotifier {
                         nickById.put(f.id, show);
                     }
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                // 昵称拿不到就用兜底显示；但留痕便于排查
+                Log.w(TAG, "friends list fetch failed (for nicknames): " + t.getMessage(), t);
+            }
 
             for (Map.Entry<String, ChatMessage> e : latestBySender.entrySet()) {
                 String senderId = e.getKey();

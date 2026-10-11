@@ -1032,10 +1032,12 @@ public class HomeActivity extends AppCompatActivity {
                         badge.setVisibility(View.GONE);
                     }
                 });
-            } catch (Throwable ignored) { }
+            } catch (Throwable t) {
+                // 角标拿不到就保持原样，不打扰用户；但留痕便于排查
+                Log.w("YukiHub", "home badge fetch failed: " + t.getMessage(), t);
+            }
         });
     }
-
     private boolean isLoggedIn() {
         if (prefs == null) return false;
         String token = prefs.getString(KEY_AUTH_ACCESS_TOKEN, "");

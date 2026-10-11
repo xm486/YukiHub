@@ -164,8 +164,9 @@ public final class BigScreenLauncher {
                     Log.i("YukiHub", "BigScreen play session reported: exp +" + awarded
                             + ", level " + res.optInt("level", 1));
                 }
-            } catch (Throwable ignored) {
-                // 静默失败，不影响大屏返回流程
+            } catch (Throwable t) {
+                // 不阻塞大屏返回流程，但要留痕：用户开日志时能查到上报失败原因
+                Log.w("YukiHub", "BigScreen play session report failed: " + t.getMessage(), t);
             }
         });
     }

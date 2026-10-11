@@ -426,7 +426,10 @@ public class MetadataController {
                     try {
                         VnMetadata full = com.yuki.yukihub.nextmoe.NextMoeClient.getWork(meta.id, meta);
                         if (full != null) meta = full;
-                    } catch (Throwable ignored) { }
+                    } catch (Throwable t) {
+                        // 详情拉取失败就退回搜索摘要，不让整条流程失败；但留痕便于排查
+                        Log.w("YukiHub", "NextMoe detail fetch failed (fallback to summary): " + t.getMessage(), t);
+                    }
                 }
                 saveMetadataForSource(g.id, source, meta);
                 matched++;
