@@ -5,6 +5,7 @@ import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.InputType;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -35,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  * 可在 HomeActivity 和 MainActivity 中统一调用。
  */
 public class FriendsChatDialog {
-
+    private static final String TAG = "FriendsChatDialog";
     private static final long POLL_INTERVAL_MS = 10_000;
     /** 打开会话时首屏渲染的缓存消息上限（其余靠翻历史加载，避免一次性渲染过多） */
     private static final int RENDER_LIMIT = 200;
@@ -1776,8 +1777,9 @@ public class FriendsChatDialog {
                     groupNameColorMap.put(myId, hex);
                     refreshRenderedNickColors();
                 });
-            } catch (Throwable ignored) {
-                // 拿不到就退回默认色，不打扰用户
+            } catch (Throwable t) {
+                // 拿不到就退回默认色，不打扰用户；但留痕便于排查
+                Log.w(TAG, "group name color fetch failed: " + t.getMessage(), t);
             }
         });
     }
@@ -1931,8 +1933,9 @@ public class FriendsChatDialog {
                     groupFrameMap.put(myId, f);
                     refreshRenderedFrames();
                 });
-            } catch (Throwable ignored) {
-                // 拿不到就不显示框，不打扰用户
+            } catch (Throwable t) {
+                // 拿不到就不显示框，不打扰用户；但留痕便于排查
+                Log.w(TAG, "group frame fetch failed: " + t.getMessage(), t);
             }
         });
     }
@@ -3975,7 +3978,9 @@ public class FriendsChatDialog {
             try {
                 boolean success = apiClient.rejectFriendRequest(friendshipId);
                 uiHandler.post(() -> { if (success) row.setVisibility(View.GONE); });
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                Log.w(TAG, "rejectFriendRequest failed: " + t.getMessage(), t);
+            }
         });
     }
 
@@ -3991,7 +3996,10 @@ public class FriendsChatDialog {
                     if (unread > 0) titleBar.setText("好友 / 聊天 (" + unread + ")");
                     else titleBar.setText("好友 / 聊天");
                 });
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                // 轮询失败不打扰用户，但留痕便于排查（网络切换/服务端异常时常见）
+                Log.w(TAG, "unread poll failed: " + t.getMessage(), t);
+            }
         }, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
