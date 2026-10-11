@@ -29,9 +29,13 @@ Developers are also welcome to actively build different branch versions. As the 
 
 - Multiple import methods: manual add, batch folder import, and migration from third-party platforms (such as <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>, <a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>, <a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>, <a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>).
 - Steam-like social online service: enjoy Gal with friends, record playtime like Steam, and view friends' play activity and what they are currently playing.
-- Supports quick login & binding with third-party accounts (Kungal Galgame, Hikarinagi).
-- Social features: friend chat, play activity, online presence, etc.
-- Integrates game metadata scraping sources: VNDB, Bangumi, Ymgal, Hikarinagi.
+- Supports quick login & binding with third-party accounts (NextMoe, Kungal Galgame, Hikarinagi).
+- Social features: friend chat, play activity, online presence (phone / PC distinguished), etc.
+- Supports NextMoe stickers, making chat livelier with emoji packs.
+- Integrates game metadata scraping sources: NextMoe, VNDB, Bangumi (official source only), Ymgal, Hikarinagi.
+- Home page integrates Gal news, so you can browse the latest Galgame updates right after opening the app.
+- Big-screen mode: full-screen card-style browsing and game launching, with search support.
+- Built-in 3D game exhibition, plus a web-based multiplayer online exhibition (cinema / music room and other multiplayer interactions).
 - Includes a relatively complete OCR translation feature, reducing the pain of reading untranslated games. Multiple translation APIs are available, with highly customizable API settings. (Original project from <a href="https://github.com/murangogo/MoeTranslate">MoeTranslate</a>)
 - Supports adding, editing, and deleting game entries, plus multi-select and one-click clear
 - Supports game entries with empty directories
@@ -114,11 +118,41 @@ For empty-directory entries, title matching is prioritized.
 
 ### 6. Game Metadata Scraping
 
-Supports fetching covers, synopses, tags, and character info from VNDB, Bangumi, Ymgal, Hikarinagi, and other sources. You can choose the source and display priority in Settings; scraped results are cached locally for offline viewing.
+Supports fetching covers, synopses, tags, and character info from NextMoe, VNDB, Bangumi (official source only), Ymgal, Hikarinagi, and other sources. You can choose the source and display priority in Settings; scraped results are cached locally for offline viewing.
 
 ### 7. App Icon Switching
 
 You can switch the desktop icon (new / classic) in the "App Icon" section of the Home settings. The desktop icon may need a moment to refresh after switching. This is a local personalization setting and is not included in cloud sync.
+
+### 8. Big-screen Mode
+
+- Provides a full-screen card-style browsing experience, ideal for TVs, tablets, and other landscape large-screen devices.
+- A search function is available at the top of the category bar, supporting search by game title and brand/company name.
+- Playtime in big-screen mode is also counted into play records and reported to community EXP and daily tasks as usual.
+
+### 9. Exhibition
+
+- Built-in **3D game exhibition**: redesigned with the ritual feel of "visiting a museum", where games are displayed as physical boxes in a virtual 3D room.
+- **Web-based multiplayer online exhibition**: hang out, chat, and interact with friends online, including a cinema (watch together, request queue, vote to change films) and a music room (play game albums imported by players), among other activities.
+- The offline exhibition also gets the music room upgrade.
+
+### 10. Engine Support
+
+A variety of game engines and launch entries are built in. You can select one manually when adding a game, or rely on auto-detection:
+
+| Engine | Description |
+|---|---|
+| KRKR / Kirikiri | Built-in Kirikiri-style game support |
+| ONS | Built-in ONScripter |
+| Tyrano | Built-in TyranoBuilder / TyranoScript |
+| Artemis | Artemis engine games |
+| FVP | FVP engine, with virtual keys and virtual mouse |
+| PSP / PPSSPP | PSP game entry management |
+| Winlator | Works with Winlator and modified direct launch |
+| PC | PC engine, compatible with Winlator-CN quick launch (requires Winlator-CN 1005+) |
+| GameHub | GameHub shortcut import |
+| Android | Android app-style entries |
+| Auto | Automatic engine detection |
 
 ---
 
@@ -165,15 +199,15 @@ You can switch the desktop icon (new / classic) in the "App Icon" section of the
 
 ---
 
-### Currently Known Issues
+### Historical Issues (Fixed)
 
-- 1. Direct launching KRKR games with TF currently seems not to work ( )
+- 1. Direct launching KRKR games with TF currently seems not to work (Fixed as of version 0.12.5+3: when running games from the SD card, the mirror directory is automatically enabled, so saves and standalone save mode point to the same location.)
 
-- 2. Due to storage read/write restrictions on Huawei and some other phones, KRKR, Artemis and other engine games may not play normally. (An external private save option has been added. You can try enabling it; maybe it helps? A lightweight SAF option has also been added 🤔. Whether it works still depends on your testing.) (Feature entry is shown below ↓)
+- 2. Due to storage read/write restrictions on Huawei and some other phones, KRKR, Artemis and other engine games may not play normally. (An external private save option has been added. You can try enabling it; a lightweight SAF option has also been added.) (Fixed as of version 0.12.5+1. If problems persist, please report.)
 
 <img src="screenshots/save1.webp" width="720" />
 
-- That's all. PRs from capable people are welcome meow 😽😽😽
+- All the above issues have been fixed in later versions. If you still encounter them, please report with your device model and reproduction steps. PRs from capable people are welcome meow 😽😽😽
 
 ---
 
@@ -257,7 +291,7 @@ Then open the project and run the build.
 - Min SDK: `26`
 - Target SDK: `33`
 - Compile SDK: `33`
-- Current version: `0.1`
+- Current version: `0.3.5`
 
 ---
 
