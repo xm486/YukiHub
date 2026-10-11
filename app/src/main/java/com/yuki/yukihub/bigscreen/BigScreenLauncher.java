@@ -35,6 +35,8 @@ public final class BigScreenLauncher {
     private static final String APP_PREFS = "yukihub_prefs";
     private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
     private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
+    /** 登录令牌键名（与 MainActivity / PresenceManager 一致） */
+    private static final String KEY_AUTH_ACCESS_TOKEN = "auth_access_token";
 
     /** 与游戏库一致的会话时长上限 */
     private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
@@ -107,13 +109,21 @@ public final class BigScreenLauncher {
         return new Result(true, sessionId, start);
     }
 
-    /** 从游戏返回大屏后收尾：结束本次游玩会话（本地时长）+ 清在线状态 */
+    /**
+     * 从游戏返回大屏后收尾：结束本次游玩会话（本地时长 + 上报服务端）+ 清在线状态。
+     *
+     * <p>注意：这里必须补上报，否则大屏游玩**不计社区经验、也不完成「游玩游戏满 1 分钟」每日任务**。
+     * 游戏库走的是 MainActivity.reportPlaySessionToServer()，大屏是独立入口，
+     * 早期实现只调了本地 finishPlaySession()，漏了服务端上报（用户反馈的正是这个问题）。
+     */
     public static void finishSession(Activity act, GameRepository repo, long sessionId, long startedAt) {
         if (repo != null && sessionId > 0L && startedAt > 0L) {
             try {
                 repo.finishPlaySession(sessionId, System.currentTimeMillis(), 0L, MAX_PLAY_SESSION_MS);
             } catch (Throwable ignored) { }
         }
+        // 上报游玩时长到服务端（与游戏库同一套规则：满 60 秒才计，每日上限 60 分钟）
+        reportPlaySessionToServer(act, repo, sessionId, startedAt);
         try {
             if (act != null) {
                 com.yuki.yukihub.social.PresenceManager pm = com.yuki.yukihub.social.PresenceManager.get(act);
@@ -121,6 +131,43 @@ public final class BigScreenLauncher {
                 com.yuki.yukihub.social.PresenceService.refresh(act);
             }
         } catch (Throwable ignored) { }
+    }
+
+    /**
+     * 游玩会话结束后上报服务端，获得游戏经验并完成每日任务。
+     *
+     * <p>与 MainActivity.reportPlaySessionToServer() 行为保持一致：
+     * 仅登录用户上报、IO 线程执行、失败静默忽略（本地 play_sessions 已落库，不影响统计）。
+     */
+    private static void reportPlaySessionToServer(Activity act, GameRepository repo, long sessionId, long startedAt) {
+        if (act == null || repo == null || sessionId <= 0L || startedAt <= 0L) return;
+        final Context appCtx = act.getApplicationContext();
+        // 未登录直接跳过（服务端会 401，没必要发请求）
+        try {
+            SharedPreferences prefs = appCtx.getSharedPreferences(APP_PREFS, Context.MODE_PRIVATE);
+            String token = prefs.getString(KEY_AUTH_ACCESS_TOKEN, "");
+            if (token == null || token.trim().isEmpty()) return;
+        } catch (Throwable ignored) {
+            return;
+        }
+        final long end = System.currentTimeMillis();
+        com.yuki.yukihub.util.AppExecutors.runOnIo(() -> {
+            try {
+                GameRepository.PlayActivity a = repo.findPlaySession(sessionId);
+                if (a == null || a.sessionUuid == null || a.sessionUuid.isEmpty()) return;
+                com.yuki.yukihub.social.SocialApiClient client =
+                        new com.yuki.yukihub.social.SocialApiClient(appCtx);
+                org.json.JSONObject res = client.reportPlayTime(
+                        a.sessionUuid, "", a.gameTitle == null ? "" : a.gameTitle, startedAt, end);
+                int awarded = res.optInt("expAwarded", 0);
+                if (awarded > 0) {
+                    Log.i("YukiHub", "BigScreen play session reported: exp +" + awarded
+                            + ", level " + res.optInt("level", 1));
+                }
+            } catch (Throwable ignored) {
+                // 静默失败，不影响大屏返回流程
+            }
+        });
     }
 
     /** 老路径（兜底）：交给游戏库启动。行为与改造前完全一致。 */
