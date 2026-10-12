@@ -6725,36 +6725,38 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(sourceTitle);
 
         Spinner sourceSpinner = new TapSafeSpinner(this);
-        // 下拉项：VNDB / NextMoe / Bangumi / 月幕Gal / Hikarinagi
+        // 下拉项：NextMoe（默认）/ VNDB / Bangumi / 月幕Gal / Hikarinagi
         // （原「Bangumi 镜像」项已移除：镜像站长期不稳定，且已有 NextMoe 源替代）
-        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"VNDB（默认）", "NextMoe（推荐 · 未萌授权）", "Bangumi（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
+        // NextMoe 作默认源：目录只读面匿名可调（不必登录），且是六源对齐数据。
+        ArrayAdapter<String> sourceAdapter = krSpinnerAdapter(new String[]{"NextMoe（推荐 · 默认）", "VNDB", "Bangumi（需要 Token）", "月幕 Gal（公开 API）", "Hikarinagi（公开 API）"});
         sourceSpinner.setAdapter(sourceAdapter);
         String currentSource = metadataSource();
-        if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(2);
+        if (MetadataController.SOURCE_VNDB.equals(currentSource)) sourceSpinner.setSelection(1);
+        else if (MetadataController.SOURCE_BANGUMI.equals(currentSource)) sourceSpinner.setSelection(2);
         else if (MetadataController.SOURCE_YMGAL.equals(currentSource)) sourceSpinner.setSelection(3);
         else if (MetadataController.SOURCE_HIKARINAGI.equals(currentSource)) sourceSpinner.setSelection(4);
-        else if (MetadataController.SOURCE_NEXTMOE.equals(currentSource)) sourceSpinner.setSelection(1);
-        else sourceSpinner.setSelection(0);
+        else sourceSpinner.setSelection(0); // NextMoe（默认）
         root.addView(sourceSpinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
-        // NextMoe 连接状态与授权入口（环回回调 + PKCE，令牌走 Android Keystore 加密存储）
+        // NextMoe 登录入口（可选）：环回回调 + PKCE，令牌走 Android Keystore 加密存储。
+        // 未登录也能正常用 NextMoe 源（匿名档，按 IP 计配额），登录只是为了提升刮削配额。
         TextView nextmoeStatus = new TextView(this);
         boolean nextmoeConnected = com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected();
         nextmoeStatus.setText("NextMoe 账号：" + (nextmoeConnected
-                ? "已连接" + (com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel().isEmpty() ? "" : "（" + com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel() + "）")
-                : "未连接（选择 NextMoe 源时需要）"));
+                ? "已连接" + (com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel().isEmpty() ? "" : "（" + com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel() + "）") + " · 刮削配额已提升"
+                : "未登录（可选）· 登录后可提升刮削配额"));
         nextmoeStatus.setTextColor(getColorCompat(R.color.yh_text_muted));
         nextmoeStatus.setTextSize(11);
         nextmoeStatus.setPadding(0, dp(8), 0, dp(2));
         root.addView(nextmoeStatus);
 
-        Button nextmoeButton = krButton(nextmoeConnected ? "断开 NextMoe 账号" : "连接 NextMoe 账号");
+        Button nextmoeButton = krButton(nextmoeConnected ? "断开 NextMoe 账号" : "登录 NextMoe（可选 · 提升配额）");
         nextmoeButton.setTextColor(primaryTextColor());
         nextmoeButton.setOnClickListener(v -> {
             if (com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
                 com.yuki.yukihub.nextmoe.NextMoeAuthStore.clear();
-                nextmoeStatus.setText("NextMoe 账号：未连接（选择 NextMoe 源时需要）");
-                nextmoeButton.setText("连接 NextMoe 账号");
+                nextmoeStatus.setText("NextMoe 账号：未登录（可选）· 登录后可提升刮削配额");
+                nextmoeButton.setText("登录 NextMoe（可选 · 提升配额）");
                 Toast.makeText(this, "已断开 NextMoe 账号", Toast.LENGTH_SHORT).show();
                 return;
             }
@@ -6771,18 +6773,20 @@ LinearLayout accountActions = new LinearLayout(this);
                 runOnUiThread(() -> {
                     nextmoeButton.setEnabled(true);
                     boolean ok = error == null && com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected();
-                    nextmoeButton.setText(ok ? "断开 NextMoe 账号" : "连接 NextMoe 账号");
+                    nextmoeButton.setText(ok ? "断开 NextMoe 账号" : "登录 NextMoe（可选 · 提升配额）");
                     nextmoeStatus.setText(ok
-                            ? "NextMoe 账号：已连接" + (com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel().isEmpty() ? "" : "（" + com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel() + "）")
-                            : "NextMoe 账号：未连接（" + (error == null ? "未完成授权" : error) + "）");
-                    if (ok) Toast.makeText(this, "NextMoe 连接成功", Toast.LENGTH_SHORT).show();
+                            ? "NextMoe 账号：已连接" + (com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel().isEmpty() ? "" : "（" + com.yuki.yukihub.nextmoe.NextMoeAuthStore.getAccountLabel() + "）") + " · 刮削配额已提升"
+                            : "NextMoe 账号：未登录（可选）· 匿名配额可用" + (error == null ? "" : "（" + error + "）"));
+                    if (ok) Toast.makeText(this, "NextMoe 登录成功，刮削配额已提升", Toast.LENGTH_SHORT).show();
                 });
             }, "yukihub-nextmoe-auth").start();
         });
         root.addView(nextmoeButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         TextView nextmoeHint = new TextView(this);
-        nextmoeHint.setText("NextMoe 会打开系统浏览器跳转未萌授权，完成后自动回到本页。\n令牌加密存储在设备内，断开即全部清除。");
+        nextmoeHint.setText("登录为可选项：不登录也能正常使用 NextMoe 源（匿名配额，按你的网络出口 IP 计）。\n"
+                + "登录后可提升刮削配额（按账号计，不受同 IP 他人挤占），并用于后续账号相关功能。\n"
+                + "授权会打开系统浏览器跳转未萌，完成后自动回到本页；令牌加密存储在设备内，断开即全部清除。");
         nextmoeHint.setTextColor(getColorCompat(R.color.yh_text_muted));
         nextmoeHint.setTextSize(10);
         nextmoeHint.setPadding(0, dp(4), 0, dp(4));
@@ -7111,8 +7115,8 @@ LinearLayout accountActions = new LinearLayout(this);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             int sourceSelection = sourceSpinner.getSelectedItemPosition();
-            // 索引对应下拉项：0=VNDB 1=NextMoe 2=Bangumi 3=月幕Gal 4=Hikarinagi
-            boolean nextmoe = sourceSelection == 1;
+            // 索引对应下拉项：0=NextMoe(默认) 1=VNDB 2=Bangumi 3=月幕Gal 4=Hikarinagi
+            boolean nextmoe = sourceSelection == 0;
             boolean bangumi = sourceSelection == 2;
             boolean ymgal = sourceSelection == 3;
             boolean hikarinagi = sourceSelection == 4;

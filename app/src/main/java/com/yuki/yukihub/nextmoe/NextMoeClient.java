@@ -18,8 +18,14 @@ import java.util.List;
 /**
  * NextMoe·未萌 目录客户端（第 5 元数据源）。
  * <p>
- * 直连 https://api.nextmoe.dev/v2，Bearer 用 NextMoe 用户访问令牌（catalog:read），
- * 配额按用户计（100/min、10,000/UTC日），无应用密钥、无服务器代理。
+ * 直连 https://api.nextmoe.dev/v2，无应用密钥、无服务器代理。**登录是可选的**：
+ * <ul>
+ *   <li>未登录：不带 Authorization，走匿名档（按来源 IPv4 / IPv6-64 计，额度较低）。
+ *       目录只读面（claim-events 除外）匿名可读，且官方承诺与带凭据时<b>逐字节相同</b>，
+ *       nsfw=true 一视同仁；</li>
+ *   <li>已登录：带用户访问令牌（catalog:read），按用户计配额（100/min、10,000/UTC日），
+ *       不受同 IP 他人挤占。</li>
+ * </ul>
  * <p>
  * 线格式要点（developer.nextmoe.dev/docs/conventions）：
  * <ul>
@@ -33,8 +39,10 @@ public final class NextMoeClient {
 
     private static final String TAG = "NextMoe";
     private static final String API_BASE = "https://api.nextmoe.dev/v2";
-    /** 用户档 100/min，留余量。 */
-    private static final long MIN_REQUEST_INTERVAL_MS = 1100;
+    /** 匿名档（实测响应头 50/min，按 IP 计），留余量。 */
+    private static final long MIN_INTERVAL_ANON_MS = 1300;
+    /** 用户令牌档 100/min，留余量。 */
+    private static final long MIN_INTERVAL_AUTHED_MS = 700;
     private static final int MAX_RETRIES = 2;
     private static final long RETRY_DELAY_MS = 1200;
 
@@ -152,7 +160,7 @@ public final class NextMoeClient {
     // ======================== HTTP ========================
 
     private static JSONObject apiGet(String pathWithQueryBase, String[][] params) throws Exception {
-        throttle();
+        // 节流放在 apiGetOnce 里做（按登录/匿名档位取间隔），这样重试请求同样会被节流
         Exception last = null;
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
@@ -174,10 +182,18 @@ public final class NextMoeClient {
     }
 
     private static JSONObject apiGetOnce(String path, String[][] params, boolean allowRefresh) throws Exception {
+        // 登录可选：有令牌就带上（按用户计配额），没有就走匿名（按来源 IP 计配额）。
+        // 目录只读面对这两种身份返回逐字节相同，所以未登录一样能用本源。
         String token = NextMoeAuth.ensureAccessToken();
-        if (token == null || token.isEmpty()) {
-            throw new IllegalStateException("尚未连接 NextMoe 账号，请先在设置中授权");
+        boolean authed = token != null && !token.isEmpty();
+        // 「账号处于登录态，却拿不到可用令牌」= 本请求会按匿名配额发送。
+        // 这是异常降级（令牌刷新失败 / 瞬态故障），必须留痕并在报错时告知用户，
+        // 否则会出现「以为登录了、其实在用匿名配额」而不自知。
+        boolean degradeToAnonymous = !authed && NextMoeAuthStore.isConnected();
+        if (degradeToAnonymous) {
+            Log.w(TAG, "账号已登录但访问令牌不可用，本次请求按匿名配额发送（path=" + path + "）");
         }
+        throttle(authed ? MIN_INTERVAL_AUTHED_MS : MIN_INTERVAL_ANON_MS);
         StringBuilder url = new StringBuilder(API_BASE).append(path);
         if (params != null && params.length > 0) {
             url.append('?');
@@ -194,20 +210,33 @@ public final class NextMoeClient {
             c.setInstanceFollowRedirects(true);
             c.setRequestProperty("Accept", "application/json");
             c.setRequestProperty("User-Agent", "YukiHub/1.0 (Android)");
-            c.setRequestProperty("Authorization", "Bearer " + token);
+            // 未登录时不带 Authorization —— 服务端按来源 IP 计匿名配额
+            if (authed) c.setRequestProperty("Authorization", "Bearer " + token);
             int code = c.getResponseCode();
 
-            if (code == 401 && allowRefresh) {
-                // 令牌过期：强制刷新一次后重放
-                NextMoeAuth.refreshAccessToken();
+            if (code == 401 && authed && allowRefresh) {
+                // 令牌过期：强制刷新一次后重放。
+                // 刷新失败 = 登录已失效（凭据会被清掉），重放将自动退化为匿名——
+                // 这是有意的优雅降级（还能继续刮削），但必须留痕，避免用户「以为登录着」。
+                String fresh = NextMoeAuth.refreshAccessToken();
+                if (fresh == null || fresh.isEmpty()) {
+                    Log.w(TAG, "令牌刷新失败，NextMoe 登录已失效；本次请求按匿名配额重放（设置页将显示未登录）");
+                }
                 return apiGetOnce(path, params, false);
             }
             if (code == 429) {
+                String errBody = readAll(c.getErrorStream());
+                if ("QUOTA_EXCEEDED".equals(problemCode(errBody))) {
+                    // 日配额耗尽：文档明确不要退避重试——等待没有意义，直接给可操作提示
+                    throw new IllegalStateException("QUOTA_EXCEEDED: 今日刮削配额已用完（UTC 零点归零）。"
+                            + (authed ? "" : anonymousQuotaHint(degradeToAnonymous)));
+                }
                 // 分钟窗打满：按 Retry-After 等（上限 60s），文档要求先读它
                 long wait = 2L;
                 try { wait = Math.min(60L, Long.parseLong(c.getHeaderField("Retry-After"))); } catch (Throwable ignored) { }
                 Thread.sleep(wait * 1000L + 250L);
-                throw new IllegalStateException("HTTP 429");
+                throw new IllegalStateException("HTTP 429"
+                        + (authed ? "" : anonymousQuotaHint(degradeToAnonymous)));
             }
             String body = readAll(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
             if (code == 404) {
@@ -218,6 +247,12 @@ public final class NextMoeClient {
                     if (!currentId.isEmpty()) throw new MergedRedirect(currentId);
                 }
                 throw new IllegalStateException("HTTP 404: " + problemCode);
+            }
+            if (code == 401) {
+                // 带了令牌仍 401：刷新没救回来（refresh token 失效，或刷新遇到瞬态故障）。
+                // 此时绝不能无声退化成匿名——明确告诉用户去重新登录。
+                throw new IllegalStateException("HTTP 401: " + problemCode(body)
+                        + "（NextMoe 登录已失效，请在「设置 → 右侧资料源」重新登录 NextMoe 账号）");
             }
             if (code < 200 || code >= 300) {
                 throw new IllegalStateException("HTTP " + code + ": " + problemCode(body));
@@ -242,11 +277,24 @@ public final class NextMoeClient {
         }
     }
 
-    private static synchronized void throttle() {
+    /**
+     * 未带凭据（匿名档）时的「怎么提升配额」提示。
+     * <p>
+     * degradeToAnonymous=true 表示账号处于登录态但令牌不可用——这不是普通的未登录，
+     * 要明确告诉用户重新登录，否则他会以为自己在用账号配额。
+     */
+    private static String anonymousQuotaHint(boolean degradeToAnonymous) {
+        if (degradeToAnonymous) {
+            return "（注意：账号为登录态但访问令牌不可用，本次按匿名配额计；请在「设置 → 右侧资料源」重新登录 NextMoe 以恢复账号配额）";
+        }
+        return "（当前为匿名配额，按网络出口 IP 计；登录 NextMoe 账号可提升刮削配额）";
+    }
+
+    private static synchronized void throttle(long intervalMs) {
         long now = System.currentTimeMillis();
         long elapsed = now - lastRequestTime;
-        if (elapsed < MIN_REQUEST_INTERVAL_MS) {
-            try { Thread.sleep(MIN_REQUEST_INTERVAL_MS - elapsed); } catch (InterruptedException ignored) { }
+        if (elapsed < intervalMs) {
+            try { Thread.sleep(intervalMs - elapsed); } catch (InterruptedException ignored) { }
         }
         lastRequestTime = System.currentTimeMillis();
     }
