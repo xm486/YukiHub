@@ -7,9 +7,12 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * KRKR「内部存储启动」的存储管理。
@@ -100,16 +103,101 @@ public final class KrkrInternalStore {
     }
 
     /**
-     * 副本内所有条目名统一转小写。
+     * 副本内条目名统一转小写。
      *
      * <p>【为什么必须小写】KR 内核会把**整条路径**转小写后再做 stat/opendir，
      * 而外部 SD 卡走 FUSE（大小写不敏感，随便大小写都能命中），
      * 内部存储却是大小写敏感的 f2fs。副本里若保留原始大小写，
      * 引擎按小写路径访问时全部落空 —— 表现为 AutoPath 扫描到 0 个文件、
      * 启动报找不到入口。中文名不受影响。
+     *
+     * <p>【例外：引擎固定名文件必须保持原样】引擎除了走 AutoPath 索引，
+     * 还会用**硬编码的原始大小写**直接拼路径读取若干固定文件，例如
+     * {@code 游戏目录 + "/Kirikiroid2Preference.xml"}（见 libgame.so 字符串）。
+     * 这些文件若被小写化，在大小写敏感的内部存储上会**直接读不到**：
+     * <ul>
+     *   <li>{@code Kirikiroid2Preference.xml} —— 读不到会导致
+     *       <b>引擎设置（含 showfps / fps_limit / renderer 等）全部失效</b>，
+     *       表现为帧率异常、掉帧、渲染参数不生效；</li>
+     *   <li>{@code DroidSansFallback.ttf}、{@code UserDefault.xml}、
+     *       {@code AfterStartup.tjs}、{@code Ystartup.tjs} 同理。</li>
+     * </ul>
+     * 因此这里采用**白名单式**：只对这些引擎固定名保持原始大小写，
+     * 其余条目照旧小写化（AutoPath 索引需要）。
      */
     private static String lowerName(String name) {
-        return name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (name == null) return "";
+        if (ENGINE_FIXED_NAMES_LOWER.contains(name.toLowerCase(Locale.ROOT))) return name;
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * 引擎以**硬编码原始大小写**直接读取的固定文件（原始名）。
+     *
+     * <p>来源：{@code libgame.so} / {@code libgame134.so} 字符串表。
+     * 这些名字**不能**被小写化，否则内部副本里读不到；
+     * 其中 {@code Kirikiroid2Preference.xml} 尤其关键 —— 读不到会导致
+     * 引擎设置（showfps / fps_limit / renderer…）全部失效。
+     *
+     * <p>这些文件同时也是「运行期可变」的，所以启动前还会与源目录同步
+     * （见 {@link #syncEngineFixedFiles}）。
+     */
+    private static final List<String> ENGINE_FIXED_FILES = Collections.unmodifiableList(
+            Arrays.asList(
+                    "Kirikiroid2Preference.xml",   // 引擎设置（showfps/fps_limit/renderer…）
+                    "DroidSansFallback.ttf",       // 兜底字体
+                    "UserDefault.xml",             // 引擎用户数据
+                    "AfterStartup.tjs",            // 引擎固定启动脚本
+                    "Ystartup.tjs"                 // 引擎固定启动脚本
+            ));
+
+    /** {@link #ENGINE_FIXED_FILES} 的小写形式，供 {@link #lowerName} 快速比对。 */
+    private static final Set<String> ENGINE_FIXED_NAMES_LOWER;
+    static {
+        Set<String> s = new HashSet<>();
+        for (String n : ENGINE_FIXED_FILES) s.add(n.toLowerCase(Locale.ROOT));
+        ENGINE_FIXED_NAMES_LOWER = Collections.unmodifiableSet(s);
+    }
+
+    /**
+     * 把源目录里的「引擎固定文件」同步进副本（单向，仅当副本版本更旧时）。
+     *
+     * <p>【为什么需要】{@code Kirikiroid2Preference.xml} 这类文件是运行期可变的：
+     * <ul>
+     *   <li>用户通过 YukiHub「引擎设置」修改 → 写到<b>源目录</b>；</li>
+     *   <li>用户在游戏内改设置 → 引擎写到<b>当前游戏目录</b>（内部模式下即副本）。</li>
+     * </ul>
+     * 副本是「存在即复用、不重拷」的，若不同步，源目录的改动永远进不来，
+     * 表现为「引擎设置改了但内部模式不生效」。
+     *
+     * <p>【为什么用 mtime 单向】只在新版本存在且更旧时覆盖，因此
+     * 「游戏内改设置」写进副本的内容不会被源目录的旧版本冲掉。
+     */
+    private static void syncEngineFixedFiles(File srcRoot, File dstRoot) {
+        if (srcRoot == null || dstRoot == null) return;
+        if (!srcRoot.isDirectory() || !dstRoot.isDirectory()) return;
+        for (String name : ENGINE_FIXED_FILES) {
+            try {
+                File src = new File(srcRoot, name);
+                if (!src.isFile()) continue;
+                File dst = new File(dstRoot, name);
+                // 清掉上一版小写化 bug 留下的同名小写文件，避免副本里
+                // 同时存在 kirikiroid2preference.xml 与 Kirikiroid2Preference.xml。
+                String lower = name.toLowerCase(Locale.ROOT);
+                if (!lower.equals(name)) {
+                    File orphan = new File(dstRoot, lower);
+                    if (orphan.isFile() && orphan.delete()) {
+                        Log.i(TAG, "remove lowercased orphan " + orphan.getName());
+                    }
+                }
+                if (dst.isFile() && dst.lastModified() >= src.lastModified()) continue;
+                if (copyOneFile(src, dst, new long[]{0}, 0L, null)) {
+                    Log.i(TAG, "sync engine file " + name + " -> " + dst.getAbsolutePath());
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "sync engine file failed: " + name, t);
+            }
+        }
     }
 
     // ==================== 复制 ====================
@@ -146,6 +234,9 @@ public final class KrkrInternalStore {
         // 已有副本 → 直接复用（不重拷、不动存档）
         if (dst.isDirectory() && hasAnyContent(dst)) {
             Log.i(TAG, "internal copy exists, reuse name=" + dst.getName());
+            // 但「引擎固定文件」是运行期可变的，必须与源目录同步，
+            // 否则用户在「引擎设置」里的改动永远不会生效。
+            syncEngineFixedFiles(sourceRoot, dst);
             return dst;
         }
 
@@ -171,6 +262,9 @@ public final class KrkrInternalStore {
             deleteRecursively(dst);
             return null;
         }
+        // copyTree 已按白名单保留引擎固定名的原始大小写；
+        // 这里再同步一次，确保「源目录比副本新」的固定文件也一并带过来。
+        syncEngineFixedFiles(sourceRoot, dst);
 
         Log.i(TAG, "internal copy done name=" + dst.getName() + " bytes=" + copied[0]);
         return dst;
