@@ -1048,6 +1048,12 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         i.putExtra("launchMode", originMode ? "internal.krkr.origin" : "internal.krkr");
         i.putExtra("scopedSaveDir", scopedSaveDir);
         i.putExtra("globalScopedSaveDir", globalScopedSaveDir);
+        // 【内部存储启动】把「正在内部副本里运行」这一事实下发给 KR2Activity。
+        // 引擎侧据此**不再把 SD 卡根**追加进搜索路径 —— 内部副本是自包含的，
+        // 而每次 AutoPath 重建都要全盘扫描该路径（实测 3.5 万文件 / 33~80ms），
+        // 是设置菜单与存档时的卡顿来源。镜像模式因为 scopedSaveDir=true 会提前
+        // return、天然不追加，内部模式关掉了 scopedSaveDir，所以必须显式告知。
+        i.putExtra("krInternalRun", internalRun);
         i.putExtra("autoKrMirror", autoSdCardMirror);
         i.putExtra("terminateKrProcessOnDestroy", scopedSaveDir || safFileFallback || autoSdCardMirror);
         i.putExtra("scopedSaveName", saveName);
