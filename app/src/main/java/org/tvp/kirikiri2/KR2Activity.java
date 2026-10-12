@@ -412,12 +412,36 @@ public class KR2Activity extends Cocos2dxActivity {
         } catch (Throwable t) {
             android.util.Log.w("KR2Activity", "collect intent storage path failed", t);
         }
+        // 【内部存储启动】内部副本自包含，不需要外部存储路径参与搜索。
+        //
+        // ⚠️ 注意：addKrStoragePath 会把任意 /storage/emulated/0/... 路径
+        // **归一化成 /storage/emulated/0**，因此 getExternalFilesDir() 与
+        // Environment.getExternalStorageDirectory() 最终都会落到 SD 卡根，
+        // 两者都必须跳过。否则引擎每次 AutoPath 重建都会全盘扫描 SD 卡
+        // （实测 5.8 万条目、33~80ms），表现为设置菜单 / 存档时卡顿。
+        //
+        // 镜像模式因 scopedSaveDir=true 会提前 return、天然不追加；
+        // 内部模式关掉了 scopedSaveDir，故这里显式跳过。
+        // 普通启动与镜像启动不受影响（krInternalRun 仅在内部副本运行时为 true）。
+        boolean internalRun = false;
         try {
-            File appExternal = getExternalFilesDir(null);
-            if (appExternal != null) addKrStoragePath(paths, appExternal.getAbsolutePath());
+            Intent it = getIntent();
+            internalRun = it != null && it.getBooleanExtra("krInternalRun", false);
         } catch (Throwable ignored) { }
-        addKrStoragePath(paths, Environment.getExternalStorageDirectory().getAbsolutePath());
-        if (paths.isEmpty()) return new String[]{Environment.getExternalStorageDirectory().getAbsolutePath()};
+        if (!internalRun) {
+            try {
+                File appExternal = getExternalFilesDir(null);
+                if (appExternal != null) addKrStoragePath(paths, appExternal.getAbsolutePath());
+            } catch (Throwable ignored) { }
+            addKrStoragePath(paths, Environment.getExternalStorageDirectory().getAbsolutePath());
+        }
+        if (paths.isEmpty()) {
+            // 内部模式下正常不会走到这里（projectRoot / gamedir / path 至少有一个），
+            // 万一走到，也绝不能回落到 SD 卡根，否则又会触发全盘扫描。
+            return internalRun
+                    ? new String[0]
+                    : new String[]{Environment.getExternalStorageDirectory().getAbsolutePath()};
+        }
         String[] out = paths.toArray(new String[0]);
         android.util.Log.i("KR2Activity", "getStoragePath " + java.util.Arrays.toString(out));
         return out;
