@@ -56,6 +56,76 @@ public class MTDataFilesProvider extends DocumentsProvider {
     private File androidObbDir;
 
     /**
+     * 【安全加固】私有目录下唯一放行的顶层目录名。
+     *
+     * <p>背景：MT「添加本地存储」会让外部文件管理器直接读取本应用私有目录，
+     * 而 {@code shared_prefs/yukihub_prefs.xml} 中保存着登录令牌
+     * （auth_access_token / auth_refresh_token），一旦被读出即可冒充账号登录。
+     *
+     * <p>因此把两个**私有**根（data、user_de_data）限制为只放行 {@code files/} 子树；
+     * shared_prefs、databases、cache 等一律不可见、不可访问。
+     *
+     * <p>android_data / android_obb 位于外部存储，本身即为用户可见路径、
+     * 不含令牌等敏感数据，保持原样以便用户取放存档。
+     */
+    private static final String ALLOWED_PRIVATE_TOP = "files";
+
+    /** 判断私有根下的相对路径是否在白名单内（空串代表私有根自身，允许访问但列出时会再过滤）。 */
+    private static boolean isAllowedPrivateSubPath(String subPath) {
+        if (subPath == null || subPath.isEmpty()) return true;
+        int slash = subPath.indexOf('/');
+        String top = slash < 0 ? subPath : subPath.substring(0, slash);
+        return ALLOWED_PRIVATE_TOP.equals(top);
+    }
+    /** 该目录是否为受保护的私有根（data / user_de_data）。 */
+    private boolean isPrivateRootDir(File dir) {
+        if (dir == null) return false;
+        String p = dir.getPath();
+        return (dataDir != null && p.equals(dataDir.getPath()))
+                || (userDeDataDir != null && p.equals(userDeDataDir.getPath()));
+    }
+
+    /**
+     * 【安全加固】校验「新建/移动」产生的目标文件是否落在允许范围内。
+     *
+     * <p>仅靠 {@link #getFileForDocId} 不够：createDocument 会拼接 displayName，
+     * moveDocument 会拼目标目录，攻击者可用 {@code ../shared_prefs} 之类绕过。
+     *
+     * <p>判定采用**白名单式**（而非黑名单）：只有落在下列位置才放行，其余一律拒绝。
+     * <ul>
+     *   <li>私有根（data / user_de_data）下的 {@code files/} 子树</li>
+     *   <li>外部存储根（android_data / android_obb）及其子树</li>
+     * </ul>
+     * 这样即使用 {@code ../../} 跳出私有根，也会因「不在任何允许根内」而被拒。
+     */
+    private boolean isTargetPathAllowed(File target) {
+        if (target == null) return false;
+        try {
+            String tp = target.getCanonicalPath();
+            // ① 私有根：只放行 files/ 子树
+            for (File root : new File[]{dataDir, userDeDataDir}) {
+                if (root == null) continue;
+                String rp = root.getCanonicalPath();
+                if (tp.equals(rp)) return true;
+                if (tp.startsWith(rp + "/")) {
+                    return isAllowedPrivateSubPath(tp.substring(rp.length() + 1));
+                }
+            }
+            // ② 外部存储根：本身即用户可见，放行
+            for (File root : new File[]{androidDataDir, androidObbDir}) {
+                if (root == null) continue;
+                String rp = root.getCanonicalPath();
+                if (tp.equals(rp) || tp.startsWith(rp + "/")) return true;
+            }
+            // ③ 其余位置（含用 .. 逃出私有根的）→ 拒绝
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+
+    /**
      * @noinspection ALL
      */
     @Override
@@ -109,12 +179,20 @@ public class MTDataFilesProvider extends DocumentsProvider {
         }
         File f = null;
         if (type.equalsIgnoreCase("data")) {
+            // 【安全加固】私有目录只放行 files/ 子树，屏蔽 shared_prefs / databases / cache 等
+            if (!isAllowedPrivateSubPath(subPath)) {
+                throw new FileNotFoundException(docId + " not found");
+            }
             f = new File(dataDir, subPath);
         } else if (type.equalsIgnoreCase("android_data") && androidDataDir != null) {
             f = new File(androidDataDir, subPath);
         } else if (type.equalsIgnoreCase("android_obb") && androidObbDir != null) {
             f = new File(androidObbDir, subPath);
         } else if (type.equalsIgnoreCase("user_de_data") && userDeDataDir != null) {
+            // 【安全加固】同上
+            if (!isAllowedPrivateSubPath(subPath)) {
+                throw new FileNotFoundException(docId + " not found");
+            }
             f = new File(userDeDataDir, subPath);
         }
         if (f == null) {
@@ -174,7 +252,10 @@ public class MTDataFilesProvider extends DocumentsProvider {
         } else {
             File[] files = parent.listFiles();
             if (files != null) {
+                // 【安全加固】私有根下只列出 files/，隐藏 shared_prefs / databases / cache 等
+                boolean filterPrivate = isPrivateRootDir(parent);
                 for (File file : files) {
+                    if (filterPrivate && !isAllowedPrivateSubPath(file.getName())) continue;
                     includeFile(result, parentDocumentId + "/" + file.getName(), file);
                 }
             }
@@ -227,6 +308,10 @@ public class MTDataFilesProvider extends DocumentsProvider {
         File parent = getFileForDocId(parentDocumentId);
         if (parent != null) {
             File newFile = new File(parent, displayName);
+            // 【安全加固】防止 displayName 用 ../ 逃出白名单
+            if (!isTargetPathAllowed(newFile)) {
+                throw new FileNotFoundException("Failed to create document in " + parentDocumentId + " with name " + displayName);
+            }
             int noConflictId = 2;
             while (newFile.exists()) {
                 newFile = new File(parent, displayName + " (" + noConflictId++ + ")");
@@ -305,6 +390,10 @@ public class MTDataFilesProvider extends DocumentsProvider {
         File targetDir = getFileForDocId(targetParentDocumentId);
         if (sourceFile != null && targetDir != null) {
             File targetFile = new File(targetDir, sourceFile.getName());
+            // 【安全加固】防止移动到白名单之外的目录
+            if (!isTargetPathAllowed(targetFile)) {
+                throw new FileNotFoundException("Filed to move document " + sourceDocumentId + " to " + targetParentDocumentId);
+            }
             if (!targetFile.exists() && sourceFile.renameTo(targetFile)) {
                 return targetParentDocumentId.endsWith("/") ? targetParentDocumentId + targetFile.getName() : targetParentDocumentId + "/" + targetFile.getName();
             }
