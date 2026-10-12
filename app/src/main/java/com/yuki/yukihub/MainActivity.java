@@ -93,6 +93,7 @@ import org.w3c.dom.Document;
  import java.io.FileInputStream;
  import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.File;
 import java.io.ByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.BufferedReader;
@@ -276,6 +277,7 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
 private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
 private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
+private static final String KEY_KR_INTERNAL_RUN = "kr_internal_run";
 private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
 /** 编辑对话框重建恢复：标记/状态/表单字段 key（onSaveInstanceState 保存）。 */
 private static final String KEY_EDIT_DIALOG_OPEN = "edit_dialog_open";
@@ -6982,6 +6984,35 @@ LinearLayout accountActions = new LinearLayout(this);
         root.addView(krDrawCutout);
         root.addView(artemisDrawCutout);
 
+        // ===== KRKR 内部存储启动（实验性）=====
+        CheckBox krInternalRun = krCheckBox("KRKR 内部存储启动（实验性）", prefs.getBoolean(KEY_KR_INTERNAL_RUN, false));
+        root.addView(krInternalRun);
+
+        TextView krInternalInfo = new TextView(this);
+        krInternalInfo.setText("开启后，启动 KR 游戏时会把整个游戏目录复制到应用内部存储再运行，"
+                + "缓解部分新版引擎游戏对话/快进卡顿的问题。\n"
+                + "· 存档保存在内部副本里，用「管理」可随时查看或清理\n"
+                + "· 首次启动需要复制，游戏较大时请耐心等待\n"
+                + "· 需占用额外的内部存储空间");
+        krInternalInfo.setTextColor(getColorCompat(R.color.yh_text_muted));
+        krInternalInfo.setTextSize(11);
+        krInternalInfo.setPadding(0, dp(4), 0, dp(6));
+        root.addView(krInternalInfo);
+
+        TextView krInternalUsage = new TextView(this);
+        krInternalUsage.setTextColor(getColorCompat(R.color.yh_text_muted));
+        krInternalUsage.setTextSize(11);
+        root.addView(krInternalUsage);
+
+        Button krInternalManage = krButton("管理内部存储");
+        krInternalManage.setTextColor(primaryTextColor());
+        krInternalManage.setOnClickListener(v -> showKrInternalStoreDialog(krInternalUsage));
+        LinearLayout.LayoutParams krInternalLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
+        krInternalLp.setMargins(0, dp(8), 0, dp(4));
+        root.addView(krInternalManage, krInternalLp);
+
+        refreshKrInternalUsage(krInternalUsage);
+
         Button nativeKrkrButton = krButton("进入原生KRKR");
         nativeKrkrButton.setTextColor(primaryTextColor());
         nativeKrkrButton.setOnClickListener(v -> {
@@ -7116,6 +7147,7 @@ LinearLayout accountActions = new LinearLayout(this);
                     .putString(KEY_KR_ENGINE_VERSION, krEngineVersionFromLabel(String.valueOf(krEngineVersion.getSelectedItem())))
                     .putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
                     .putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
+                    .putBoolean(KEY_KR_INTERNAL_RUN, krInternalRun.isChecked())
                     .putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, artemisScopedSaveDir.isChecked())
                     .putBoolean(KEY_KR_DRAW_CUTOUT, krDrawCutout.isChecked())
                     .putBoolean(KEY_ARTEMIS_DRAW_CUTOUT, artemisDrawCutout.isChecked())
@@ -11458,11 +11490,92 @@ private String guessInstalledWinlatorPackage() {
         if (shouldShowLaunchLoadingOverlay(game)) {
             showLaunchLoadingOverlay();
         }
+        // 【KRKR 内部存储启动】开启且是 KR 游戏时，先复制到内部副本再启动。
+        if (shouldRunKrkrInternal(game)) {
+            launchGameWithInternalCopy(game);
+            return;
+        }
         if (shouldProbeStorageBeforeLaunch(game)) {
             launchGameWithStorageProbe(game);
             return;
         }
         doLaunchGame(game);
+    }
+
+    /** 是否需要走「内部存储启动」流程。 */
+    private boolean shouldRunKrkrInternal(Game game) {
+        if (game == null || game.engine != EngineType.KIRIKIRI) return false;
+        if (prefs == null || !prefs.getBoolean(KEY_KR_INTERNAL_RUN, false)) return false;
+        if (game.rootUri == null || game.rootUri.trim().isEmpty()) return false;
+        return true;
+    }
+
+    /**
+     * 复制游戏到内部存储后启动。
+     *
+     * <p>复制在 IO 线程进行（大游戏可能数十秒），期间用进度对话框提示。
+     * 复制失败或空间不足时**不静默降级**：明确提示并中止，避免用户误以为已生效。
+     * 复制成功后把 {@code game.rootUri} 临时替换为内部路径再走正常启动链，
+     * 这样 {@link EmulatorLauncher} 会识别为内部运行并关掉存档重定向。
+     */
+    private void launchGameWithInternalCopy(Game game) {
+        final Game target = game;
+        final String sourcePath = EmulatorLauncher.uriToFilePath(game.rootUri);
+        if (sourcePath == null || sourcePath.trim().isEmpty()) {
+            doLaunchGame(game);
+            return;
+        }
+        final File sourceRoot = new File(sourcePath);
+        if (!sourceRoot.isDirectory()) {
+            // 不是本地目录（如 SAF/空目录条目），无法复制 → 按原流程启动
+            Log.w("KrkrInternal", "source not a directory, fallback: " + sourcePath);
+            doLaunchGame(game);
+            return;
+        }
+
+        final TextView progressText = new TextView(this);
+        progressText.setTextColor(getColorCompat(R.color.yh_text));
+        progressText.setTextSize(13);
+        progressText.setPadding(dp(16), dp(12), dp(16), dp(12));
+        final AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setTitle("正在复制到内部存储…")
+                .setView(progressText)
+                .setCancelable(false)
+                .create();
+        progressDialog.show();
+        if (progressDialog.getWindow() != null) tintDialogRoot(progressText);
+
+        AppExecutors.io().execute(() -> {
+            File copyDir = com.yuki.yukihub.krkr.KrkrInternalStore.ensureCopy(
+                    this, target.id, target.title, sourceRoot, (copied, total) -> {
+                        if (total <= 0) return;
+                        final int pct = (int) Math.min(100, copied * 100 / total);
+                        runOnUiThread(() -> progressText.setText(
+                                "已复制 " + pct + "%\n"
+                                        + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(copied)
+                                        + " / " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(total)));
+                    });
+            runOnUiThread(() -> {
+                try { progressDialog.dismiss(); } catch (Throwable ignored) { }
+                if (copyDir == null) {
+                    clearLaunchLoadingOverlay();
+                    Toast.makeText(this,
+                            "复制到内部存储失败（空间不足或读写错误），已中止启动。\n"
+                                    + "可关闭「KRKR 内部存储启动」后按原方式游玩。",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                // 临时把游戏根目录指向内部副本，再走原有启动链
+                final String originalRootUri = target.rootUri;
+                target.rootUri = copyDir.getAbsolutePath();
+                try {
+                    doLaunchGame(target);
+                } finally {
+                    // 还原，避免内存中的 Game 对象长期持有内部路径
+                    target.rootUri = originalRootUri;
+                }
+            });
+        });
     }
 
     private View launchLoadingOverlay = null;
@@ -11629,13 +11742,133 @@ private String guessInstalledWinlatorPackage() {
         }
         doLaunchGame(game);
     }
-
-    private boolean isScopedSaveEnabledFor(EngineType engine) {
+private boolean isScopedSaveEnabledFor(EngineType engine) {
         if (prefs == null || engine == null) return false;
         if (engine == EngineType.KIRIKIRI) return prefs.getBoolean(KEY_KR_SCOPED_SAVE_DIR, false);
         if (engine == EngineType.ARTEMIS) return prefs.getBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, false);
         return false;
     }
+
+    // ==================== KRKR 内部存储启动 ====================
+
+    /** 设置页的「已用 / 可用」摘要文本。 */
+    private void refreshKrInternalUsage(TextView tv) {
+        if (tv == null) return;
+        tv.setText("当前内部已用：" + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(
+                        com.yuki.yukihub.krkr.KrkrInternalStore.usedBytes(this))
+                + "　可用：" + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(
+                        com.yuki.yukihub.krkr.KrkrInternalStore.availableBytes(this)));
+    }
+
+    /**
+     * 「管理内部存储」对话框：列出所有内部副本、占用大小，支持单个/全部清理。
+     *
+     * <p>统计与删除都放到 IO 线程，避免大目录卡住 UI。
+     */
+    private void showKrInternalStoreDialog(TextView usageView) {
+        final android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        final TextView summary = new TextView(this);
+        summary.setTextColor(getColorCompat(R.color.yh_text));
+        summary.setTextSize(13);
+        summary.setPadding(0, 0, 0, dp(8));
+        box.addView(summary);
+
+        final android.widget.LinearLayout listBox = new android.widget.LinearLayout(this);
+        listBox.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.addView(listBox);
+
+        final android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(box);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("KRKR 内部存储管理")
+                .setView(scroll)
+                .setPositiveButton("关闭", null)
+                .setNeutralButton("全部清理", null)
+                .create();
+
+        dialog.setOnShowListener(d -> {
+            tintDialogRoot(box);
+            // 「全部清理」需二次确认，避免误删存档
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v ->
+                    new AlertDialog.Builder(this)
+                            .setTitle("清空全部内部副本？")
+                            .setMessage("将删除所有已复制的游戏及其内部存档，且无法恢复。\n（外部原目录不受影响）")
+                            .setPositiveButton("确认清空", (d2, w) -> AppExecutors.io().execute(() -> {
+                                com.yuki.yukihub.krkr.KrkrInternalStore.removeAll(this);
+                                runOnUiThread(() -> {
+                                    loadKrInternalList(listBox, summary);
+                                    refreshKrInternalUsage(usageView);
+                                    Toast.makeText(this, "已清空", Toast.LENGTH_SHORT).show();
+                                });
+                            }))
+                            .setNegativeButton("取消", null)
+                            .show());
+        });
+
+        dialog.show();
+        loadKrInternalList(listBox, summary);
+    }
+
+    /** 异步填充副本列表。 */
+    private void loadKrInternalList(android.widget.LinearLayout listBox, TextView summary) {
+        summary.setText("正在统计…");
+        listBox.removeAllViews();
+        AppExecutors.io().execute(() -> {
+            final java.util.List<com.yuki.yukihub.krkr.KrkrInternalStore.Entry> entries =
+                    com.yuki.yukihub.krkr.KrkrInternalStore.list(this);
+            final long used = com.yuki.yukihub.krkr.KrkrInternalStore.usedBytes(this);
+            final long avail = com.yuki.yukihub.krkr.KrkrInternalStore.availableBytes(this);
+            runOnUiThread(() -> {
+                summary.setText("已用 " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(used)
+                        + "　可用 " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(avail)
+                        + "　共 " + entries.size() + " 个");
+                if (entries.isEmpty()) {
+                    TextView empty = new TextView(this);
+                    empty.setText("（暂无内部副本）");
+                    empty.setTextColor(getColorCompat(R.color.yh_text_muted));
+                    empty.setTextSize(12);
+                    listBox.addView(empty);
+                    return;
+                }
+                for (final com.yuki.yukihub.krkr.KrkrInternalStore.Entry e : entries) {
+                    android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+                    row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                    row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                    row.setPadding(0, dp(6), 0, dp(6));
+
+                    TextView name = new TextView(this);
+                    name.setText(e.displayName + "\n" + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(e.bytes));
+                    name.setTextColor(getColorCompat(R.color.yh_text));
+                    name.setTextSize(12);
+                    row.addView(name, new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+                    Button del = krButton("删除");
+                    del.setTextSize(12);
+                    del.setOnClickListener(v -> new AlertDialog.Builder(this)
+                            .setTitle("删除「" + e.displayName + "」？")
+                            .setMessage("将同时删除该副本内的存档，且无法恢复。\n（外部原目录不受影响）")
+                            .setPositiveButton("确认删除", (d2, w) -> AppExecutors.io().execute(() -> {
+                                com.yuki.yukihub.krkr.KrkrInternalStore.remove(this, e.dirName);
+                                runOnUiThread(() -> {
+                                    loadKrInternalList(listBox, summary);
+                                    Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                                });
+                            }))
+                            .setNegativeButton("取消", null)
+                            .show());
+                    row.addView(del, new android.widget.LinearLayout.LayoutParams(dp(72), dp(36)));
+                    listBox.addView(row);
+                }
+            });
+        });
+    }
+
+    // ==================== /KRKR 内部存储启动 ====================
+
 
     private boolean shouldUseKrSafFileFallback(Game game) {
         return canUseKrSafFileFallback(game, lastStorageProbeResult)
