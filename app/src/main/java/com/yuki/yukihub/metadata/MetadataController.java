@@ -41,6 +41,14 @@ public class MetadataController {
     public static final String SOURCE_HIKARINAGI = "hikarinagi";
     public static final String SOURCE_NEXTMOE = "nextmoe";
     /**
+     * 默认资料源（首次启动 / 用户未设置时使用）。
+     *
+     * NextMoe 的目录只读面**匿名即可调用**（与带凭据逐字节相同），且数据是六源对齐的
+     * ——一次调用即可拿到 VNDB 评分 + Bangumi 中文名 + ErogameScape 时长，
+     * 所以作默认源的填充质量最好，且不强制用户登录。
+     */
+    public static final String SOURCE_DEFAULT = SOURCE_NEXTMOE;
+    /**
      * 已下线的 Bangumi 镜像源标识（历史遗留）。
      *
      * 镜像站长期不稳定（bangumi.lol → bangumi.pro 都挂过），且已有 NextMoe 源替代，
@@ -151,10 +159,10 @@ public class MetadataController {
     // ======================== metadata source ========================
 
     public String metadataSource() {
-        String source = delegate.prefs() == null ? SOURCE_VNDB : delegate.prefs().getString(KEY_METADATA_SOURCE, SOURCE_VNDB);
+        String source = delegate.prefs() == null ? SOURCE_DEFAULT : delegate.prefs().getString(KEY_METADATA_SOURCE, SOURCE_DEFAULT);
         // 兼容迁移：镜像源已下线（镜像站长期不稳定，且已有 NextMoe 源替代）。
         // 旧版存过 "bangumi_mirror" 的用户，这里静默降级到 Bangumi 官源，
-        // 避免设置面板读到无效值而回退到 VNDB。
+        // 避免设置面板读到无效值而回退到默认源。
         if (LEGACY_SOURCE_BANGUMI_MIRROR.equals(source)) return SOURCE_BANGUMI;
         return source;
     }
@@ -171,8 +179,10 @@ public class MetadataController {
     public String normalizeMetadataSource(String source) {
         // 镜像源已下线，旧值一律归一到 Bangumi 官源
         if (LEGACY_SOURCE_BANGUMI_MIRROR.equals(source)) return SOURCE_BANGUMI;
-        if (SOURCE_BANGUMI.equals(source) || SOURCE_YMGAL.equals(source) || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source)) return source;
-        return SOURCE_VNDB;
+        // 注意：VNDB 必须显式列出——它不再兼任「兜底值」，漏掉会被归一成默认源（NextMoe）
+        if (SOURCE_VNDB.equals(source) || SOURCE_BANGUMI.equals(source) || SOURCE_YMGAL.equals(source)
+                || SOURCE_HIKARINAGI.equals(source) || SOURCE_NEXTMOE.equals(source)) return source;
+        return SOURCE_DEFAULT;
     }
     public boolean isValidMetadataSource(String source) {
         // 镜像源不再有效（旧值在读取处已归一，这里不接受它）
@@ -461,7 +471,7 @@ public class MetadataController {
             } else if (SOURCE_HIKARINAGI.equals(source)) {
                 data = HikarinagiClient.searchCandidates(keyword, 1);
             } else if (SOURCE_NEXTMOE.equals(source)) {
-                if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) return null;
+                // 登录可选：未登录走匿名档（按 IP 计配额），一样能搜
                 data = com.yuki.yukihub.nextmoe.NextMoeClient.searchCandidates(keyword, 1);
             } else if (SOURCE_BANGUMI.equals(source)) {
                 String token = bangumiToken();
@@ -748,10 +758,7 @@ public class MetadataController {
             applyVndbMetadata(cached, game);
             return;
         }
-        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
-            delegate.setSideDescription("NextMoe 尚未连接。\n\n请在「设置 → 右侧资料源」下方点击「连接 NextMoe 账号」，\n用未萌账号授权后即可使用本源（按你的账号计配额）。");
-            return;
-        }
+        // 登录可选：未登录走匿名档（按来源 IP 计配额），一样能读目录，不再因为没登录而挡下整个流程
         delegate.setSideDescription("正在从 NextMoe 获取资料…");
         AppExecutors.runOnIo(() -> {
             try {
@@ -775,7 +782,9 @@ public class MetadataController {
                 delegate.runOnUiThread(() -> {
                     if (delegate.selectedGame() == null || delegate.selectedGame().id != id) return;
                     String msg = t.getMessage() == null ? "" : t.getMessage();
-                    String hint = msg.contains("尚未连接") ? "NextMoe 尚未连接，请在设置中授权。" : "NextMoe 获取失败。请检查网络或稍后重试。\n\n" + msg;
+                    String hint = (msg.contains("QUOTA_EXCEEDED") || msg.contains("HTTP 429"))
+                            ? "NextMoe 暂时限流了。\n\n" + msg
+                            : "NextMoe 获取失败。请检查网络或稍后重试。\n\n" + msg;
                     delegate.setSideDescription(hint);
                 });
             }
@@ -843,10 +852,6 @@ public class MetadataController {
 
     public void searchNextMoeWithKeyword(Game game, String keyword) {
         if (game == null || keyword == null || keyword.trim().isEmpty()) return;
-        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
-            delegate.showToast("NextMoe 尚未连接，请在设置中授权", Toast.LENGTH_SHORT);
-            return;
-        }
         delegate.setSideDescription("正在按自定义关键词搜索 NextMoe…");
         AppExecutors.runOnIo(() -> {
             try {
