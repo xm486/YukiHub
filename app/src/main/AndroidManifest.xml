@@ -70,14 +70,14 @@
         </provider>
 
         <!--
-            YukiHub 私有目录对外暴露（系统「文件」框架 / MT 管理器「添加本地存储」）。
-            只暴露 getFilesDir()/krkr_internal/（KRKR 内部存储运行的游戏副本），
-            详见 YukiHubDocumentsProvider 的白名单与越界校验。
-            permission=MANAGE_DOCUMENTS：仅持有该权限的系统组件可调用。
+            MT 管理器「添加本地存储」支持（官方 MTDataFilesProvider 方案）。
+            源码取自 https://github.com/L-JINBIN/MTDataFilesProvider（原样照抄，未改动），
+            让用户无需 root 就能在 MT 里管理本应用的私有目录文件。
+            authority 必须为 <applicationId>.MTDataFilesProvider —— MT 依此识别。
         -->
         <provider
-            android:name=".docs.YukiHubDocumentsProvider"
-            android:authorities="${applicationId}.documents"
+            android:name="bin.mt.file.content.MTDataFilesProvider"
+            android:authorities="${applicationId}.MTDataFilesProvider"
             android:exported="true"
             android:grantUriPermissions="true"
             android:permission="android.permission.MANAGE_DOCUMENTS">
@@ -86,18 +86,12 @@
             </intent-filter>
         </provider>
 
-        <!--
-            唤醒用 Activity：第三方文件管理器通过显式组件名启动它来拉起本进程
-            （provider 需要进程存活才能响应查询）。
-            刻意**不加** intent-filter：加了会在桌面多出一个图标。
-            对照 MT 注入版的做法（noHistory + excludeFromRecents，无 filter）。
-        -->
         <activity
-            android:name=".docs.YukiHubDocsWakeUpActivity"
-            android:exported="true"
+            android:name="bin.mt.file.content.MTDataFilesWakeUpActivity"
+            android:taskAffinity="${applicationId}.MTDataFilesWakeUp"
             android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:theme="@android:style/Theme.NoDisplay" />
+            android:exported="true"
+            android:noHistory="true" />
 
 
         <service
