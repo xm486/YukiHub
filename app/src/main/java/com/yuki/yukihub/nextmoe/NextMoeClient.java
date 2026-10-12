@@ -47,6 +47,11 @@ public final class NextMoeClient {
     private static final long RETRY_DELAY_MS = 1200;
 
     private static volatile long lastRequestTime = 0L;
+    /**
+     * 上次记录过的配额档位。只用于「档位变化时打一行日志」——
+     * 批量刮削（自动匹配可能上百款）不会刷屏，但登录/退出/降级这些关键切换一定留痕。
+     */
+    private static volatile String lastLoggedTier = "";
 
     private NextMoeClient() { }
 
@@ -190,9 +195,7 @@ public final class NextMoeClient {
         // 这是异常降级（令牌刷新失败 / 瞬态故障），必须留痕并在报错时告知用户，
         // 否则会出现「以为登录了、其实在用匿名配额」而不自知。
         boolean degradeToAnonymous = !authed && NextMoeAuthStore.isConnected();
-        if (degradeToAnonymous) {
-            Log.w(TAG, "账号已登录但访问令牌不可用，本次请求按匿名配额发送（path=" + path + "）");
-        }
+        String tier = authed ? "用户档" : (degradeToAnonymous ? "匿名档(降级)" : "匿名档");
         throttle(authed ? MIN_INTERVAL_AUTHED_MS : MIN_INTERVAL_ANON_MS);
         StringBuilder url = new StringBuilder(API_BASE).append(path);
         if (params != null && params.length > 0) {
@@ -213,6 +216,18 @@ public final class NextMoeClient {
             // 未登录时不带 Authorization —— 服务端按来源 IP 计匿名配额
             if (authed) c.setRequestProperty("Authorization", "Bearer " + token);
             int code = c.getResponseCode();
+
+            // 只在档位变化时打一行 —— 带上服务端回的限流头，是档位的直接证据：
+            // 匿名档 limit=50、用户令牌档 limit=100（policy 里两个窗口都写了）。
+            // 挂在「变化才打」上，所以批量刮削（自动匹配可能上百款）也不会刷屏。
+            if (!tier.equals(lastLoggedTier)) {
+                lastLoggedTier = tier;
+                String line = "配额档位=" + tier
+                        + "  limit=" + c.getHeaderField("X-RateLimit-Limit")
+                        + "  policy=" + c.getHeaderField("RateLimit-Policy")
+                        + "  → " + path;
+                if (degradeToAnonymous) Log.w(TAG, line); else Log.i(TAG, line);
+            }
 
             if (code == 401 && authed && allowRefresh) {
                 // 令牌过期：强制刷新一次后重放。
