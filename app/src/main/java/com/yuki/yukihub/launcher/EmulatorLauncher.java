@@ -994,8 +994,12 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         String rawRootPath = stripFileScheme(uriToFilePath(gamePath));
         String path = resolvedPath == null ? null : stripFileScheme(resolvedPath);
         String rootPath = krkrRootForPath(rawRootPath, path);
-        boolean globalScopedSaveDir = context != null && context.getSharedPreferences("yukihub_prefs", Context.MODE_PRIVATE).getBoolean("kr_scoped_save_dir", false);
-        boolean autoSdCardMirror = !originMode && !globalScopedSaveDir && isExternalSdCardKrPath(rootPath);
+        // 【内部存储启动】若游戏已在私有内部副本里（krkr_internal/<name>/），
+        // 必须关掉 scoped save 重定向与镜像：存档要留在副本自己的 savedata/，
+        // 否则会被 redirectScopedSavePath 重定向回外部目录，失去内部读写收益。
+        boolean internalRun = isInternalRunPath(rootPath);
+        boolean globalScopedSaveDir = !internalRun && context != null && context.getSharedPreferences("yukihub_prefs", Context.MODE_PRIVATE).getBoolean("kr_scoped_save_dir", false);
+        boolean autoSdCardMirror = !originMode && !globalScopedSaveDir && !internalRun && isExternalSdCardKrPath(rootPath);
         boolean scopedSaveDir = globalScopedSaveDir || autoSdCardMirror;
         String saveName = safeSaveName(rootPath);
         // 镜像会覆盖 rootPath，先留存源目录，供 NativeBridge 做镜像->源路径换算。
@@ -1387,6 +1391,23 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
             String v = volume.toLowerCase(Locale.ROOT);
             if ("self".equals(v) || "emulated".equals(v)) return false;
             return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * 判断路径是否位于「内部存储启动」的私有副本目录下。
+     *
+     * <p>命中后 {@link #buildInternalKrkrIntent} 会关掉 scoped save 重定向与镜像，
+     * 让存档直接写在副本自己的 {@code savedata/}（即真实内部路径）。
+     */
+    private static boolean isInternalRunPath(String path) {
+        try {
+            if (path == null || path.trim().isEmpty()) return false;
+            String p = stripFileScheme(path.trim()).toLowerCase(Locale.ROOT);
+            return p.contains("/files/" + com.yuki.yukihub.krkr.KrkrInternalStore.DIR_NAME + "/")
+                    || p.endsWith("/files/" + com.yuki.yukihub.krkr.KrkrInternalStore.DIR_NAME);
         } catch (Throwable ignored) {
             return false;
         }

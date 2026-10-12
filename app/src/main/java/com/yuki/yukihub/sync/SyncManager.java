@@ -59,6 +59,8 @@ private static final String KEY_BACKGROUND_DIM_ENABLED = "background_dim_enabled
     private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
     private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
     private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
+    // 注意：KEY_KR_INTERNAL_RUN 刻意不参与同步 —— 内部副本是本机存储状态，
+    // 跨设备无意义（换设备后 krkr_internal/ 里并没有对应的副本）。
     private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
     private static final String KEY_UI_FONT_SCALE = "ui_font_scale";
     private static final String KEY_GAME_COLUMNS = "game_columns";
