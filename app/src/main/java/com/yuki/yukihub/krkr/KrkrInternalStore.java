@@ -60,7 +60,7 @@ public final class KrkrInternalStore {
      * 游戏 ID 是数据库主键，改名/移动目录都不会变，可作稳定标识。
      */
     public static String copyDirName(long gameId, String rawName) {
-        return gameId + "_" + safeName(rawName);
+        return gameId + "_" + lowerName(safeName(rawName));
     }
 
     /** 从副本目录名解析游戏 ID；无法解析返回 -1。 */
@@ -97,6 +97,19 @@ public final class KrkrInternalStore {
         if (name == null || name.trim().isEmpty()) return "default";
         String n = name.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
         return n.isEmpty() ? "default" : n;
+    }
+
+    /**
+     * 副本内所有条目名统一转小写。
+     *
+     * <p>【为什么必须小写】KR 内核会把**整条路径**转小写后再做 stat/opendir，
+     * 而外部 SD 卡走 FUSE（大小写不敏感，随便大小写都能命中），
+     * 内部存储却是大小写敏感的 f2fs。副本里若保留原始大小写，
+     * 引擎按小写路径访问时全部落空 —— 表现为 AutoPath 扫描到 0 个文件、
+     * 启动报找不到入口。中文名不受影响。
+     */
+    private static String lowerName(String name) {
+        return name == null ? "" : name.toLowerCase(Locale.ROOT);
     }
 
     // ==================== 复制 ====================
@@ -178,7 +191,12 @@ public final class KrkrInternalStore {
             String cname = child.getName();
             if (cname == null || cname.isEmpty()) continue;
 
-            File target = new File(dstDir, cname);
+            File target = new File(dstDir, lowerName(cname));
+            if (target.exists()) {
+                // 小写化后撞名（如 Data.xp3 与 data.xp3 并存），保留先复制的那个。
+                Log.w(TAG, "name collision after lowercase, skip " + child.getAbsolutePath());
+                continue;
+            }
             if (child.isDirectory()) {
                 if (!target.exists() && !target.mkdirs()) return false;
                 if (!copyTree(child, target, copied, total, listener)) return false;

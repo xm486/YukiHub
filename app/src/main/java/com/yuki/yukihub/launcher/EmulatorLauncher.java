@@ -1253,6 +1253,14 @@ private static String resolveInternalArtemisPath(String rootUri, String launchTa
         File targetFile = new File(root, target);
         if (targetFile.isFile()) return targetFile.getAbsolutePath();
         if (targetFile.isDirectory()) return targetFile.getAbsolutePath();
+        // 【内部存储副本】副本内条目名统一转小写（见 KrkrInternalStore.lowerName）。
+        // DB 里记录的启动目标若含大写（如 Data.xp3），直接拼路径会落空，
+        // 这里用小写名再试一次；中文名转小写是空操作，不受影响。
+        if (isInternalRunPath(rootPath)) {
+            File lowered = new File(root, target.toLowerCase(Locale.ROOT));
+            if (lowered.isFile()) return lowered.getAbsolutePath();
+            if (lowered.isDirectory()) return lowered.getAbsolutePath();
+        }
         String safTarget = findKrkrTargetFromTree(context, rootUri, rootPath, target);
         if (safTarget != null) return safTarget;
         if (target.endsWith(".xp3") || target.endsWith(".tjs") || target.endsWith(".exe") || target.endsWith(".dll")) {
