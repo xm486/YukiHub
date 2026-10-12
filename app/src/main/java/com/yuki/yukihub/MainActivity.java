@@ -11533,27 +11533,39 @@ private String guessInstalledWinlatorPackage() {
             return;
         }
 
-        final TextView progressText = new TextView(this);
-        progressText.setTextColor(getColorCompat(R.color.yh_text));
-        progressText.setTextSize(13);
-        progressText.setPadding(dp(16), dp(12), dp(16), dp(12));
-        final AlertDialog progressDialog = new AlertDialog.Builder(this)
-                .setTitle("正在复制到内部存储…")
-                .setView(progressText)
-                .setCancelable(false)
-                .create();
+        // 自绘卡片式进度窗：不依赖系统 AlertDialog 主题，
+        // 避免浅色主题下「白底 + 白字」看不见内容。
+        final android.view.View copyView = getLayoutInflater().inflate(R.layout.dialog_kr_internal_copy, null);
+        final TextView copyGame = copyView.findViewById(R.id.tvCopyGame);
+        final TextView copyPercent = copyView.findViewById(R.id.tvCopyPercent);
+        final TextView copySize = copyView.findViewById(R.id.tvCopySize);
+        final android.widget.ProgressBar copyBar = copyView.findViewById(R.id.pbCopy);
+        copyGame.setText(target.title == null ? "" : target.title);
+
+        final Dialog progressDialog = new Dialog(this);
+        progressDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        progressDialog.setContentView(copyView);
+        progressDialog.setCancelable(false);
+        if (progressDialog.getWindow() != null) {
+            progressDialog.getWindow().setBackgroundDrawable(
+                    new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+            progressDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
         progressDialog.show();
-        if (progressDialog.getWindow() != null) tintDialogRoot(progressText);
 
         AppExecutors.io().execute(() -> {
             File copyDir = com.yuki.yukihub.krkr.KrkrInternalStore.ensureCopy(
                     this, target.id, target.title, sourceRoot, (copied, total) -> {
                         if (total <= 0) return;
                         final int pct = (int) Math.min(100, copied * 100 / total);
-                        runOnUiThread(() -> progressText.setText(
-                                "已复制 " + pct + "%\n"
-                                        + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(copied)
-                                        + " / " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(total)));
+                        runOnUiThread(() -> {
+                            copyPercent.setText(pct + "%");
+                            copyBar.setProgress(pct);
+                            copySize.setText(com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(copied)
+                                    + " / " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(total));
+                        });
                     });
             runOnUiThread(() -> {
                 try { progressDialog.dismiss(); } catch (Throwable ignored) { }
@@ -11766,55 +11778,46 @@ private boolean isScopedSaveEnabledFor(EngineType engine) {
      * <p>统计与删除都放到 IO 线程，避免大目录卡住 UI。
      */
     private void showKrInternalStoreDialog(TextView usageView) {
-        final android.widget.LinearLayout box = new android.widget.LinearLayout(this);
-        box.setOrientation(android.widget.LinearLayout.VERTICAL);
-        box.setPadding(dp(4), dp(4), dp(4), dp(4));
+        final android.view.View view = getLayoutInflater().inflate(R.layout.dialog_kr_internal_store, null);
+        final TextView summary = view.findViewById(R.id.tvKrMgrSummary);
+        final android.widget.ProgressBar usageBar = view.findViewById(R.id.pbKrMgrUsage);
+        final android.widget.LinearLayout listBox = view.findViewById(R.id.llKrMgrList);
 
-        final TextView summary = new TextView(this);
-        summary.setTextColor(getColorCompat(R.color.yh_text));
-        summary.setTextSize(13);
-        summary.setPadding(0, 0, 0, dp(8));
-        box.addView(summary);
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(view);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(
+                    new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.90f),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
 
-        final android.widget.LinearLayout listBox = new android.widget.LinearLayout(this);
-        listBox.setOrientation(android.widget.LinearLayout.VERTICAL);
-        box.addView(listBox);
-
-        final android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-        scroll.addView(box);
-
-        final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("KRKR 内部存储管理")
-                .setView(scroll)
-                .setPositiveButton("关闭", null)
-                .setNeutralButton("全部清理", null)
-                .create();
-
-        dialog.setOnShowListener(d -> {
-            tintDialogRoot(box);
-            // 「全部清理」需二次确认，避免误删存档
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v ->
-                    new AlertDialog.Builder(this)
-                            .setTitle("清空全部内部副本？")
-                            .setMessage("将删除所有已复制的游戏及其内部存档，且无法恢复。\n（外部原目录不受影响）")
-                            .setPositiveButton("确认清空", (d2, w) -> AppExecutors.io().execute(() -> {
-                                com.yuki.yukihub.krkr.KrkrInternalStore.removeAll(this);
-                                runOnUiThread(() -> {
-                                    loadKrInternalList(listBox, summary);
-                                    refreshKrInternalUsage(usageView);
-                                    Toast.makeText(this, "已清空", Toast.LENGTH_SHORT).show();
-                                });
-                            }))
-                            .setNegativeButton("取消", null)
-                            .show());
-        });
+        view.findViewById(R.id.tvKrMgrClose).setOnClickListener(v -> dialog.dismiss());
+        view.findViewById(R.id.btnKrMgrDone).setOnClickListener(v -> dialog.dismiss());
+        view.findViewById(R.id.btnKrMgrClearAll).setOnClickListener(v ->
+                new AlertDialog.Builder(this)
+                        .setTitle("清空全部内部副本？")
+                        .setMessage("将删除所有已复制的游戏及其内部存档，且无法恢复。\n（外部原目录不受影响）")
+                        .setPositiveButton("确认清空", (d2, w) -> AppExecutors.io().execute(() -> {
+                            com.yuki.yukihub.krkr.KrkrInternalStore.removeAll(this);
+                            runOnUiThread(() -> {
+                                loadKrInternalList(listBox, summary, usageBar);
+                                refreshKrInternalUsage(usageView);
+                                Toast.makeText(this, "已清空", Toast.LENGTH_SHORT).show();
+                            });
+                        }))
+                        .setNegativeButton("取消", null)
+                        .show());
 
         dialog.show();
-        loadKrInternalList(listBox, summary);
+        loadKrInternalList(listBox, summary, usageBar);
     }
 
     /** 异步填充副本列表。 */
-    private void loadKrInternalList(android.widget.LinearLayout listBox, TextView summary) {
+    private void loadKrInternalList(android.widget.LinearLayout listBox, TextView summary,
+                                    android.widget.ProgressBar usageBar) {
         summary.setText("正在统计…");
         listBox.removeAllViews();
         AppExecutors.io().execute(() -> {
@@ -11824,47 +11827,85 @@ private boolean isScopedSaveEnabledFor(EngineType engine) {
             final long avail = com.yuki.yukihub.krkr.KrkrInternalStore.availableBytes(this);
             runOnUiThread(() -> {
                 summary.setText("已用 " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(used)
-                        + "　可用 " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(avail)
-                        + "　共 " + entries.size() + " 个");
+                        + "　·　可用 " + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(avail)
+                        + "　·　共 " + entries.size() + " 个");
+                if (usageBar != null) {
+                    // 进度 = 已用 /（已用 + 可用），直观展示内部空间占用
+                    long denom = used + avail;
+                    usageBar.setProgress(denom <= 0 ? 0 : (int) Math.min(100, used * 100 / denom));
+                }
                 if (entries.isEmpty()) {
                     TextView empty = new TextView(this);
-                    empty.setText("（暂无内部副本）");
+                    empty.setText("暂无内部副本\n\n开启「KRKR 内部存储启动」后\n首次启动 KR 游戏会自动复制到这里");
                     empty.setTextColor(getColorCompat(R.color.yh_text_muted));
                     empty.setTextSize(12);
+                    empty.setGravity(android.view.Gravity.CENTER);
+                    empty.setPadding(0, dp(24), 0, dp(24));
                     listBox.addView(empty);
                     return;
                 }
                 for (final com.yuki.yukihub.krkr.KrkrInternalStore.Entry e : entries) {
-                    android.widget.LinearLayout row = new android.widget.LinearLayout(this);
-                    row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-                    row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-                    row.setPadding(0, dp(6), 0, dp(6));
-
-                    TextView name = new TextView(this);
-                    name.setText(e.displayName + "\n" + com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(e.bytes));
-                    name.setTextColor(getColorCompat(R.color.yh_text));
-                    name.setTextSize(12);
-                    row.addView(name, new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
-
-                    Button del = krButton("删除");
-                    del.setTextSize(12);
-                    del.setOnClickListener(v -> new AlertDialog.Builder(this)
-                            .setTitle("删除「" + e.displayName + "」？")
-                            .setMessage("将同时删除该副本内的存档，且无法恢复。\n（外部原目录不受影响）")
-                            .setPositiveButton("确认删除", (d2, w) -> AppExecutors.io().execute(() -> {
-                                com.yuki.yukihub.krkr.KrkrInternalStore.remove(this, e.dirName);
-                                runOnUiThread(() -> {
-                                    loadKrInternalList(listBox, summary);
-                                    Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
-                                });
-                            }))
-                            .setNegativeButton("取消", null)
-                            .show());
-                    row.addView(del, new android.widget.LinearLayout.LayoutParams(dp(72), dp(36)));
-                    listBox.addView(row);
+                    listBox.addView(buildKrInternalRow(e, listBox, summary, usageBar));
                 }
             });
         });
+    }
+
+    /** 构造单个副本行：卡片式，左名称+大小，右删除按钮。 */
+    private android.view.View buildKrInternalRow(
+            final com.yuki.yukihub.krkr.KrkrInternalStore.Entry e,
+            final android.widget.LinearLayout listBox, final TextView summary,
+            final android.widget.ProgressBar usageBar) {
+        android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setBackground(getDrawable(R.drawable.bg_auth_input));
+        row.setPadding(dp(12), dp(10), dp(10), dp(10));
+        android.widget.LinearLayout.LayoutParams rowLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.bottomMargin = dp(8);
+        row.setLayoutParams(rowLp);
+
+        android.widget.LinearLayout textCol = new android.widget.LinearLayout(this);
+        textCol.setOrientation(android.widget.LinearLayout.VERTICAL);
+
+        TextView name = new TextView(this);
+        name.setText(e.displayName);
+        name.setTextColor(getColorCompat(R.color.yh_text));
+        name.setTextSize(13);
+        name.setMaxLines(1);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        textCol.addView(name);
+
+        TextView size = new TextView(this);
+        size.setText(com.yuki.yukihub.krkr.KrkrInternalStore.formatSize(e.bytes));
+        size.setTextColor(getColorCompat(R.color.yh_text_muted));
+        size.setTextSize(11);
+        size.setPadding(0, dp(2), 0, 0);
+        textCol.addView(size);
+
+        row.addView(textCol, new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView del = new TextView(this);
+        del.setText("删除");
+        del.setTextColor(getColorCompat(R.color.yh_warning));
+        del.setTextSize(12);
+        del.setPadding(dp(12), dp(6), dp(4), dp(6));
+        del.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("删除「" + e.displayName + "」？")
+                .setMessage("将同时删除该副本内的存档，且无法恢复。\n（外部原目录不受影响）")
+                .setPositiveButton("确认删除", (d2, w) -> AppExecutors.io().execute(() -> {
+                    com.yuki.yukihub.krkr.KrkrInternalStore.remove(this, e.dirName);
+                    runOnUiThread(() -> {
+                        loadKrInternalList(listBox, summary, usageBar);
+                        Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show();
+                    });
+                }))
+                .setNegativeButton("取消", null)
+                .show());
+        row.addView(del);
+        return row;
     }
 
     // ==================== /KRKR 内部存储启动 ====================
