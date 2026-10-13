@@ -196,13 +196,23 @@ public class MainActivity extends AppCompatActivity {
     private GameAdapter adapter;
     private final List<Game> allGames = new ArrayList<>();
     private String filter = "ALL";
+    /**
+     * 隐藏游戏列表：与 {@link #allGames} 分开维护。
+     * <p>{@code repository.getAll()} 在 SQL 层就排除了 {@code hidden=1}，所以隐藏项不会混进
+     * 普通分类；仅当 {@code filter == "HIDDEN"} 时把它作为列表数据源。
+     */
+    private final List<Game> hiddenGames = new ArrayList<>();
+    /** 上次加载时的隐藏条数；onResume 用它判断其它界面（大屏）是否改过隐藏状态。 */
+    private int lastKnownHiddenCount = -1;
     /** 本地游戏分类的安装检测缓存（key=rootUri，进入分类时清空重查，分类内搜索/排序复用）。 */
     private final java.util.Map<String, Boolean> localInstalledCache = new java.util.HashMap<>();
 private String query = "";
 private String developerFilter = "";
-    // 多选删除栏
+    // 多选批量操作栏
     private LinearLayout multiSelectBar;
     private TextView multiSelectCount;
+    /** 多选栏里的「隐藏 / 恢复」按钮：文案随当前分类变化，需要每次刷新。 */
+    private TextView multiSelectHideBtn;
     private TextView tvEmpty, tvStatsGames, tvStatsTime, tvProfileName, tvProfileInitial;
 private ImageView ivProfileAvatar;
 private View profileStatusDot;
@@ -2166,7 +2176,7 @@ if (profilePanel != null) {
 }
         setupDeveloperToggle();
         setupStatusToggle();
-bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "LOCAL");
+bindFilter(R.id.filterAll, "ALL"); bindFilter(R.id.filterFavorite, "FAVORITE"); bindFilter(R.id.filterRecent, "LOCAL"); bindFilter(R.id.filterHidden, "HIDDEN");
         updateFilterSelection();
         EditText searchInput = findViewById(R.id.etSearch);
         searchInput.setFocusableInTouchMode(true); // 搜索输入必须允许触摸获取焦点
@@ -4919,8 +4929,11 @@ private void bindFilter(int id, String value) {
         updateFilterItem(R.id.filterAll, "ALL");
         updateFilterItem(R.id.filterFavorite, "FAVORITE");
         updateFilterItem(R.id.filterRecent, "LOCAL");
+        updateFilterItem(R.id.filterHidden, "HIDDEN");
         updateDeveloperFilterSelection();
         updateStatusFilterSelection();
+        // 多选模式下切分类（隐藏 ↔ 其它）时，「隐藏/恢复」按钮语义要跟着变。
+        if (adapter != null && adapter.isMultiSelectMode()) updateMultiSelectBar(adapter.getCheckedCount());
     }
 
     private void updateFilterItem(int id, String value) {
@@ -4935,6 +4948,11 @@ private void bindFilter(int id, String value) {
             if (id == R.id.filterFavorite) {
                 com.yuki.yukihub.util.IconedText.set(tv, R.drawable.ic_st_heart, " 收藏", 8f, fg);
             }
+            // 隐藏项带眼睛图标；数量大于 0 时后缀计数，让用户在别的分类也能看到「有东西被藏起来了」
+            if (id == R.id.filterHidden) {
+                String label = hiddenGames.isEmpty() ? " 隐藏" : " 隐藏 " + hiddenGames.size();
+                com.yuki.yukihub.util.IconedText.set(tv, R.drawable.ic_st_hidden, label, 8f, fg);
+            }
             tv.setTextColor(fg);
             if (selected) ActionButtonStyle.apply(view, ActionButtonStyle.FILTER);
             else view.setBackgroundResource(R.drawable.bg_input);
@@ -4944,6 +4962,14 @@ private void bindFilter(int id, String value) {
 private void loadGames() {
 allGames.clear();
 allGames.addAll(repository.getAll());
+// 隐藏游戏单独查：数量少、只在「隐藏」分类用到，跟随主列表一起刷新可避免分类里读到过期数据。
+hiddenGames.clear();
+try {
+    hiddenGames.addAll(repository.getHiddenGames());
+} catch (Throwable t) {
+    Log.w("YukiHub", "load hidden games failed", t);
+}
+lastKnownHiddenCount = hiddenGames.size();
 rebuildDeveloperFilters();
 applyFilter();
 if (adapter != null) adapter.setNsfwBlurEnabled(nsfwBlurEnabled());
@@ -4989,13 +5015,57 @@ scanMissingCoversIfNeeded();
         }
     }
 
+    /**
+     * onResume 时对齐隐藏状态。
+     * <p>大屏模式是独立 Activity，在里面隐藏/恢复了游戏后回到主界面，本 Activity 的
+     * {@code allGames}/{@code hiddenGames} 还是旧的。这里用隐藏条数（一次 COUNT，很轻）
+     * 判断「是否有人动过」，只在真的变了时才整表重载，避免每次回前台都白刷一遍列表。
+     * <p>用条数而非时间戳是刻意的：它足够覆盖「大屏改了隐藏」这个场景，又不会因为
+     * 游玩时长之类与隐藏无关的字段变化而误触发重载（那会打断用户当前的选择和滚动位置）。
+     */
+    private void syncHiddenGamesIfChanged() {
+        if (repository == null || adapter == null) return;
+        int count;
+        try {
+            count = repository.countHiddenGames();
+        } catch (Throwable t) {
+            Log.w("YukiHub", "countHiddenGames failed", t);
+            return;
+        }
+        if (count == lastKnownHiddenCount) return;
+        Game previous = selectedGame;
+        loadGames();
+        // 与库内恢复行为保持一致：隐藏分类被清空（在大屏里恢复完了）就退回「全部」，
+        // 否则用户回到主界面会对着一个空列表，以为自己刚才看的东西不见了。
+        if ("HIDDEN".equals(filter) && hiddenGames.isEmpty()) {
+            filter = "ALL";
+            updateFilterSelection();
+            applyFilter();
+        }
+        // 尽量把侧栏选中的游戏还原回去——但只在它确实属于「当前分类正在展示的那份列表」时。
+        // 否则会出现「列表是隐藏分类，侧栏却指着一款已恢复的普通游戏」这种不一致。
+        if (previous == null) return;
+        List<Game> visibleSource = "HIDDEN".equals(filter) ? hiddenGames : allGames;
+        for (Game g : visibleSource) {
+            if (g.id == previous.id) { updateSideDetail(g); return; }
+        }
+    }
+
     private void applyFilter() {
         List<Game> shown = new ArrayList<>();
         String q = query == null ? "" : query.toLowerCase(Locale.ROOT).trim();
         long total = 0;
+        // 统计口径固定为「游戏库总量」，与当前筛选分类无关，避免切到隐藏分类时数字跳动。
         for (Game g : allGames) {
             total += g.totalPlayTime;
+        }
+        // 「隐藏」分类的数据源是独立查询出来的隐藏列表，其余分类都用可见列表。
+        boolean hiddenView = "HIDDEN".equals(filter);
+        List<Game> source = hiddenView ? hiddenGames : allGames;
+        for (Game g : source) {
             if (!q.isEmpty() && (g.title == null || !g.title.toLowerCase(Locale.ROOT).contains(q))) continue;
+            // 隐藏分类是独立的互斥一级分类，不再叠加收藏/本地/引擎等其它一级条件。
+            if (hiddenView) { shown.add(g); continue; }
             if ("LOCAL".equals(filter) && !isGameInstalled(g)) continue;
             if ("FAVORITE".equals(filter) && !g.favorite) continue;
             // 游玩状态是独立维度（statusFilter），可与引擎分类、开发商叠加
@@ -5021,8 +5091,16 @@ scanMissingCoversIfNeeded();
         sortGames(shown);
         adapter.submit(shown);
         tvEmpty.setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+        if (shown.isEmpty() && hiddenView) {
+            // 隐藏分类为空时给出可执行的说明，避免用户以为功能坏了。
+            tvEmpty.setText("没有隐藏的游戏\n在「选项」菜单里可以把游戏隐藏起来");
+        } else if (shown.isEmpty()) {
+            tvEmpty.setText("还没有游戏\n点击「添加」手动录入，或点击「扫描」导入目录");
+        }
         tvStatsGames.setText(String.valueOf(allGames.size()));
         tvStatsTime.setText(TimeFormatUtil.playTime(total));
+        // 隐藏数量可能因隐藏/恢复而变化，筛选栏按钮文案在这里统一刷新（所有刷新路径都会经过 applyFilter）。
+        updateFilterItem(R.id.filterHidden, "HIDDEN");
         updateProfilePanel();
         if (shown.isEmpty()) {
             updateSideDetail(null);
@@ -5798,11 +5876,12 @@ String rematchItem = "重新匹配" + sourceLabel;
         String syncItem = "同步" + sourceLabel + "到卡片";
         String playTimeItem = "修改游玩时长";
         String favoriteItem = game.favorite ? "取消收藏" : "收藏游戏";
+        String hideItem = game.hidden ? "取消隐藏" : "隐藏游戏";
         String nsfwBlurLabel = "🔞 NSFW 封面模糊";
         boolean nsfwBlurGameOn = game.nsfw;
         String nsfwBlurItem = nsfwBlurLabel + "：" + (nsfwBlurGameOn ? "开启" : "关闭");
         java.util.List<String> itemList = new java.util.ArrayList<>(java.util.Arrays.asList(
-                "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
+                "编辑游戏", "设置游玩状态", playTimeItem, favoriteItem, hideItem, nsfwBlurItem, rematchItem, customSearchItem, syncItem));
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS || game.engine == EngineType.PC || game.engine == EngineType.FVP) itemList.add("引擎设置");
         if (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ARTEMIS || game.engine == EngineType.FVP) itemList.add("虚拟鼠标");
         // 桌面快捷方式：部分启动器（含部分定制 ROM）不支持固定快捷方式，不支持时不显示该项
@@ -5811,7 +5890,7 @@ String rematchItem = "重新匹配" + sourceLabel;
         if (shortcutSupported) itemList.add(shortcutItem);
         itemList.add("详细信息");
         itemList.add("删除游戏");
-        itemList.add("多选删除…");
+        itemList.add("多选操作（隐藏 / 删除）…");
         String[] items = itemList.toArray(new String[0]);
         LinearLayout listRoot = new LinearLayout(this);
         listRoot.setOrientation(LinearLayout.VERTICAL);
@@ -5823,8 +5902,8 @@ String rematchItem = "重新匹配" + sourceLabel;
         for (String item : items) {
             TextView row = new TextView(this);
             row.setText(item);
-            row.setTextColor(getColorCompat(
-                    ("删除游戏".equals(item) || "多选删除…".equals(item)) ? R.color.yh_secondary : R.color.yh_text));
+            boolean isDangerItem = "删除游戏".equals(item) || item.startsWith("多选操作");
+            row.setTextColor(getColorCompat(isDangerItem ? R.color.yh_secondary : R.color.yh_text));
             row.setTextSize(15);
             row.setGravity(android.view.Gravity.CENTER_VERTICAL);
             row.setPadding(hp, 0, hp, 0);
@@ -5845,6 +5924,7 @@ String rematchItem = "重新匹配" + sourceLabel;
                     loadGames();
                     Toast.makeText(this, game.favorite ? "已收藏" : "已取消收藏", Toast.LENGTH_SHORT).show();
                 }
+                else if (hideItem.equals(chosen)) toggleGameHidden(game);
                 else if (rematchItem.equals(chosen)) {
     clearCurrentSourceMetadata(game.id);
     fetchSelectedMetadata(game, true);
@@ -5863,7 +5943,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 else if (shortcutItem.equals(chosen)) requestGameShortcut(game);
                 else if ("详细信息".equals(chosen)) showDetailDialog(game);
                 else if ("删除游戏".equals(chosen)) confirmDeleteGame(game);
-                else if ("多选删除…".equals(chosen)) enterMultiSelectMode(game);
+                else if (chosen != null && chosen.startsWith("多选操作")) enterMultiSelectMode(game);
             });
         }
         ScrollView optionScroll = new ScrollView(this);
@@ -5880,6 +5960,64 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         if (optionDialog.getWindow() != null) {
             optionDialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.48f), (int) (getResources().getDisplayMetrics().heightPixels * 0.78f));
         }
+    }
+
+    // ==================== 游戏库隐藏 / 恢复 ====================
+
+    /**
+     * 隐藏或恢复单款游戏。
+     * <p>隐藏只改数据库 {@code hidden} 标志：不删除记录、不动封面/PV/游玩时长，
+     * 所以「隐藏分类 → 取消隐藏」是无损可逆的。恢复时若当前停在隐藏分类且已清空，
+     * 自动切回「全部」并提示，避免用户对着空列表以为游戏丢了。
+     */
+    private void toggleGameHidden(Game game) {
+        if (game == null || game.id <= 0) return;
+        boolean hide = !game.hidden;
+        if (hide) {
+            // 隐藏属于「要让人找不到」的操作，给一次二次确认；恢复不设门槛（用户本来就在找它）。
+            String title = emptyText(game.title, "这款游戏");
+            new AlertDialog.Builder(this)
+                    .setTitle("隐藏这款游戏？")
+                    .setMessage("“" + title + "”将从游戏库列表中移除。\n\n不会删除游戏文件，也不会清除封面、游玩时长和收藏；"
+                            + "之后可在筛选栏「隐藏」分类里取消隐藏。")
+                    .setPositiveButton("隐藏", (d, w) -> applyGameHidden(game, true))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        applyGameHidden(game, false);
+    }
+
+    /** 真正落库 + 刷新列表。写库失败不假报成功。 */
+    private void applyGameHidden(Game game, boolean hidden) {
+        int rows;
+        try {
+            rows = repository.setHidden(game.id, hidden);
+        } catch (Throwable t) {
+            Log.w("YukiHub", "setHidden failed: " + game.id, t);
+            rows = 0;
+        }
+        if (rows != 1) {
+            Toast.makeText(this, hidden ? "隐藏失败，请重试" : "取消隐藏失败，请重试", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        game.hidden = hidden;
+        if (hidden && selectedGame != null && selectedGame.id == game.id) {
+            // 被隐藏的游戏马上就要从列表消失，侧栏不能继续指向它。
+            updateSideDetail(null);
+        }
+        // 在隐藏分类里恢复最后一项 → 先把分类切回「全部」，避免先生成一份空列表再跳转。
+        boolean leavingHiddenView = !hidden && "HIDDEN".equals(filter);
+        loadGames(); // 内部会重建隐藏列表并刷新计数
+        if (leavingHiddenView && hiddenGames.isEmpty()) {
+            filter = "ALL";
+            updateFilterSelection();
+            applyFilter();
+        }
+        Toast.makeText(this, hidden
+                ? "已隐藏；筛选栏「隐藏」分类可取消隐藏"
+                : "已恢复 · " + emptyText(game.title, "") + "（在「全部」里可查看）",
+                Toast.LENGTH_SHORT).show();
     }
 
     // ==================== 批量重扫全部游戏资料 ====================
@@ -6071,7 +6209,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 .show();
     }
 
-    // ==================== 多选删除 ====================
+    // ==================== 多选批量操作（删除 / 隐藏 / 恢复）====================
 
     /** 进入多选模式，并预勾选当前游戏。 */
     private void enterMultiSelectMode(Game seed) {
@@ -6081,7 +6219,7 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         ensureMultiSelectBar();
         if (multiSelectBar != null) multiSelectBar.setVisibility(View.VISIBLE);
         updateMultiSelectBar(adapter.getCheckedCount());
-        Toast.makeText(this, "已进入多选模式，点选游戏后可批量删除", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "已进入多选模式，点选游戏后可批量隐藏或删除", Toast.LENGTH_SHORT).show();
     }
 
     private void exitMultiSelectMode() {
@@ -6092,6 +6230,12 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
     private void updateMultiSelectBar(int count) {
         if (multiSelectCount != null) {
             multiSelectCount.setText("已选 " + count + " 个");
+        }
+        // 隐藏分类里按钮是「恢复」，其余分类是「隐藏」；文案与配色一起跟着分类走。
+        if (multiSelectHideBtn != null) {
+            boolean inHiddenView = "HIDDEN".equals(filter);
+            multiSelectHideBtn.setText(inHiddenView ? "恢复" : "隐藏");
+            multiSelectHideBtn.setTextColor(getColorCompat(inHiddenView ? R.color.yh_primary : R.color.yh_text));
         }
         if (multiSelectBar != null) {
             multiSelectBar.setVisibility(adapter != null && adapter.isMultiSelectMode() ? View.VISIBLE : View.GONE);
@@ -6136,6 +6280,12 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
         deleteBtn.setOnClickListener(v -> confirmBatchDelete());
         multiSelectBar.addView(deleteBtn, multiSelectBtnLp());
 
+        // 批量隐藏 / 恢复：按钮语义跟随当前分类（在「隐藏」分类里就是恢复）。
+        // 多选栏只创建一次，所以文案不在闭包里定死，由 updateMultiSelectBar 每次刷新。
+        multiSelectHideBtn = makeMultiSelectAction("隐藏", getColorCompat(R.color.yh_text));
+        multiSelectHideBtn.setOnClickListener(v -> confirmBatchHide(!"HIDDEN".equals(filter)));
+        multiSelectBar.addView(multiSelectHideBtn, multiSelectBtnLp());
+
         TextView cancelBtn = makeMultiSelectAction("取消", getColorCompat(R.color.yh_text_muted));
         cancelBtn.setOnClickListener(v -> exitMultiSelectMode());
         multiSelectBar.addView(cancelBtn, multiSelectBtnLp());
@@ -6170,6 +6320,48 @@ else if (syncItem.equals(chosen)) syncCurrentMetadataToGameCard(game);
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(dp(6), 0, 0, 0);
         return lp;
+    }
+
+    /** 批量隐藏 / 恢复（二次确认 + 事务落库）。 */
+    private void confirmBatchHide(boolean hide) {
+        if (adapter == null) return;
+        final java.util.Set<Long> ids = adapter.getCheckedIds();
+        if (ids.isEmpty()) {
+            Toast.makeText(this, hide ? "请先勾选要隐藏的游戏" : "请先勾选要恢复的游戏", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int count = ids.size();
+        new AlertDialog.Builder(this)
+                .setTitle(hide ? "批量隐藏" : "批量恢复")
+                .setMessage(hide
+                        ? "确定隐藏选中的 " + count + " 个游戏？\n不会删除游戏文件，也不会清除封面与游玩时长；可在筛选栏「隐藏」分类里恢复。"
+                        : "确定恢复选中的 " + count + " 个游戏？\n恢复后会回到「全部」分类中。")
+                .setPositiveButton(hide ? "隐藏 " + count + " 个" : "恢复 " + count + " 个", (d, w) -> {
+                    int updated;
+                    try {
+                        updated = repository.setHiddenBatch(ids, hide);
+                    } catch (Throwable t) {
+                        Log.w("YukiHub", "setHiddenBatch failed", t);
+                        updated = 0;
+                    }
+                    if (updated <= 0) {
+                        Toast.makeText(MainActivity.this, hide ? "隐藏失败，请重试" : "恢复失败，请重试", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    // 选中项里可能含被隐藏的那款，清掉选中；侧栏由 applyFilter 重新指向首项。
+                    selectedGame = null;
+                    exitMultiSelectMode();
+                    loadGames();
+                    if (!hide && "HIDDEN".equals(filter) && hiddenGames.isEmpty()) {
+                        filter = "ALL";
+                        updateFilterSelection();
+                        applyFilter();
+                    }
+                    Toast.makeText(MainActivity.this,
+                            (hide ? "已隐藏 " : "已恢复 ") + updated + " 个游戏", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void confirmBatchDelete() {
@@ -12475,6 +12667,7 @@ return startActivitySafely(intent);
      } catch (Throwable ignored) {}
      finishCurrentPlaySessionIfAny();
     resumeBackgroundVideoIfNeeded();
+    syncHiddenGamesIfChanged();
     
     // 自动刷新 Token（如果已登录但可能过期）
     if (isLoggedIn()) {
