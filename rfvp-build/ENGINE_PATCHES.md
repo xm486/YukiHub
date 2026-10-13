@@ -28,9 +28,14 @@ apply_audio_fix_patch.py       # 5. MP4 声道回填 + SampleBuffer 按需分配
 apply_wmv_decoder_patch.py     # 6. WMA 解码器负数下标防护
 apply_probe_patch.py           # 7. YHPROBE 输入探针（诊断期）
 apply_text_click_patch.py      # 8. 点击补全文字 + vm_runner resume 保护
+apply_fvp_additive_blend_patch.py  # 9. PrimSetBlend(id,1) 走加法混合（上游 ffc73809）
+apply_fvp_mask_dissolve_patch.py   # 10. Mask dissolve 遮罩渐变（上游 e95f275a）· YHFVP-MASKDISSOLVE-1.0
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 9. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 11. video-sys 解码器 ByteBuffer 模式
 ```
+
+> 9 与 10 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
+> 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
 
 > ⚠️ 顺序有依赖：`apply_movie_patch` 与 `apply_audio_fix_patch` 会争抢
 > `videoplayer.rs` 同一段代码，必须保持现有顺序（见提交 `a013595`）。
@@ -49,6 +54,8 @@ video-sys-cpu-read.patch       # 9. video-sys 解码器 ByteBuffer 模式
 | `apply_wmv_decoder_patch.py` | `na_wmv_player/src/wma/decoder.rs` | WMA 指数解码负数下标 panic → 返回 `Err` |
 | `apply_probe_patch.py` | `syscalls/input.rs` 等 | YHPROBE 输入探针（`InputGetDown/Up/Event/SetClick/PrimHit`） |
 | `apply_text_click_patch.py` | `app.rs` / `text_manager.rs` / `vm_runner.rs` | **点击补全点字动画** + `TextResume` 状态保护 |
+| `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
+| `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -551,6 +558,77 @@ FvpVirtualKeys: virtual keys attached (ESC / 历史 / Ctrl)
 
 ---
 
+### 3.9 FVP HD "parts" 背景硬边暗带（上游贴图 bug）—— 移植上游修复
+
+**现象**：FVP HD 版《Hoshizora no Memoria》开场星空背景上，有一条**硬边暗色竖带**
+（1920×1080 虚拟坐标下约 x=712..1274），并且会**有节奏地明暗脉动**。
+
+**排查（已提 upstream issue #38）**：
+
+| 证据 | 内容 |
+|---|---|
+| 涉及的图 | `graph/BG063_020`(基图) / `BG063_020b` / `BG063_020_parts1` / `BG063_020_parts2` |
+| 罪魁 | `parts2` 的 sprite quad `rect=(712,-4)-(1274,939)` —— 正好是暗带位置 |
+| alpha 时间线 | 一直脉动 `0.98 → 0.25 → 0.88 → 0.25 …`，从不稳定 |
+| 文件特征 | `parts2` 598×1002，压缩后仅 ~12 KB —— 按 8-bit 灰度算压缩比 49:1（合理），按 RGB24 算是 146:1（不合理）→ **它本来就是 8-bit 遮罩图** |
+| 排除项 | 不是 Parts syscall（只用于角色）、不是 PrimSetZ、不是全屏 Dissolve |
+
+**上游回复（作者 xmoezzz）**：
+
+> I guess the incorrect dissolve motion caused it. It should be fixed in e95f275
+
+**根因**：`MaskFadeIn / MaskFadeInOut / MaskFadeOut` 这类 dissolve 用的是 8-bit 遮罩图，
+原引擎按"遮罩形状逐渐变黑"来合成。而 rfvp 此前**在所有平台上都没实现这条管线**
+（旧版 `app.rs` 原话：*"Until a dedicated mask dissolve pipeline is implemented, do not draw
+a solid overlay here"*），于是遮罩图被当成普通贴图直接画出来 → 硬边暗带。
+
+**上游修复（两个提交）**：
+
+| 提交 | 内容 |
+|---|---|
+| `e95f275a` | 实现 Mask Dissolve：root=0 之后、dissolve2/HUD 之前插入全屏合成，`clamp(alpha + 2*progress - 1, 0, 1)` |
+| `ffc73809` | `PrimSetBlend(id, 1)` 改走**加法混合**（SRCALPHA/ONE），对齐原引擎 |
+
+**我们的做法：不整体同步上游，只把这两段"插"进 fork 的基线。**
+
+理由：上游 09-24 → 10-12 隔了 **30 个提交**，包含 VFS / 存档 / 音频 / 视频四大模块的
+跨平台统一重构（143 个文件有差异），整体同步要重做全部 11 个补丁的锚点，风险远大于收益。
+
+**移植范围（只取 Android/wgpu 路径）**：
+
+| 文件 | 改动 | 说明 |
+|---|---|---|
+| `rendering/mask_dissolve.rs` | **新增 60 行** | 照抄上游（+1 个 `YHFVP-MASKDISSOLVE-1.0` CI 标记） |
+| `rendering/mod.rs` | +2 | 注册模块 |
+| `rendering/gpu_prim.rs` | +62 | `DrawTextureKey::Mask`、`mask_frame`/`mask_texture` 字段、`texture_bind_group` 分支、`build()` 插入点、`additive` 字段 + 5 处调用点 |
+| `rfvp_render/pipelines/sprite.rs` | +106 −32 | additive 混合管线 + `draw_blended()` |
+| `motion_manager/mod.rs` | +7 | `set_dissolve_mask_graph` 递增 `generation` |
+
+**不移植的部分**（Android 碰不到）：`platform/ps1/*`、`host_api/*` 的 portable 渲染器、
+`texture.rs` / `graph_buff.rs` 里的 `#[cfg(feature = "psx")]` 分支、`soft_render/`、
+`sprite_wasm.rs`。
+
+**为什么能这么省事**：所需 API 在旧版基线里**全都有**（逐个核对过）——
+`GraphBuff::export_alpha_mask()`（签名逐字节相同）、`texture_path`、`generation`、
+`MotionManager::get_dissolve_*()`、`GpuTexture::new_rgba8_unorm` / `update_rgba8`
+（`rfvp_render/texture.rs` 新旧连行号都一样）、`DrawPrim::get_blend()`。
+所以是"纯插入"，不动任何既有结构，也**不碰我们其它 9 个补丁**。
+
+**验证（本轮已完成）**：
+
+1. 两个脚本**顺序无关**（A→B / B→A 结果功能等价），且都**幂等**；
+2. 4 个被改文件用 `rustc 1.75 --edition 2021` 逐个过语法检查 → **0 语法错误**；
+3. `rebuild()` 确认是 `build()` 的薄封装 → mask 插入点**一定会被执行**；
+4. mask 在 `root0_draw_end` 之前入队 → 会被 `draw_virtual_root0` 绘制、排在 HUD 之前 ✅
+
+**未验证（需要真机）**：实际画面效果 —— 暗带是否真的消失。
+作者原话是 "I guess"，且加法混合在原理上**同样能解释**暗带消失，所以两个修复都插了。
+
+**注意**：我们 fork 的基线仍是上游 `81a8b685`，所以 `apply_wmv_decoder_patch.py`（补丁 6）
+**继续保留** —— 上游虽然自己修了 WMA 负数下标，但我们没同步。
+
+---
+
 ## 4. YHPROBE 探针一览（诊断期）
 
 > 过滤：`adb logcat -s rfvp | grep YHPROBE`
@@ -625,6 +703,7 @@ FvpVirtualKeys: virtual keys attached (ESC / 历史 / Ctrl)
 | OP / 电影播放（**MP4**，含音频） | video-sys + movie + audio 补丁 | **推荐格式**：画面+音频+可跳过 全功能 |
 | 原版 `.wmv` 播放 | wmv 补丁 | **能播画面、可跳过、不卡死**；**无声音**（原版行为，见 3.3.1） |
 | 原版 `.mpg/.mpeg` | — | 不做同步音频解码（同 WMV 理由） |
+| **FVP HD parts 背景暗带** | fvp render 补丁（mask dissolve + additive blend） | 见 3.9；**需真机实测确认** |
 | 点击补全点字动画 | text_click 补丁 | 动画中点一下=显示完整句；再点一下才过 |
 | **虚拟按键 ESC / 历史 / Ctrl** | APK 侧 `FvpVirtualKeys` | **与 so 无关**（键码走 `rfvp_android_key`），需重编 APK |
 | **虚拟鼠标（含光标包）** | APK 侧 `gamecursor` | 同上；光标点击走 `rfvp_android_touch`（见 3.8）|
