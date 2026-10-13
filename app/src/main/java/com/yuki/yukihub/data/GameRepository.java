@@ -52,7 +52,6 @@ public class GameRepository {
         }
         return list;
     }
-
     /** 仅更新指定游戏的隐藏标志，不覆盖封面、PV、游玩时长等其他字段。 */
     public int setHidden(long gameId, boolean hidden) {
         ContentValues values = new ContentValues();
@@ -60,6 +59,40 @@ public class GameRepository {
         values.put("updated_at", System.currentTimeMillis());
         return helper.getWritableDatabase().update("games", values, "id=?",
                 new String[]{String.valueOf(gameId)});
+    }
+
+    /** 隐藏游戏条数（COUNT，供界面判断是否需要重载列表，比整表查询轻）。 */
+    public int countHiddenGames() {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM games WHERE hidden=1", null)) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        }
+    }
+
+    /**
+     * 批量设置隐藏标志（批量隐藏 / 批量恢复），返回实际更新的游戏数。
+     * <p>整体包在一个事务里：要么全成，要么全不动，避免批量操作做到一半失败后
+     * 列表处于「一半隐藏一半可见」的中间态。同样只改 hidden/updated_at。
+     */
+    public int setHiddenBatch(java.util.Collection<Long> ids, boolean hidden) {
+        if (ids == null || ids.isEmpty()) return 0;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        int updated = 0;
+        long now = System.currentTimeMillis();
+        db.beginTransaction();
+        try {
+            ContentValues values = new ContentValues();
+            values.put("hidden", hidden ? 1 : 0);
+            values.put("updated_at", now);
+            for (Long id : ids) {
+                if (id == null || id <= 0) continue;
+                updated += db.update("games", values, "id=?", new String[]{String.valueOf(id)});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return updated;
     }
 
     public long insert(Game game) {
