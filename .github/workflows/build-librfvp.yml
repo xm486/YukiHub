@@ -46,6 +46,8 @@ jobs:
           cp rfvp-build/apply_wmv_decoder_patch.py rfvp/
           cp rfvp-build/apply_probe_patch.py rfvp/
           cp rfvp-build/apply_text_click_patch.py rfvp/
+          cp rfvp-build/apply_fvp_additive_blend_patch.py rfvp/
+          cp rfvp-build/apply_fvp_mask_dissolve_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -55,6 +57,10 @@ jobs:
           python3 apply_wmv_decoder_patch.py
           python3 apply_probe_patch.py
           python3 apply_text_click_patch.py
+          # FVP 渲染修复（移植自上游 ffc73809 + e95f275a，只取 Android/wgpu 部分）。
+          # 顺序无关，两个脚本都会自适应对方是否已应用。
+          python3 apply_fvp_additive_blend_patch.py
+          python3 apply_fvp_mask_dissolve_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -147,6 +153,13 @@ jobs:
             echo "外部文本替换补丁已编入 ✓ ($(grep -ao 'YHFVP-TEXTPATCH-[0-9.]*' "$SO" | head -1))"
           else
             echo "::error::librfvp.so 未包含 text_patch 补丁（缺 YHFVP-TEXTPATCH 标识）—— apply_text_patch.py 未生效"
+            exit 1
+          fi
+          # FVP 渲染修复（mask dissolve）必须编进去
+          if grep -qa 'YHFVP-MASKDISSOLVE' "$SO"; then
+            echo "FVP mask-dissolve 补丁已编入 ✓ ($(grep -ao 'YHFVP-MASKDISSOLVE-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 mask dissolve 补丁（缺 YHFVP-MASKDISSOLVE 标识）—— apply_fvp_mask_dissolve_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"
