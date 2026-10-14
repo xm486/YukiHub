@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  汉堡菜单图标（大屏顶栏「菜单」按钮）。
+  v2：初版三条线只占 viewBox 高度的 42%（y:7~17），而相邻的「房子」图标
+  内容占了 83% —— 同样 20dp 显示尺寸下汉堡显得小一圈，两颗按钮不等大。
+  这里把几何撑到与房子同一档：x:3~21（75% 宽，与房子一致）、y:5~19（58% 高，
+  汉堡图形本身是扁的，取视觉平衡点），线宽加粗到 2.0 补足横向线条的视觉密度。
+  风格对齐 ic_nav_* 系列：线性描边、round cap；颜色由调用方按需 tint。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3,6h18M3,12h18M3,18h18" />
+</vector>

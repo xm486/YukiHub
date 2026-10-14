@@ -149,8 +149,16 @@ public class BigScreenActivity extends AppCompatActivity
     private View topBar;
     private View bottomBar;
     private View menuBtn;
+    /** 触摸模式的「退出大屏」直出口（手柄玩家隐藏，见 applyTouchUi）。 */
+    private View exitBtn;
     /** 最近一次输入来自触摸 —— 提示文案随之切换（手柄/键盘一动就切回来） */
     private boolean touchMode = false;
+    /**
+     * 顶栏按钮区（退出 / 菜单）焦点下标：-1 = 不在顶栏区。
+     * 进入路径：侧栏按 ↑ 到顶（侧栏是纵向的，顶就是顶栏按钮）；
+     * 退出路径：按 ↓ 回到侧栏。←→ 在两颗按钮间移动，Ⓐ 确认。
+     */
+    private int topBarFocus = -1;
     /** M13：原地启动后待收尾的游玩会话（0 = 无） */
     private long pendingLaunchSessionId = 0L;
     private long pendingLaunchAt = 0L;
@@ -331,9 +339,17 @@ public class BigScreenActivity extends AppCompatActivity
         topBar = findViewById(R.id.bsTopBar);
         bottomBar = findViewById(R.id.bsBottomBar);
         menuBtn = findViewById(R.id.bsMenuBtn);
+        exitBtn = findViewById(R.id.bsExitBtn);
         sizes = new BigScreenSizes(this);
         applySizes();
-        if (menuBtn != null) { menuBtn.setOnClickListener(v -> { BigScreenSound.open(); openMainMenu(); }); }
+        if (menuBtn != null) {
+            menuBtn.setOnClickListener(v -> { BigScreenSound.open(); BigScreenSound.hapticKey(v); openMainMenu(); });
+            bindTopBarPressFeedback(menuBtn);
+        }
+        if (exitBtn != null) {
+            exitBtn.setOnClickListener(v -> { BigScreenSound.confirm(); BigScreenSound.hapticKey(v); exitToHome(); });
+            bindTopBarPressFeedback(exitBtn);
+        }
         applyEffectLevel();
     }
 
@@ -571,6 +587,104 @@ public class BigScreenActivity extends AppCompatActivity
         if (detailsLayer != null) { detailsLayer.setTouchUi(touchUi); }
         // M22：搜索浮层的关闭按钮同理
         if (searchLayer != null) { searchLayer.setTouchUi(touchUi); }
+        // 「退出大屏」现在是常驻按钮（手柄侧栏到顶也能进入它，不再做触摸限定）。
+        // 手柄插拔时若有焦点落在顶栏按钮上，收回焦点避免悬空。
+        if (!touchUi && topBarFocus >= 0) { setTopBarFocus(-1); }
+    }
+
+    // ================= 顶栏按钮焦点（退出 / 菜单）=================
+
+    /** 顶栏区两颗按钮：与 XML 里的顺序一致 */
+    private static final int TOPBAR_EXIT = 0;
+    private static final int TOPBAR_MENU = 1;
+
+    /** 设置顶栏焦点（-1 = 离开顶栏区），并刷新两颗按钮的视觉。 */
+    /**
+     * 侧栏焦点是否已在第一个可选条目（且没有因循环滚动而跳走）。
+     * 注意 RailView.moveFocus 是**循环**的：第一项再按 ↑ 会绕到最后一项，
+     * 所以「到顶检测」必须在移动**之前**做，这里就是那个检测点。
+     */
+    private boolean railAtTop() {
+        return railZone && rail.focusedIndex() <= 0;
+    }
+
+    /** 设置顶栏焦点（-1 = 离开顶栏区），并刷新两颗按钮的视觉。 */
+    private void setTopBarFocus(int index) {
+        if (topBarFocus == index) { return; }
+        topBarFocus = index;
+        applyTopBarFocusVisual();
+        updateHints();
+    }
+
+    /**
+     * 焦点视觉：常态 = 半透明底（bg_bs_icon_btn，XML 里设的，这里要恢复它）；
+     * 聚焦 = 粉描边 + 轻微放大（bs_rail_item_active，与侧栏同一套）。
+     */
+    private void applyTopBarFocusVisual() {
+        View[] btns = { exitBtn, menuBtn };
+        for (int i = 0; i < btns.length; i++) {
+            View v = btns[i];
+            if (v == null) { continue; }
+            boolean focused = topBarFocus == i;
+            v.setBackgroundResource(focused ? R.drawable.bs_rail_item_active : R.drawable.bg_bs_icon_btn);
+            v.animate().cancel();
+            v.animate().scaleX(focused ? 1.08f : 1f).scaleY(focused ? 1.08f : 1f)
+                    .setDuration(140L).setInterpolator(new DecelerateInterpolator()).start();
+        }
+    }
+
+    /** 在两颗顶栏按钮间移动焦点 */
+    private void moveTopBarFocus(int delta) {
+        setTopBarFocus((topBarFocus + delta + 2) % 2);
+        BigScreenSound.tick();
+    }
+
+    /** 按下当前聚焦的顶栏按钮 */
+    private void runTopBarAction() {
+        if (topBarFocus == TOPBAR_EXIT && exitBtn != null) { exitBtn.performClick(); return; }
+        if (topBarFocus == TOPBAR_MENU && menuBtn != null) { menuBtn.performClick(); }
+    }
+
+    /**
+     * 顶栏图标按钮的触摸按压反馈（退出 / 菜单共用）。
+     *
+     * <p>大屏其他触摸按钮一直有 {@code BigScreenSound.hapticKey} 轻震（M22 统一补的），
+     * 但没有按压缩放动效；顶栏这两颗是浮在壁纸上的独立图标，没有形变的话
+     * 「点了但像没点上」的感觉会格外明显，所以这里在触感之外补一个轻量下沉动效：
+     * 按下缩到 0.9，移入按钮范围外取消、抬起回弹到 1.0。
+     *
+     * <p>scale 是叠加在焦点视觉（applyTopBarFocusVisual 的 1.08）之上的 ——
+     * 但顶栏焦点只能经手柄进入，触摸按压与手柄焦点不会同时出现，无需做乘法合成。
+     */
+    private void bindTopBarPressFeedback(View v) {
+        v.setOnTouchListener((vv, ev) -> {
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    vv.animate().cancel();
+                    vv.animate().scaleX(0.9f).scaleY(0.9f).setDuration(70L).start();
+                    return false;   // 不消费：click 仍由系统派发
+                case MotionEvent.ACTION_MOVE:
+                    // 手指滑出按钮 → 取消按压态（但维持 0.9，等 ACTION_UP 恢复）
+                    if (!isTouchInside(vv, ev)) { vv.animate().cancel(); vv.animate().scaleX(1f).scaleY(1f).setDuration(90L).start(); }
+                    return false;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    vv.animate().cancel();
+                    vv.animate().scaleX(1f).scaleY(1f).setDuration(120L).start();
+                    return false;
+                default:
+                    return false;
+            }
+        });
+    }
+
+    /** 触点是否仍在 view 边界内（含少量外扩容错，减少边缘滑动的误取消） */
+    private boolean isTouchInside(View v, MotionEvent ev) {
+        float x = ev.getX();
+        float y = ev.getY();
+        // 用 view 坐标系里的原始触点判断；getX/getY 已是相对 view 的坐标
+        return x >= -v.getWidth() * 0.1f && x <= v.getWidth() * 1.1f
+                && y >= -v.getHeight() * 0.1f && y <= v.getHeight() * 1.1f;
     }
 
     /**
@@ -2413,6 +2527,29 @@ List<Shelf> defs = new ArrayList<>();
         startActivity(intent);
     }
 
+    /**
+     * 退出大屏、回到首页。
+     *
+     * <p><b>为什么必须带 {@code force_home}</b>：大屏可以作为启动页（设置里
+     * {@code startup_page=bigscreen}），那条路径是 HomeActivity {@code startActivity(大屏) + finish()}
+     * 把自己干掉的 —— 栈里只剩大屏。此时若只 startActivity(HomeActivity)，
+     * 它的 onCreate 会读到 {@code startup_page=bigscreen} 又把用户弹回大屏，形成死循环。
+     * 带 {@code force_home=true} 才会跳过启动页分流直接渲染首页。
+     *
+     * <p>用 CLEAR_TOP|SINGLE_TOP：若首页已在栈中则复用它而不是再叠一层，
+     * 避免反复进出大屏堆积一堆 Activity。
+     *
+     * <p>与跳「触摸模式」({@link #jumpToTouchMode}) 是两个不同目标：
+     * 那个是切到游戏库，这个是回首页，所以没复用。
+     */
+    private void exitToHome() {
+        Intent intent = new Intent(this, com.yuki.yukihub.HomeActivity.class);
+        intent.putExtra("force_home", true);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
+    }
+
     // ================= 详情层回调 =================
 
     private void openDetails() {
@@ -2749,9 +2886,44 @@ List<Shelf> defs = new ArrayList<>();
         }
 
         // 3) 主界面
+        // 顶栏按钮区（退出/菜单）优先级最高：进去之后所有方向键都只在两颗按钮间活动
+        if (topBarFocus >= 0) {
+            switch (intent) {
+                case UP: case DOWN:
+                    // ↓ 离开顶栏、恢复侧栏焦点区（侧栏焦点还停在原来的条目上）；
+                    // ↑ 在顶栏里无事可做
+                    if (intent == InputRouter.Intent.DOWN) {
+                        setTopBarFocus(-1);
+                        setRailZone(true);
+                    }
+                    break;
+                case LEFT: moveTopBarFocus(-1); break;
+                case RIGHT: moveTopBarFocus(1); break;
+                case CONFIRM: runTopBarAction(); break;
+                case BACK:
+                    // Ⓑ 离开顶栏区，回到侧栏 —— 不触发原生的 finish()
+                    setTopBarFocus(-1);
+                    setRailZone(true);
+                    break;
+                default:
+                    // 顶栏区里不响应翻页/收藏/详情等游戏操作（PAGE_L/R 等），
+                    // 这些都依赖"侧栏/内容区当前焦点"，在顶栏区上下文里无意义。
+                    break;
+            }
+            return;
+        }
         switch (intent) {
             case UP:
-                if (railZone) { rail.moveFocus(-1); }
+                if (railZone) {
+                    // 侧栏已在第一项再按 ↑ → 进入顶栏按钮区（焦点默认落在菜单按钮上：
+                    // 它是高频入口，退出按钮在它左边可一步到达）。
+                    // 必须在 moveFocus **之前**检测 —— RailView.moveFocus 是循环的，
+                    // 第一项再按 ↑ 会直接绕到最后一项，事后查 focusedIndex 已经晚了。
+                    if (railAtTop()) {
+                        setRailZone(false);
+                        setTopBarFocus(TOPBAR_MENU);
+                    } else { rail.moveFocus(-1); }
+                }
                 // M14：从卡片排按 ↑ 进入"启动/收藏/详情/更多"按钮排（之前上方向键完全没用）
                 else if (!infoZone && infoActions != null && infoActions.getChildCount() > 0) {
                     setInfoZone(true);
