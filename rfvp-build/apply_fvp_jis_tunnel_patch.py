@@ -41,14 +41,19 @@ rfvp 解到 Shift-JIS 就停了，缺的正是这第二步 —— 所以替身�
 
 做法
 ----
-新增模块 `crates/rfvp/src/jis_tunnel.rs`，在两个方向各接一次：
+新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**三条路径**上各接一次：
 
-1. **读入方向**（脚本 → 屏幕）：`Parser::decode_string_bytes()`（所有脚本文本的
-   **唯一解码出口**）之后 `restore()`，替身字 → 真字。
-2. **写出方向**（屏幕 → 存档）：`save_manager.rs` 的 `enc()` 里、`SHIFT_JIS.encode`
-   之前 `to_surrogate()`，真字 → 替身字（**反向**）。
+| # | 位置 | 方向 | 函数 |
+|---|---|---|---|
+| 1 | `script/parser.rs` 的 `decode_string_bytes()` | 脚本 → 屏幕 | `restore()` |
+| 2 | `save_manager.rs` 的 `decode_bytes()` | 存档 → 屏幕 | `restore()` |
+| 3 | `save_manager.rs` 的 `enc()` | 屏幕 → 存档 | `to_surrogate()` |
 
-**脚本文件一个字节都不改**，所有字节偏移天然不变。
+1 是脚本文本的唯一解码出口；2/3 是存档的唯一读/写出口（`load_from_file` 与
+`load_from_mem` 里 6 个调用点全走 `decode_bytes`；全 workspace 只有 `enc()`
+一处把文本编码回 Shift-JIS）。
+
+**脚本文件与存档文件都一个字节都不改**，所有字节偏移天然不变。
 
 为什么「写出方向」也必须做（`&#NNNNN;` 的来历）
 ----------------------------------------------
@@ -517,6 +522,23 @@ SAVE_NEW = """            match nls {
                     cow.into_owned()
                 }"""
 
+# `decode_bytes` 是存档**读取**的唯一出口（`load_from_file` / `load_from_mem`
+# 里 6 个调用点全走它）。读出来的标题/场景名/剧本预览又带回了替身字，必须在
+# 这里再 `restore()` 一次 —— 否则存档界面显示「寅却辉辉地握住了我的手」。
+#
+# 存档文件本身**不需要改**：读进来是替身字、显示时还原；写出去时再换回替身字。
+# 这样格式与 PC 版完全一致，存档还能拿到 PC 上用。
+SAVE_DECODE_OLD = """            Nls::ShiftJIS => encoding_rs::SHIFT_JIS.decode(bytes).0.to_string(),"""
+
+SAVE_DECODE_NEW = """            Nls::ShiftJIS => {
+                // YukiHub patch: mirror of `to_surrogate` — the bytes on disk
+                // still hold the surrogate kanji, so restore them here.
+                let decoded = encoding_rs::SHIFT_JIS.decode(bytes).0;
+                #[cfg(not(feature = "no_std"))]
+                let decoded = crate::jis_tunnel::restore(&decoded);
+                decoded.to_string()
+            }"""
+
 
 
 def apply_anchors(text: str, rel: str, pairs) -> "tuple[int, str]":
@@ -575,19 +597,24 @@ def main() -> int:
         par_path.write_text(par_text, encoding="utf-8")
         print(f"[OK]   {PARSER_RS}: 替身字还原已接入 decode_string_bytes")
 
-    # save_manager.rs（编码回写方向）
+    # save_manager.rs（写入方向 + 读取方向，同一文件）
     sav_path = Path(SAVE_RS)
     sav_text = sav_path.read_text(encoding="utf-8")
-    if "crate::jis_tunnel::to_surrogate" in sav_text:
+    if "crate::jis_tunnel::to_surrogate" in sav_text and "crate::jis_tunnel::restore" in sav_text:
         print(f"[OK]   {SAVE_RS}: 已应用（幂等）")
     else:
         rc, sav_text = apply_anchors(
-            sav_text, SAVE_RS, [("存档 ShiftJIS encode", SAVE_OLD, SAVE_NEW)]
+            sav_text,
+            SAVE_RS,
+            [
+                ("存档 decode_bytes（读）", SAVE_DECODE_OLD, SAVE_DECODE_NEW),
+                ("存档 ShiftJIS encode（写）", SAVE_OLD, SAVE_NEW),
+            ],
         )
         if rc != 0:
             return rc
         sav_path.write_text(sav_text, encoding="utf-8")
-        print(f"[OK]   {SAVE_RS}: 存档前反向映射（真字→替身字）已接入")
+        print(f"[OK]   {SAVE_RS}: 存档读/写两个方向都已接入")
 
     print("YHFVP-JISTUNNEL-1.0 全部锚点应用成功 ✓（可重复执行，幂等）")
     return 0
