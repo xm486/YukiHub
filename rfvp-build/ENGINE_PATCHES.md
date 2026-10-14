@@ -721,8 +721,38 @@ encode("这") -> "&#36825;"
   -> decode+restore -> 原句  ✅ 一致
 ```
 
-并且真实 Rust 运行验证：`禳禳` → `——`、`她禳我最重要的朋友` → `她—我最重要的朋友`、
-纯 ASCII 资源名不受影响、存档往返 `&#` 出现次数 = 0。
+并且真实 Rust 运行验证：`禳禳` → `——`、纯 ASCII 资源名不受影响、
+存档往返 `&#` 出现次数 = 0。
+
+**坑 3：存档标题读出来还是替身字（「寅却稾稾地…」，应为「她却轻轻地…」）**
+
+前两版只修了 `parser.rs`（脚本文本出口）与 `save_manager.rs` 的 `enc()`（写入），
+漏了存档的**读取**出口 —— `save_manager.rs:105` 的 `decode_bytes()`：
+
+```rust
+fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
+    Nls::ShiftJIS => encoding_rs::SHIFT_JIS.decode(bytes).0.to_string(),   // 没还原
+```
+
+读出来的标题/场景名/剧本预览又带回了替身字。`load_from_file` 与 `load_from_mem`
+里共有 6 个调用点，全走这个函数，所以补它一处即可。
+
+现在一共三个注入点（都在补丁里，幂等）：
+
+| # | 位置 | 方向 | 函数 |
+|---|---|---|---|
+| 1 | `script/parser.rs::decode_string_bytes()` | 脚本 → 屏幕 | `restore()` |
+| 2 | `save_manager.rs::decode_bytes()` | 存档 → 屏幕 | `restore()` |
+| 3 | `save_manager.rs::enc()` | 屏幕 → 存档 | `to_surrogate()` |
+
+验证（真实 Rust 运行，脚本原文 `@0xb9a63` 的字节）：
+
+```
+磁盘替身字  "寅却稾稾地握住了我的手。"
+旧行为     "寅却稾稾地握住了我的手。"        ❌
+新行为     "她却轻轻地握住了我的手。"        ✅
+再保存+读回 含 "&#" ? false   一致? true
+```
 
 **判据（自证 + 白名单双保险）**：
 
