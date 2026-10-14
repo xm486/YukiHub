@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  大屏顶栏图标按钮的常态底（退出大屏 / 菜单）。
+  v2：初版完全无底板 —— 用户反馈「看着都不像按钮」；更早的文字 chip 底
+  （bg_bs_chip，#B3≈70% 不透明）又太重。这里取中间值：50% 透明深蓝 +
+  8dp 圆角，既能从任意壁纸上托出图标，又不会像两坨色块那样突兀。
+  焦点态不在这里 —— 焦点时代码会换成 bs_rail_item_active（粉描边）。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#80222B49" />
+    <corners android:radius="8dp" />
+</shape>

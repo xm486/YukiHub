@@ -136,22 +136,38 @@
                 android:textColor="@color/bs_text_muted"
                 android:textSize="13sp" />
 
-            <!-- 触摸用户的菜单入口（手柄也可以点）-->
-            <TextView
-                android:id="@+id/bsMenuBtn"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="7dp"
-                android:paddingBottom="7dp"
-                android:background="@drawable/bg_bs_chip"
-                android:text="菜单"
-                android:textColor="@color/bs_text"
-                android:textSize="13sp"
+<!-- 快速出口：退出大屏回首页（常驻，触摸与手柄都能用 —— 手柄经侧栏 ↑ 进入）。
+                 之所以给触摸用户一个直出口：把大屏当启动页的用户每次换模式
+                 都要先开菜单再翻到最底部，太绕。
+                 用图标不用文字：顶栏只有 36dp 高，文字 chip 占地且挤。
+                 复用首页导航的「房子」图标（ic_nav_home），视觉语义一致。 -->
+            <ImageView
+                android:id="@+id/bsExitBtn"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginStart="10dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_bs_icon_btn"
+                android:src="@drawable/ic_nav_home"
+                android:scaleType="fitCenter"
+                android:contentDescription="退出大屏返回首页"
                 android:clickable="true"
-                android:focusable="true" />
+                android:focusable="false" />
+            <!-- 菜单按钮：图标化（汉堡三条线），比文字「菜单」更省横向空间。
+                 两颗按钮常态 = 同一款半透明圆角底（bg_bs_icon_btn），
+                 焦点态 = 粉描边（bs_rail_item_active，代码切换）—— 与侧栏同一套视觉。 -->
+            <ImageView
+                android:id="@+id/bsMenuBtn"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginStart="6dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_bs_icon_btn"
+                android:src="@drawable/bs_ic_menu"
+                android:scaleType="fitCenter"
+                android:contentDescription="菜单"
+                android:clickable="true"
+                android:focusable="false" />
         </LinearLayout>
 
         <!-- ===== 主区：图标侧栏 + shelf 行 ===== -->
