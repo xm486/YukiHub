@@ -430,19 +430,57 @@ public class FriendsChatDialog {
         if (friends.isEmpty()) {
             contentContainer.addView(emptyLabel("还没有好友\n点击上方「添加好友」搜索其他用户"));
         } else {
+            // 排序规则（与网页端 server/api/friends/list.php 保持同一套排序键）：
+            //   ① 有未读消息的置顶
+            //   ② 在线状态：正在游戏 → 在线/忙碌 → 离开/离线
+            //   ③ 同组内按最后上线时间倒序，缺失心跳的排最后
+            //   ④ 仍相同则按显示名，保证顺序稳定
+            // 分区时把「有未读」单独切出来放最前，所以①在这里也参与排序键，
+            // 是为了和网页端拿到完全一致的相对顺序（不然两端会不一致）。
+            List<FriendInfo> sorted = new ArrayList<>(friends);
+            // 心跳解析是 SimpleDateFormat.parse，比较器里会被调用 O(n log n) 次，
+            // 而这里是主线程渲染路径。预先解析一遍缓存起来，避免反复解析造成掉帧。
+            final java.util.Map<FriendInfo, Long> heartbeatCache = new java.util.IdentityHashMap<>();
+            for (FriendInfo f : sorted) heartbeatCache.put(f, parseHeartbeatMillis(f.lastHeartbeat));
+            java.util.Collections.sort(sorted, (a, b) -> {
+                int ua = (a.unreadCount > 0) ? 0 : 1;
+                int ub = (b.unreadCount > 0) ? 0 : 1;
+                if (ua != ub) return ua - ub;
+
+                int ga = friendGroupRank(a);
+                int gb = friendGroupRank(b);
+                if (ga != gb) return ga - gb;
+
+                Long ta = heartbeatCache.get(a);
+                Long tb = heartbeatCache.get(b);
+                long va = ta == null ? 0L : ta;
+                long vb = tb == null ? 0L : tb;
+                if (va != vb) return Long.compare(vb, va);
+
+                String na = a.displayName() == null ? "" : a.displayName();
+                String nb = b.displayName() == null ? "" : b.displayName();
+                return na.compareToIgnoreCase(nb);
+            });
+
+            List<FriendInfo> unread = new ArrayList<>();
             List<FriendInfo> playing = new ArrayList<>();
             List<FriendInfo> online = new ArrayList<>();
             List<FriendInfo> offline = new ArrayList<>();
-            for (FriendInfo f : friends) {
-                if (f.isOffline() || f.isAway()) {
-                    offline.add(f);
-                } else if (f.isOnline() && f.activity != null && !f.activity.trim().isEmpty()) {
-                    playing.add(f);
-                } else {
-                    online.add(f);
-                }
+            for (FriendInfo f : sorted) {
+                // 有未读消息的一律提到最前面：好友可能已经离线好几天，但消息没看，
+                // 只按在线状态排的话它会被埋进「离线」区，用户根本注意不到。
+                if (f.unreadCount > 0) { unread.add(f); continue; }
+                int rank = friendGroupRank(f);
+                if (rank == 0) playing.add(f);
+                else if (rank == 1) online.add(f);
+                else offline.add(f);
             }
-            // Steam 风格：正在玩游戏的排在最前
+            // Steam 风格：有未读的最前，其次正在玩游戏
+            if (!unread.isEmpty()) {
+                contentContainer.addView(sectionLabel("未读消息 — " + unread.size()));
+                for (FriendInfo f : unread) contentContainer.addView(buildFriendItem(f));
+                contentContainer.addView(divider());
+            }
             if (!playing.isEmpty()) {
                 contentContainer.addView(sectionLabel("正在游戏 — " + playing.size()));
                 for (FriendInfo f : playing) contentContainer.addView(buildFriendItem(f));
@@ -461,6 +499,35 @@ public class FriendsChatDialog {
         startPolling();
         // 列表渲染完成，此时才安全地进入通知指定的会话
         consumePendingOpen(loaded, groups);
+    }
+
+    /**
+     * 好友分区序号（与网页端同口径）：
+     * 0 = 正在游戏（在线且有 activity）、1 = 在线 / 忙碌、2 = 离开 / 离线。
+     * 注意这里**不考虑 unreadCount**：未读会单独切成一个分区，避免「有未读的离线好友」
+     * 被继续压在离线区里。
+     */
+    private int friendGroupRank(FriendInfo f) {
+        if (f == null) return 3;
+        if (f.isOnline() && f.activity != null && !f.activity.trim().isEmpty()) return 0;
+        if (f.isOnline() || f.isBusy()) return 1;
+        return 2;
+    }
+
+    /**
+     * 解析最后心跳时间（"yyyy-MM-dd HH:mm:ss"）为毫秒，失败或缺失返回 0。
+     * 与 formatHeartbeatRelative 用同一套格式解析，保证「显示什么」和「按什么排」一致。
+     */
+    private long parseHeartbeatMillis(String heartbeat) {
+        if (heartbeat == null || heartbeat.trim().isEmpty()) return 0L;
+        try {
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat(
+                    "yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
+            java.util.Date date = fmt.parse(heartbeat);
+            return date == null ? 0L : date.getTime();
+        } catch (Throwable t) {
+            return 0L;
+        }
     }
 
     private View buildFriendItem(FriendInfo friend) {
@@ -554,8 +621,8 @@ public class FriendsChatDialog {
             st.setMaxLines(1);
             st.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(st);
-        } else if (friend.isOffline() && friend.lastHeartbeat != null && !friend.lastHeartbeat.isEmpty()) {
-            // Steam 风格：离线好友显示最后在线时间
+        } else if ((friend.isOffline() || friend.isAway()) && friend.lastHeartbeat != null && !friend.lastHeartbeat.isEmpty()) {
+            // Steam 风格：离线/离开都以同一口径显示最后在线时间（两者同属「离线区」）
             String lastSeen = formatHeartbeatRelative(friend.lastHeartbeat);
             if (lastSeen != null && !lastSeen.isEmpty()) {
                 TextView st = new TextView(activity);
