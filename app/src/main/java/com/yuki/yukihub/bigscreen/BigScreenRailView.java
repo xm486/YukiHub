@@ -72,6 +72,50 @@ public class BigScreenRailView extends LinearLayout {
     private static final float ITEM_HEIGHT_DP = 50f;
     private static final float ICON_BOX_DP = 46f;
     private static final float LABEL_SHIFT_DP = 6f;
+    /**
+     * 图标边长占 iconBox 的比例 —— **按展开状态区分**。
+     *
+     * <p>收起态用 0.75：此时条目里只剩图标，图标应当撑满、与条目框视觉匹配。
+     * （初版写死 0.44 是只为展开态考虑的，导致收起时「图标小小的，底框却很大」，
+     * 实测框宽是图标的 4.5 倍。）
+     *
+     * <p>展开态用 0.62：iconBox 右侧要接 label + count，图标让位、留足文字宽度。
+     *
+     * <p>两者配合 {@code BigScreenSizes.railCollapsedW}（= iconBox + 10）后，
+     * 框/图标比在各档屏幕上约 1.5~2.0 倍，是常见的图标按钮内边距比例。
+     */
+    private static final float ICON_RATIO_COLLAPSED = 0.75f;
+    private static final float ICON_RATIO_EXPANDED = 0.62f;
+
+    /** 当前展开状态下应使用的图标比例 */
+    private float iconRatio() {
+        return expanded ? ICON_RATIO_EXPANDED : ICON_RATIO_COLLAPSED;
+    }
+
+    /**
+     * 按当前展开状态重算图标尺寸。
+     * 收起态图标大（0.75）、展开态图标小（0.62），切换状态时要跟着变 ——
+     * 否则收起后图标还停留在展开态的小尺寸，框大图标小的问题依旧。
+     */
+    private void applyIconSize() {
+        final int iconSize = dp(Math.round(iconBoxDp * iconRatio()));
+        for (View item : itemViews) {
+            if (!(item instanceof ViewGroup)) { continue; }
+            ViewGroup g = (ViewGroup) item;
+            if (g.getChildCount() == 0) { continue; }
+            View iconBox = g.getChildAt(0);
+            if (!(iconBox instanceof ViewGroup)) { continue; }
+            ViewGroup box = (ViewGroup) iconBox;
+            if (box.getChildCount() == 0) { continue; }
+            View icon = box.getChildAt(0);
+            ViewGroup.LayoutParams lp = icon.getLayoutParams();
+            if (lp != null) {
+                lp.width = iconSize;
+                lp.height = iconSize;
+                icon.setLayoutParams(lp);
+            }
+        }
+    }
 
     private float collapsedWidthDp = COLLAPSED_WIDTH_DP;
     private float expandedWidthDp = EXPANDED_WIDTH_DP;
@@ -101,6 +145,20 @@ public class BigScreenRailView extends LinearLayout {
     private final Interpolator fastOutSlowIn =
             AnimationUtils.loadInterpolator(getContextSafe(), android.R.interpolator.fast_out_slow_in);
 
+    /**
+     * 展开/收起的"文字动画代次"。
+     *
+     * <p>为什么需要：expand()/collapse() 都要 {@code postDelayed} 延迟 60/80ms 再动文字，
+     * 而这两个延迟任务不会被自动取消 —— 用户快速「展开→收起→再展开」时，
+     * 第一轮那个还没执行的任务会在**第二轮**里跑起来，把刚淡入的文字又按 alpha 0
+     * 处理一遍（表现为文字闪一下、或干脆不出现）。
+     *
+     * <p>做法：每次切换状态都把代次 +1，延迟任务执行前先比对自己捕获的代次，
+     * 不匹配就直接丢弃。比 removeCallbacks 更精确 —— 后者会把同一次切换里
+     * 另一个合法的延迟任务也一起干掉。
+     */
+    private int textAnimGeneration = 0;
+
     public BigScreenRailView(Context context) { this(context, null); }
 
     public BigScreenRailView(Context context, @Nullable AttributeSet attrs) {
@@ -126,10 +184,34 @@ public class BigScreenRailView extends LinearLayout {
         this.iconBoxDp = iconBox;
         applyMetricsToChildren();
         applyWidth(expanded ? expandedWidthPx() : collapsedWidthPx(), false);
+        // 尺寸重算后对齐也跟着当前展开状态刷新
+        applyIconBoxGravity(expanded);
+    }
+
+    /**
+     * 切换 iconBox 在条目里的水平对齐：展开态靠左（右侧让给文字），收起态居中。
+     *
+     * <p>为什么需要这个：条目本身是 MATCH_PARENT（= 侧栏全宽），收起时
+     * 条目里只剩 iconBox 一个可见子项。若 iconBox 一直靠左，条目框就会明显
+     * 偏在图标右边 —— 实机观感是「选中框比图标宽出一大截」。居中后框与图标同心，
+     * 视觉上才是「一个按钮」。
+     */
+    private void applyIconBoxGravity(boolean expandState) {
+        for (View item : itemViews) {
+            if (!(item instanceof ViewGroup)) { continue; }
+            ViewGroup g = (ViewGroup) item;
+            if (g.getChildCount() == 0) { continue; }
+            View iconBox = g.getChildAt(0);
+            ViewGroup.LayoutParams lp = iconBox.getLayoutParams();
+            if (lp instanceof LinearLayout.LayoutParams) {
+                ((LinearLayout.LayoutParams) lp).gravity =
+                        expandState ? Gravity.START : Gravity.CENTER_HORIZONTAL;
+                iconBox.setLayoutParams(lp);
+            }
+        }
     }
 
     private void applyMetricsToChildren() {
-        final int iconSize = Math.round(iconBoxDp * 0.44f);
         for (View item : itemViews) {
             ViewGroup.LayoutParams lp = item.getLayoutParams();
             if (lp != null) {
@@ -145,16 +227,10 @@ public class BigScreenRailView extends LinearLayout {
                 ilp.width = dp(iconBoxDp);
                 iconBox.setLayoutParams(ilp);
             }
-            if (iconBox instanceof ViewGroup && ((ViewGroup) iconBox).getChildCount() > 0) {
-                View icon = ((ViewGroup) iconBox).getChildAt(0);
-                ViewGroup.LayoutParams ip = icon.getLayoutParams();
-                if (ip instanceof FrameLayout.LayoutParams) {
-                    ip.width = dp(iconSize);
-                    ip.height = dp(iconSize);
-                    icon.setLayoutParams(ip);
-                }
-            }
         }
+        // 图标尺寸统一由 applyIconSize 负责（它按当前展开状态算比例），
+        // 避免这里再写一遍缩放公式、两处将来不一致。
+        applyIconSize();
     }
 
     public List<Entry> entries() { return entries; }
@@ -177,11 +253,45 @@ public class BigScreenRailView extends LinearLayout {
             if (count != null) {
                 count.setText(e.count > 0 ? String.valueOf(e.count) : "");
             }
-            item.setBackgroundResource(e.active ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
+            // **必须把焦点态一起算进来**：这里原来只按 e.active 刷背景，
+            // 而 rebuild() 是先 applyFocusVisual() 再 refreshStates() ——
+            // 后者的无脑覆盖会把刚画好的焦点描边擦掉，表现是「切分类后
+            // 手柄焦点高亮莫名消失」。判据与 applyFocusVisual 保持一致。
+            boolean focused = zoneFocused && i == focusedIndex;
+            boolean highlight = focused || e.active;
+            item.setBackgroundResource(highlight
+                    ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
             if (i < labelViews.size() && labelViews.get(i) != null) {
                 labelViews.get(i).setTextColor(ContextCompat.getColor(getContext(),
-                        e.active ? R.color.bs_text : R.color.bs_text_muted));
+                        highlight ? R.color.bs_text : R.color.bs_text_muted));
             }
+            // 图标 tint 也要跟着刷：rebuild() 里按 entry.active 定了颜色，
+            // 但焦点移动 / 筛选变化后要重算 —— 否则手柄焦点移上去图标不亮，
+            // 或者切了分类图标还留着旧色。
+            applyIconTint(i, highlight);
+        }
+    }
+
+    /**
+     * 刷新某条目的图标着色。焦点/选中 → bs_focus（粉），否则 bs_text_muted。
+     *
+     * <p>抽出来是因为有两处需要（refreshStates / applyFocusVisual），
+     * 而 rebuild() 建视图时也用的是同一套判据 —— 三处必须一致。
+     */
+    private void applyIconTint(int index, boolean highlight) {
+        if (index < 0 || index >= itemViews.size()) { return; }
+        View item = itemViews.get(index);
+        if (!(item instanceof ViewGroup)) { return; }
+        ViewGroup g = (ViewGroup) item;
+        if (g.getChildCount() == 0) { return; }
+        View iconBox = g.getChildAt(0);
+        if (!(iconBox instanceof ViewGroup)) { return; }
+        ViewGroup box = (ViewGroup) iconBox;
+        if (box.getChildCount() == 0) { return; }
+        View icon = box.getChildAt(0);
+        if (icon instanceof ImageView) {
+            ((ImageView) icon).setColorFilter(ContextCompat.getColor(getContext(),
+                    highlight ? R.color.bs_focus : R.color.bs_text_muted));
         }
     }
 
@@ -190,6 +300,16 @@ public class BigScreenRailView extends LinearLayout {
         itemViews.clear();
         labelViews.clear();
         countViews.clear();
+
+        // 条目数可能变了（如隐藏分类后重建），把焦点夹进新范围 ——
+        // 否则 focusedIndex 会指向不存在的下标，applyFocusVisual 里
+        // entries.get(i) 不会越界（它是按 itemViews 循环的），
+        // 但 focusedEntry() 会返回 null，后续按 Ⓐ 无响应。
+        if (!entries.isEmpty()) {
+            focusedIndex = Math.max(0, Math.min(focusedIndex, entries.size() - 1));
+        } else {
+            focusedIndex = -1;
+        }
 
         for (int i = 0; i < entries.size(); i++) {
             final Entry entry = entries.get(i);
@@ -217,18 +337,19 @@ public class BigScreenRailView extends LinearLayout {
                 }
             });
 
-            // 图标（固定宽度，保证收起时图标位置不跳）
+            // 图标（收起态居中；展开态靠左，给右侧文字让位）
+            // 宽度固定（iconBoxDp）保证收起/展开时图标横向不跳；
+            // 但水平位置要跟状态走，否则收起时条目框（= 侧栏全宽）会明显偏在图标右边。
             FrameLayout iconBox = new FrameLayout(getContext());
-            LayoutParams iconLp = new LayoutParams(dp(iconBoxDp), LayoutParams.MATCH_PARENT);
+            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(iconBoxDp), LayoutParams.MATCH_PARENT);
+            iconLp.gravity = expanded ? Gravity.START : Gravity.CENTER_HORIZONTAL;
             iconBox.setLayoutParams(iconLp);
             ImageView icon = new ImageView(getContext());
-            final int iconSize = Math.round(iconBoxDp * 0.44f);
+            final int iconSize = Math.round(iconBoxDp * iconRatio());
             FrameLayout.LayoutParams iconInner =
                     new FrameLayout.LayoutParams(dp(iconSize), dp(iconSize), Gravity.CENTER);
             icon.setLayoutParams(iconInner);
             icon.setImageResource(entry.iconRes);
-            icon.setColorFilter(ContextCompat.getColor(getContext(),
-                    entry.active ? R.color.bs_focus : R.color.bs_text_muted));
             iconBox.addView(icon);
             item.addView(iconBox);
 
@@ -242,6 +363,10 @@ public class BigScreenRailView extends LinearLayout {
             label.setTextColor(ContextCompat.getColor(getContext(),
                     entry.active ? R.color.bs_text : R.color.bs_text_muted));
             label.setAlpha(expanded ? 1f : 0f);
+            // scaleX 也要跟展开状态对齐：展开态是 1.0（正常大小），收起态 0.86。
+            // 漏掉的话，在展开状态下重建（如切分类触发 setEntries）文字会停在 1.0 之外的
+            // 上一次的值，或收起态下没设过而残留。
+            label.setScaleX(expanded ? 1f : 0.86f);
             label.setTranslationX(expanded ? 0f : -dp(LABEL_SHIFT_DP));
             if (!expanded) { label.setVisibility(GONE); }
             item.addView(label);
@@ -265,6 +390,7 @@ public class BigScreenRailView extends LinearLayout {
         }
 
         applyWidth(expanded ? expandedWidthPx() : collapsedWidthPx(), false);
+        applyIconBoxGravity(expanded);
         applyFocusVisual();
         refreshStates();
     }
@@ -305,13 +431,18 @@ public class BigScreenRailView extends LinearLayout {
             View item = itemViews.get(i);
             Entry e = entries.get(i);
             boolean focused = zoneFocused && i == focusedIndex;
-            // 焦点态：粉描边；选中态（active）：同样有描边但更含蓄
+            // 焦点态与选中态共用同一个背景资源（bs_rail_item_active 的粉描边），
+            // 差别只在有无缩放动效 —— 手柄能看出"焦点在哪"，同时当前生效的分类
+            // 也保持描边（失焦时不清掉 active，与 refreshStates 判据一致）。
+            boolean highlight = focused || e.active;
+            item.setBackgroundResource(highlight
+                    ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
+            applyIconTint(i, highlight);
+            item.animate().cancel();
             if (focused) {
-                item.setBackgroundResource(R.drawable.bs_rail_item_active);
                 item.animate().scaleX(1.03f).scaleY(1.03f).setDuration(160L)
                         .setInterpolator(new DecelerateInterpolator()).start();
             } else {
-                item.setBackgroundResource(e.active ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
                 item.animate().scaleX(1f).scaleY(1f).setDuration(160L)
                         .setInterpolator(new DecelerateInterpolator()).start();
             }
@@ -354,15 +485,34 @@ public class BigScreenRailView extends LinearLayout {
 
     public void setExpandListener(ExpandListener l) { this.expandListener = l; }
 
+    /**
+     * 展开：先宽度开框 + 文字让位，再文字淡入。
+     *
+     * <p>动效（用户要求「加一下动效」，在原有 220ms 宽度动画之上）：
+     * <ul>
+     *   <li>宽度：220ms fastOutSlowIn（原有）</li>
+     *   <li>文字：淡入 + 右移到位 + 从 0.86 放大到 1.0 —— 加缩放是为了让
+     *       「文字滑出来」更有实体感，纯 alpha 会显得飘</li>
+     * </ul>
+     *
+     * <p>所有延迟任务都用 {@link #textAnimGeneration} 做代次守卫，防止快速连按时
+     * 上一轮的延迟任务在新一轮里过期触发。
+     */
     public void expand() {
         if (expanded) { return; }
         expanded = true;
+        final int gen = ++textAnimGeneration;
 
         // 1) 先让文字可见（透明）→ 宽度先开框
+        // iconBox 从「居中」切回「靠左」：展开态右侧要塞文字，图标必须让位到左边。
+        // 跟宽度动画同步切换即可 —— 期间宽度还在变，视觉上不会跳。
+        applyIconBoxGravity(true);
+        applyIconSize();
         for (int i = 0; i < labelViews.size(); i++) {
             TextView label = labelViews.get(i);
             label.setVisibility(VISIBLE);
             label.setAlpha(0f);
+            label.setScaleX(0.86f);
             label.setTranslationX(-dp(LABEL_SHIFT_DP));
             TextView count = countViews.get(i);
             count.setVisibility(VISIBLE);
@@ -372,33 +522,49 @@ public class BigScreenRailView extends LinearLayout {
 
         // 2) 延迟 60ms 后文字淡入并右移到位（先开框、后显字）
         postDelayed(() -> {
-            if (!expanded) { return; }
+            if (gen != textAnimGeneration || !expanded) { return; }
             for (int i = 0; i < labelViews.size(); i++) {
                 TextView label = labelViews.get(i);
-                label.animate().alpha(1f).translationX(0f).setDuration(TEXT_EXPAND_MS)
+                label.animate().cancel();
+                label.animate().alpha(1f).translationX(0f).scaleX(1f)
+                        .setDuration(TEXT_EXPAND_MS)
                         .setInterpolator(new DecelerateInterpolator()).start();
-                countViews.get(i).animate().alpha(1f).setDuration(TEXT_EXPAND_MS).start();
+                TextView count = countViews.get(i);
+                count.animate().cancel();
+                count.animate().alpha(1f).setDuration(TEXT_EXPAND_MS).start();
             }
         }, TEXT_EXPAND_DELAY_MS);
     }
 
+    /**
+     * 收起：文字先淡出左移并缩小，再收框。
+     *
+     * <p>动效与 {@link #expand()} 对称：文字淡出 + 左移 + 缩到 0.86（"收回去"的实体感）。
+     */
     public void collapse() {
         if (!expanded) { return; }
         expanded = false;
+        final int gen = ++textAnimGeneration;
 
-        // 1) 文字先淡出左移（先收字）
+        // 1) 文字先淡出左移缩小（先收字）
         for (int i = 0; i < labelViews.size(); i++) {
             TextView label = labelViews.get(i);
-            label.animate().alpha(0f).translationX(-dp(LABEL_SHIFT_DP))
+            label.animate().cancel();
+            label.animate().alpha(0f).translationX(-dp(LABEL_SHIFT_DP)).scaleX(0.86f)
                     .setDuration(TEXT_COLLAPSE_MS).start();
-            countViews.get(i).animate().alpha(0f).setDuration(TEXT_COLLAPSE_MS).start();
+            TextView count = countViews.get(i);
+            count.animate().cancel();
+            count.animate().alpha(0f).setDuration(TEXT_COLLAPSE_MS).start();
         }
 
         // 2) 80ms 后收框，收完把文字彻底 GONE（不占位）
         postDelayed(() -> {
-            if (expanded) { return; }
+            if (gen != textAnimGeneration || expanded) { return; }
+            // 文字收完后图标回居中：收起态下条目里只剩图标，居中才与框视觉匹配
+            applyIconBoxGravity(false);
+            applyIconSize();
             animateWidth(collapsedWidthPx(), WIDTH_COLLAPSE_MS, 0L, () -> {
-                if (expanded) { return; }
+                if (gen != textAnimGeneration || expanded) { return; }
                 for (TextView label : labelViews) { label.setVisibility(GONE); }
                 for (TextView count : countViews) { count.setVisibility(GONE); }
             });
@@ -406,7 +572,14 @@ public class BigScreenRailView extends LinearLayout {
     }
 
     private void animateWidth(final int target, long duration, long startDelay, final Runnable onEnd) {
-        if (widthAnimator != null) { widthAnimator.cancel(); }
+        if (widthAnimator != null) {
+            // **先把旧监听摘掉再 cancel**：ValueAnimator.cancel() 会照常回调
+            // onAnimationEnd（这是它和"自然结束"共用的出口）。若不摘，正在跑的
+            // 收起动画的 onEnd（把文字设为 GONE）会在这个动画刚启动时误触发 ——
+            // 表现是「快速收起→展开后，框展开了但文字全没了」。
+            widthAnimator.removeAllListeners();
+            widthAnimator.cancel();
+        }
 
         final ViewGroup.LayoutParams lp = getLayoutParams();
         if (lp == null) { return; }
@@ -421,7 +594,13 @@ public class BigScreenRailView extends LinearLayout {
             setLayoutParams(lp);
         });
         widthAnimator.addListener(new AnimatorListenerAdapter() {
+            /** 被打断（cancel）时不落到终值、也不跑回调 —— 那是新动画的地盘 */
+            private boolean cancelled = false;
+
+            @Override public void onAnimationCancel(Animator animation) { cancelled = true; }
+
             @Override public void onAnimationEnd(Animator animation) {
+                if (cancelled) { return; }
                 lp.width = target;
                 setLayoutParams(lp);
                 if (onEnd != null) { onEnd.run(); }
@@ -439,6 +618,27 @@ public class BigScreenRailView extends LinearLayout {
 
     public int collapsedWidthPx() { return dp(collapsedWidthDp); }
     public int expandedWidthPx() { return dp(expandedWidthDp); }
+
+    /**
+     * 脱离窗口时清掉未执行的延迟任务与正在跑的动画。
+     *
+     * <p>大屏 Activity 销毁 / 重建（切主题、旋屏等）时本 View 会被 detach，
+     * 若还有 postDelayed 排在队列里，它会持有 View 引用执行 —— 既泄漏又可能
+     * 操作已经不在窗口上的树。代次守卫只解决"过期触发"，这个负责"根本别执行"。
+     */
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        // 让所有在途的延迟任务失效。
+        // 注意不能用 removeCallbacks(null) —— View.removeCallbacks 要求非空 Runnable，
+        // 传 null 会抛 NPE。只递增代次即可：延迟任务执行时会发现自己已过期而直接 return。
+        textAnimGeneration++;
+        if (widthAnimator != null) {
+            widthAnimator.removeAllListeners();
+            widthAnimator.cancel();
+            widthAnimator = null;
+        }
+    }
 
     private int dp(float value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
