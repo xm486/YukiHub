@@ -99,6 +99,28 @@ rfvp 解到 Shift-JIS 就停了，缺的正是这第二步 —— 所以替身�
 - `FVP_BASE_PATH` 环境变量（已有，`apply_text_patch.py` 就用它）
 
 整个模块在 `#[cfg(not(feature = "no_std"))]` 下（Android 构建不是 no_std）。
+
+验证方法（重要，别再踩坑）
+----------------------------
+`rustc --emit=metadata <单个文件>` **查不出借用/类型错误**：缺依赖会先报一堆
+`E0433`（名字解析失败），编译器直接在该阶段停住，**根本走不到借用检查**。
+第一版就是这样漏掉了一个 `E0716`（`decode(&[lead, trail])` 的临时数组在语句
+结束即释放，而返回值还借着它），结果 CI 构建失败。
+
+可靠的本地验证方式（本仓库已实测可行）：建一个最小 crate，只依赖
+`encoding_rs` + `log`，把生成出来的 `jis_tunnel.rs` 当 `src/lib.rs` 拷进去，
+然后 `cargo build --offline`。这样借用检查会真跑，能直接复现/排除 E0716 一类问题：
+
+    mkdir -p /tmp/jtcheck/src && cd /tmp/jtcheck
+    printf '[package]\nname="jtcheck"\nversion="0.1.0"\nedition="2021"\n\n[dependencies]\nencoding_rs="=0.8.33"\nlog="=0.4.34"\n' > Cargo.toml
+    python3 -c "import re,pathlib; \\
+      s=pathlib.Path('apply_fvp_jis_tunnel_patch.py').read_text(encoding='utf-8'); \\
+      b=re.search(r\\\"JIS_TUNNEL_RS = r'''(.*?)'''\\\", s, re.S).group(1); \\
+      pathlib.Path('src/lib.rs').write_text(b.replace('crate::jis_tunnel::','crate::'), encoding='utf-8')"
+    cargo build --offline
+
+（注意：整个 rfvp workspace 在本机 cargo 1.75 上编不了 —— `resolver = "3"` 与
+edition2024 依赖都需要更新的 cargo，所以只能这样单模块验证。）
 """
 import sys
 from pathlib import Path
@@ -318,14 +340,18 @@ fn script_charset(dir: &Path) -> Option<HashSet<char>> {
             let trail = data[i + 1];
             let is_trail = (0x40..=0x7E).contains(&trail) || (0x80..=0xFC).contains(&trail);
             if is_trail {
-                let (decoded, _, had_err) = encoding_rs::SHIFT_JIS.decode(&[lead, trail]);
+                // Bind the bytes first: `decode` returns a `Cow` that borrows the
+                // input, so an inline `&[lead, trail]` temporary would be dropped
+                // at the end of the statement (E0716).
+                let pair = [lead, trail];
+                let (decoded, _, had_err) = encoding_rs::SHIFT_JIS.decode(&pair);
                 if !had_err {
-                    if let Some(c) = decoded.chars().next() {
-                        if decoded.chars().count() == 1 {
-                            set.insert(c);
-                            i += 2;
-                            continue;
-                        }
+                    let mut chars = decoded.chars();
+                    // A two-byte Shift-JIS sequence must yield exactly one char.
+                    if let (Some(c), None) = (chars.next(), chars.next()) {
+                        set.insert(c);
+                        i += 2;
+                        continue;
                     }
                 }
             }
