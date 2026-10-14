@@ -30,12 +30,17 @@ apply_probe_patch.py           # 7. YHPROBE 输入探针（诊断期）
 apply_text_click_patch.py      # 8. 点击补全文字 + vm_runner resume 保护
 apply_fvp_additive_blend_patch.py  # 9. PrimSetBlend(id,1) 走加法混合（上游 ffc73809）
 apply_fvp_mask_dissolve_patch.py   # 10. Mask dissolve 遮罩渐变（上游 e95f275a）· YHFVP-MASKDISSOLVE-1.0
+apply_fvp_jis_tunnel_patch.py      # 11. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 11. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 12. video-sys 解码器 ByteBuffer 模式
 ```
 
 > 9 与 10 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
 > 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
+
+> 11 与 2（`apply_text_patch`）都会改 `lib.rs`，但**锚点刻意错开**（11 插在
+> `pub mod rfvp_render;` 之后，2 锚定 `pub mod script;` + `pub mod soft_host;`），
+> 因此**任意顺序都对**（双顺序已实测）。
 
 > ⚠️ 顺序有依赖：`apply_movie_patch` 与 `apply_audio_fix_patch` 会争抢
 > `videoplayer.rs` 同一段代码，必须保持现有顺序（见提交 `a013595`）。
@@ -56,6 +61,7 @@ video-sys-cpu-read.patch       # 11. video-sys 解码器 ByteBuffer 模式
 | `apply_text_click_patch.py` | `app.rs` / `text_manager.rs` / `vm_runner.rs` | **点击补全点字动画** + `TextResume` 状态保护 |
 | `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
+| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `script/parser.rs` | **官中版 SJIS 替身字还原**（解码后 Unicode→Unicode），标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -631,6 +637,83 @@ a solid overlay here"*），于是遮罩图被当成普通贴图直接画出来 
 
 ---
 
+### 3.10 官方简体中文版文本乱码（SJIS 替身字）—— 新增还原层
+
+**现象**：官中版对话里夹带冷僻汉字（用户截图：`寅喊着什弗。`）：
+
+```
+实际显示：  平日寡言少苫的寅，用我从未听到慓的音量，大声地喊着什弗。
+应该是：    平日寡言少语的他，用我从未听到过的音量，大声地喊着什么。
+```
+
+**用户已试过但无效**：改字体（无效果，字体没问题）、改文本编码（GBK 出 `彫铎` 假字、
+UTF-8 有 57,507/64,779 条直接解码失败）——**都解不了**。
+
+**根因：官中版用「SJIS 替身字」承载简体中文**
+
+简体字绝大多数在 **JIS X 0208 里没有码位**（`么/这/为/着/过/语/说/话/车/时` 全部
+`encode('cp932')` 失败）。所以官方的做法是：把每个简体字映射到一个**冷僻的 JIS 汉字码位**，
+用那个码位写进脚本；PC 版在**解码之后**再做一次 Unicode→Unicode 还原。
+
+证据链：
+
+| 证据 | 内容 |
+|---|---|
+| `Sakura.hcb` | 4,372,452 字节（日文版是 5,002,852 → **是另一份脚本**，官中是直接写中文进去的） |
+| 反汇编脚本 | 按 opcode 表提取 **64,779** 条 `push_string`；Shift-JIS 解码失败 1,729 条（**cp932 全部正常**） |
+| 高频字后继统计 | 「什」(8F59) 后继 top1 = `95A4`「弗」×3237 → 只可能是「什么」 |
+| `Sakura.dll` 符号 | `babel::sjis_cp932_to_unicode_engine` / `SJIS tunnel limit exceeded` / `Invalid jis_map.bin format` |
+| **表本体** | `Sakura.dll` 偏移 `0x47960`（`.rdata` 段），**1,206 对 UTF-16LE** |
+| 表内容 | `徼→这 · 戍→你 · 禳→— · 諍→说 · 弗→么 · 來→们 · 餤→为 · 肛→样 · 寅→她` |
+| 替身字覆盖 | 223,054 / 1,310,705 字符 = **17.02%**（平均每 6 字 1 个） |
+| 表 key 区段 | **全部**在 JIS X 0208 标准区（cp932 与 shift_jis 解码结果完全一致 → 我们引擎用的 `encoding_rs::SHIFT_JIS` 能正确解出 key） |
+
+**修复**：新增模块 `crates/rfvp/src/jis_tunnel.rs`，在 `Parser::decode_string_bytes()`
+（**所有脚本文本的唯一解码出口**）之后做一次 Unicode→Unicode 还原。
+
+**脚本文件一个字节都不改**，所有字节偏移天然不变；行为与 `patch.dat` 查表那条路完全独立。
+
+**判据（自证 + 白名单双保险）**：
+
+1. **只认游戏目录里的 `Sakura.dll`**（不做全目录 dll/exe 扫描）；
+2. 在该文件里找**最长的一段连续 `(u16>=0x2000, u16>=0x2000)`**（≥64 对），
+   再按「key 必须是 CJK 汉字」「value 在 0x3000..=0x9FFF」过滤；
+3. 用「表里 key 是否出现在**本游戏脚本**用到的字符集里」打分：
+   **命中 ≥ 500 且命中率 ≥ 90%** 才启用，否则**静默不启用**（= 上游行为）。
+
+阈值为什么是 90%（实测数据，不是拍的）：
+
+| 组合 | 命中 | 命中率 | 结论 |
+|---|---|---|---|
+| 官中版脚本 + 它自己的表 | **1,205 / 1,207** | **99.8%** | ✅ 启用 |
+| *日文原版*脚本 + 官中版的表 | 754 / 1,207 | 62.5% | ❌ 拒绝 |
+| 星空EH `FVPLoaderGui.exe`（本目录最大假阳性） | 44 | — | ❌ 拒绝 |
+| 星空Wish `Memoria.exe` | 1 | — | ❌ 拒绝 |
+| 无关 `Steam2.dll` / `quartz.dll` / `d3d9.dll` | ≤239 | ≤24% | ❌ 拒绝 |
+
+> 第二行就是**汉化组版**的情形（它用的正是日文原版脚本）—— 50% 的松阈值挡不住它，
+> 所以必须提到 90%。**汉化组版行为完全不变。**
+
+**资源名风险 = 0**（实测）：表 key 全是**汉字**，资源名是纯 ASCII。
+官方脚本里 7,267 条纯 ASCII 字符串、3,764 条含路径分隔符的（`voice/01000060`、`se/001`…），
+被还原改动的**都是 0 条**。
+
+**端到端还原效果**（64,779 条跑一遍，49,649 条被还原 = 76.6%）：
+
+```
+徼肛的颯苫悄然落下。   →  这样的话语悄然落下。
+母唳 / 索瑛 / 花崟      →  母亲 / 索尔 / 花飞
+什弗 / 寅 / 苫          →  什么 / 她 / 语
+```
+
+**验证（本轮已完成）**：双顺序（A/B）✅、幂等 ✅、`rustc 1.75 --edition 2021` 0 语法错误 ✅、
+端到端仿真 ✅。**尚未真机验证**（需要跑一次 CI 出 so）。
+
+**将来要支持别的作品**：改 `jis_tunnel.rs` 里 `dir.join("Sakura.dll")` 那一行即可 ——
+后面的评分逻辑仍然会兜底。
+
+---
+
 ## 4. YHPROBE 探针一览（诊断期）
 
 > 过滤：`adb logcat -s rfvp | grep YHPROBE`
@@ -697,6 +780,13 @@ a solid overlay here"*），于是遮罩图被当成普通贴图直接画出来 
       可能把原本正常的地方改坏；且我们没有原版的曲线参数、纯靠猜；
       一旦上游改这块又要重新对齐。→ **优先级低（美观度问题，非可用性 bug），等上游。**
 - [ ] 关注上游 commit：出现 `dissolve` / `render` 相关改动时，回来看是否解决上面这条。
+- [ ] **官中版 SJIS 替身字还原：待真机验证**（见 3.10）。静态验证已全绿
+      （双顺序 / 幂等 / 语法 / 端到端仿真），但**还没在真机上跑过一次**——
+      需要跑一次 `build-librfvp.yml` 出新 so 才能确认。
+      验证要点：官中版对话应显示正常中文（`什弗`→`什么`、`寅`→`她`）；
+      汉化组版与其它游戏应**完全不受影响**。
+- [ ] 若将来还有别的 FVP 作品用同类方案：改 `jis_tunnel.rs` 里
+      `dir.join("Sakura.dll")` 那一行（评分逻辑仍会兜底），见 3.10。
 - [ ] 虚拟控件相关均**在 APK 侧**（3.8），换 so 不影响；但**换 APK 必须重编**。
 
 ---

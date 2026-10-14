@@ -48,6 +48,7 @@ jobs:
           cp rfvp-build/apply_text_click_patch.py rfvp/
           cp rfvp-build/apply_fvp_additive_blend_patch.py rfvp/
           cp rfvp-build/apply_fvp_mask_dissolve_patch.py rfvp/
+          cp rfvp-build/apply_fvp_jis_tunnel_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -61,6 +62,9 @@ jobs:
           # 顺序无关，两个脚本都会自适应对方是否已应用。
           python3 apply_fvp_additive_blend_patch.py
           python3 apply_fvp_mask_dissolve_patch.py
+          # 官方简体中文版的「SJIS 替身字」还原（YHFVP-JISTUNNEL-1.0）。
+          # 与 text_patch 顺序无关（锚点刻意避开对方区域），已双顺序实测。
+          python3 apply_fvp_jis_tunnel_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -160,6 +164,13 @@ jobs:
             echo "FVP mask-dissolve 补丁已编入 ✓ ($(grep -ao 'YHFVP-MASKDISSOLVE-[0-9.]*' "$SO" | head -1))"
           else
             echo "::error::librfvp.so 未包含 mask dissolve 补丁（缺 YHFVP-MASKDISSOLVE 标识）—— apply_fvp_mask_dissolve_patch.py 未生效"
+            exit 1
+          fi
+          # 官方简体中文版的 SJIS 替身字还原必须编进去
+          if grep -qa 'YHFVP-JISTUNNEL' "$SO"; then
+            echo "SJIS 替身字还原补丁已编入 ✓ ($(grep -ao 'YHFVP-JISTUNNEL-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 jis-tunnel 补丁（缺 YHFVP-JISTUNNEL 标识）—— apply_fvp_jis_tunnel_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"
