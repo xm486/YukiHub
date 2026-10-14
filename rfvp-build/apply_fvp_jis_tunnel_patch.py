@@ -41,8 +41,35 @@ rfvp 解到 Shift-JIS 就停了，缺的正是这第二步 —— 所以替身�
 
 做法
 ----
-新增模块 `crates/rfvp/src/jis_tunnel.rs`，并在 `Parser::decode_string_bytes()`
-（所有脚本文本的**唯一解码出口**）之后做一次 Unicode→Unicode 还原。
+新增模块 `crates/rfvp/src/jis_tunnel.rs`，在两个方向各接一次：
+
+1. **读入方向**（脚本 → 屏幕）：`Parser::decode_string_bytes()`（所有脚本文本的
+   **唯一解码出口**）之后 `restore()`，替身字 → 真字。
+2. **写出方向**（屏幕 → 存档）：`save_manager.rs` 的 `enc()` 里、`SHIFT_JIS.encode`
+   之前 `to_surrogate()`，真字 → 替身字（**反向**）。
+
+**脚本文件一个字节都不改**，所有字节偏移天然不变。
+
+为什么「写出方向」也必须做（`&#NNNNN;` 的来历）
+----------------------------------------------
+表里 **全部 1,206 个真字都没有 JIS X 0208 码位**（这正是官方要用替身字的原因）。
+`encoding_rs::SHIFT_JIS.encode()` 对无法映射的字符会按 WHATWG 规范输出
+**数字字符引用** `&#NNNNN;`：
+
+    encode("纸")  ->  "&#32440;"        had_unmappable = true
+    encode("这")  ->  "&#36825;"
+
+而引擎读回时**不会解析**这个实体（`decode("&#32440;") == "&#32440;"`），
+所以存档界面上就会看到字面量 `&#32440;`。全 workspace 只有 `save_manager.rs`
+这一处把文本编码回 Shift-JIS，所以修这一处就够。
+
+反向映射是安全的：表是**双射**（1,206 个 key 两两不同，1,206 个 value 也两两不同，
+重复 0 条），所以真字 → 替身字的查找没有歧义。往返已验证：
+
+    真字「上放着用彩色糖纸包装起来的巧克力。」
+      -> to_surrogate -> 「上放着用彩色糖驥包装起来的巧克力。」
+      -> encode       -> 8fe3...939c e987 95ef...8142   ← 与游戏脚本原始字节逐字节一致
+      -> decode+restore -> 「上放着用彩色糖纸包装起来的巧克力。」  ✅ 往返一致
 
 **脚本文件一个字节都不改**，所有字节偏移天然不变。
 
@@ -55,8 +82,12 @@ rfvp 解到 Shift-JIS 就停了，缺的正是这第二步 —— 所以替身�
    目前只有这一个官方版本用替身字方案；而且显式命名 + 自证的文件**不可能**
    被游戏目录里恰好躺着的无关二进制误触发。将来若要支持别的作品，改这一行名字即可。
 2. **候选表识别**：在该文件里找**最长的一段连续 `(u16>=0x2000, u16>=0x2000)`**
-   （即「(汉字, 字符) 对」的连续序列），至少 64 对；再按
-   「key 必须是 CJK 汉字」「value 必须在 0x3000..=0x9FFF」过滤。
+   （即「(汉字, 字符) 对」的连续序列），至少 64 对；再**从头开始逐条读**，
+   遇到第一条不合法（key 非 CJK 汉字，或 value < U+2000）就**停**。
+   > 一开始用的是「跳过非法条目（`continue`）+ 把 value 限制在 `0x3000..=0x9FFF`」，
+   > 结果把表里第 3 高频的 **`禳→—`**（value 是 U+2014 破折号，低于 CJK 区）丢掉了 ——
+   > 它在脚本里出现 **9,211 次**，游戏里就是满屏「禳禳」粘在一起。现在的写法是
+   > 「run 到哪算哪，遇到非法就结束」，实测提取结果与手工 1,206 条**完全一致**。
 3. **自证机制**：用「表里的 key 是否出现在**本游戏脚本**用到的字符集里」打分。
    只有 **命中 ≥ 500 且命中率 ≥ 90%** 才启用；否则静默不启用（行为与上游一致）。
 
@@ -127,6 +158,7 @@ from pathlib import Path
 
 LIB_RS = "crates/rfvp/src/lib.rs"
 PARSER_RS = "crates/rfvp/src/script/parser.rs"
+SAVE_RS = "crates/rfvp/src/subsystem/resources/save_manager.rs"
 TUNNEL_RS = "crates/rfvp/src/jis_tunnel.rs"
 
 # ---------------------------------------------------------------- 模块实现
@@ -309,9 +341,17 @@ fn extract_table(data: &[u8]) -> Option<HashMap<char, char>> {
         let i = offset + 4 * k;
         let a = u16::from_le_bytes([data[i], data[i + 1]]);
         let b = u16::from_le_bytes([data[i + 2], data[i + 3]]);
+        // The run *is* the table: stop at the first entry that is not a
+        // `(CJK key, character)` pair instead of skipping it.
+        //
+        // Skipping (`continue`) would silently drop the first entry — `禳 -> —`,
+        // whose value U+2014 sits *below* the CJK blocks — and, because the
+        // original code filtered every entry against a `0x3000..=0x9FFF` value
+        // range, also everything after it. `禳` occurs 9,211 times in the
+        // official script, so that mistake is very visible in game.
         let key_is_kanji = (0x4E00..=0x9FFF).contains(&a) || (0x3400..=0x4DBF).contains(&a);
-        if !key_is_kanji || !(0x3000..=0x9FFF).contains(&b) {
-            continue;
+        if !key_is_kanji || b < 0x2000 {
+            break;
         }
         if let (Some(key), Some(value)) = (char::from_u32(a as u32), char::from_u32(b as u32)) {
             map.insert(key, value);
@@ -322,6 +362,30 @@ fn extract_table(data: &[u8]) -> Option<HashMap<char, char>> {
     } else {
         None
     }
+}
+
+/// Inverse of [`restore`]: put the surrogate kanji back.
+///
+/// Needed on the way *out*, i.e. whenever the engine writes text into a
+/// Shift-JIS container — save files are the only such case. Every value in the
+/// table has **no JIS X 0208 code point**, so `encoding_rs::SHIFT_JIS.encode`
+/// emits a numeric character reference (`&#NNNNN;`, per the WHATWG encoding
+/// standard) for it, which the engine then never turns back into a character:
+/// the load screen shows a literal `&#32440;`.
+///
+/// The mapping is a bijection (all 1,206 keys and all 1,206 values are
+/// distinct), so the reverse lookup is unambiguous.
+pub fn to_surrogate(s: &str) -> Cow<'_, str> {
+    let rev = reverse_table();
+    if !s.chars().any(|c| rev.contains_key(&c)) {
+        return Cow::Borrowed(s);
+    }
+    Cow::Owned(s.chars().map(|c| rev.get(&c).copied().unwrap_or(c)).collect())
+}
+
+fn reverse_table() -> &'static HashMap<char, char> {
+    static REVERSE: OnceLock<HashMap<char, char>> = OnceLock::new();
+    REVERSE.get_or_init(|| table().iter().map(|(k, v)| (*v, *k)).collect())
 }
 
 /// Every character the script decodes to under Shift-JIS.
@@ -417,7 +481,6 @@ pub mod jis_tunnel;
 PARSER_OLD = """        Ok(s.to_string())
     }
 """
-
 PARSER_NEW = """        // YukiHub patch: official Simplified-Chinese builds encode text as
         // Shift-JIS with surrogate kanji; restore them before returning.
         #[cfg(not(feature = "no_std"))]
@@ -425,6 +488,35 @@ PARSER_NEW = """        // YukiHub patch: official Simplified-Chinese builds enc
         Ok(s.to_string())
     }
 """
+
+# ------------------------------------------------------ save_manager.rs
+#
+# 存档是引擎里**唯一**把文本编码回 Shift-JIS 的地方（全 workspace 只有这一处
+# `SHIFT_JIS.encode`，其余都在 assembler / lua2hcb_compiler 这类 PC 端工具里）。
+# 必须先把真汉字换回替身字，否则 encoding_rs 会对每个无 SJIS 码位的字输出
+# `&#NNNNN;`（WHATWG 数字字符引用），读档时就显示成字面量。
+#
+# 注意：save_manager.rs 本身**没有任何 cfg 属性**，所以注入点不能带
+# `#[cfg(not(feature = "no_std"))]` —— 那会让属性贴到 `let` 语句上而报错。
+# 好在 `jis_tunnel` 模块与 `String` 在两种构建下都可用，无需门控。
+SAVE_OLD = """            match nls {
+                Nls::ShiftJIS => {
+                    let (cow, _, _) = encoding_rs::SHIFT_JIS.encode(s);
+                    cow.into_owned()
+                }"""
+
+SAVE_NEW = """            match nls {
+                Nls::ShiftJIS => {
+                    // YukiHub patch: put the SJIS-tunnel surrogate kanji back
+                    // before encoding. The real characters have no JIS X 0208
+                    // code point, so encoding them directly would emit
+                    // `&#NNNNN;` character references into the save file.
+                    #[cfg(not(feature = "no_std"))]
+                    let s = crate::jis_tunnel::to_surrogate(s);
+                    let (cow, _, _) = encoding_rs::SHIFT_JIS.encode(&s);
+                    cow.into_owned()
+                }"""
+
 
 
 def apply_anchors(text: str, rel: str, pairs) -> "tuple[int, str]":
@@ -438,7 +530,7 @@ def apply_anchors(text: str, rel: str, pairs) -> "tuple[int, str]":
 
 
 def main() -> int:
-    for rel in (LIB_RS, PARSER_RS):
+    for rel in (LIB_RS, PARSER_RS, SAVE_RS):
         if not Path(rel).exists():
             # fail-fast：上游若重命名/移动了该文件，这里必须让 CI 红，而不是静默跳过。
             print(f"[FAIL] {rel} 不存在 —— 上游可能改了目录结构，补丁无法应用")
@@ -482,6 +574,20 @@ def main() -> int:
             return rc
         par_path.write_text(par_text, encoding="utf-8")
         print(f"[OK]   {PARSER_RS}: 替身字还原已接入 decode_string_bytes")
+
+    # save_manager.rs（编码回写方向）
+    sav_path = Path(SAVE_RS)
+    sav_text = sav_path.read_text(encoding="utf-8")
+    if "crate::jis_tunnel::to_surrogate" in sav_text:
+        print(f"[OK]   {SAVE_RS}: 已应用（幂等）")
+    else:
+        rc, sav_text = apply_anchors(
+            sav_text, SAVE_RS, [("存档 ShiftJIS encode", SAVE_OLD, SAVE_NEW)]
+        )
+        if rc != 0:
+            return rc
+        sav_path.write_text(sav_text, encoding="utf-8")
+        print(f"[OK]   {SAVE_RS}: 存档前反向映射（真字→替身字）已接入")
 
     print("YHFVP-JISTUNNEL-1.0 全部锚点应用成功 ✓（可重复执行，幂等）")
     return 0
