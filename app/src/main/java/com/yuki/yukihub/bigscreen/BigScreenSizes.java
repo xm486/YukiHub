@@ -110,8 +110,13 @@ public class BigScreenSizes {
         rowH = cardH + headerH + gap * 2;
 
         railItemH = clamp((content - 12) / RAIL_ENTRY_COUNT, 28, 52);
+        // 图标容器（收起态图标在其中居中，展开态靠左让位给文字）。
+        // 条目高度决定它 —— 与条目等高才不会在展开态显得图标偏上/偏下。
         railIconBox = clamp(Math.round(railItemH * 0.92f), 24, 46);
-        railCollapsedW = clamp(railItemH + 14, 50, 78);
+        // 收起宽度：**由 iconBox 推导**而不是由条目高度（旧公式 railItemH + 14）。
+        // 旧公式与图标尺寸没有关系，导致收起态「框很宽、图标很小」—— 实测框宽
+        // 是图标的 4.5 倍。现在 = 图标容器 + 左右各 5dp 余量，框正好裹住图标。
+        railCollapsedW = clamp(railIconBox + 10, 40, 78);
         railExpandedW = clamp(Math.round(wDp * 0.24f), 168, 260);
 
         actionBtnH = clamp(Math.round(hDp * 0.085f), 28, 40);
