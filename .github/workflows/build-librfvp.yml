@@ -48,7 +48,7 @@ jobs:
           cp rfvp-build/apply_text_click_patch.py rfvp/
           cp rfvp-build/apply_fvp_additive_blend_patch.py rfvp/
           cp rfvp-build/apply_fvp_mask_dissolve_patch.py rfvp/
-          cp rfvp-build/apply_audio_silent_fix_patch.py rfvp/
+          cp rfvp-build/apply_fvp_dissolve_snapshot_patch.py rfvp/
           cp rfvp-build/apply_fvp_jis_tunnel_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
@@ -63,8 +63,9 @@ jobs:
           # 顺序无关，两个脚本都会自适应对方是否已应用。
           python3 apply_fvp_additive_blend_patch.py
           python3 apply_fvp_mask_dissolve_patch.py
-          # 音频：SoundSilentOn / AudioSilentOn 不应真的静音（上游 be92e540 的语义修正）。
-          python3 apply_audio_silent_fix_patch.py
+          # 转场：改成「擦掉开始时那一帧」，不再盖黑（上游 2a9ff58a）。
+          # 依赖上一个补丁，必须紧随其后。
+          python3 apply_fvp_dissolve_snapshot_patch.py
           # 官方简体中文版的「SJIS 替身字」还原（YHFVP-JISTUNNEL-1.0）。
           # 与 text_patch 顺序无关（锚点刻意避开对方区域），已双顺序实测。
           python3 apply_fvp_jis_tunnel_patch.py
@@ -174,6 +175,13 @@ jobs:
             echo "SJIS 替身字还原补丁已编入 ✓ ($(grep -ao 'YHFVP-JISTUNNEL-[0-9.]*' "$SO" | head -1))"
           else
             echo "::error::librfvp.so 未包含 jis-tunnel 补丁（缺 YHFVP-JISTUNNEL 标识）—— apply_fvp_jis_tunnel_patch.py 未生效"
+            exit 1
+          fi
+          # 转场快照（擦掉起始帧）必须编进去
+          if grep -qa 'YHFVP-DISSOLVESNAPSHOT' "$SO"; then
+            echo "转场快照补丁已编入 ✓ ($(grep -ao 'YHFVP-DISSOLVESNAPSHOT-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含转场快照补丁（缺 YHFVP-DISSOLVESNAPSHOT 标识）—— apply_fvp_dissolve_snapshot_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"
