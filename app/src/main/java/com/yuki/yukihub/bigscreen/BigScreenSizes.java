@@ -134,14 +134,20 @@ public class BigScreenSizes {
         // 想让它裹住图标，就得在这里把侧栏收窄 ——
         // 反过来"把图标放大去填满框"是南辕北辙（试过，实机评价"难看的要死"）。
         //
-        // 取值 = 条目高度 × 0.94（比行高略窄，读起来是个方正的按钮）
-        //      + RAIL_FOCUS_BLEED（给焦点放大留的左右余量，见下方常量）。
-        // 配合 BigScreenRailView.ICON_RATIO = 0.44，框/图标比稳定在 2.3 倍左右。
+        // 取值 = 条目高度 × 0.84 → 得到**框本身的宽度**，再加两侧的留白余量。
         //
-        // 旧公式是 railIconBox + 10 且**下限写死 40**：小屏横屏上 railItemH 触底
-        // 28dp（railIconBox 26，算出来本该 36）会被抬到 40，于是
-        // 「框 40 宽 × 28 高、图标只有 11dp」—— 又宽又扁。
-        railCollapsedW = clamp(Math.round(railItemH * 0.94f) + RAIL_FOCUS_BLEED * 2, 34, 60);
+        // 配合 BigScreenRailView.ICON_RATIO = 0.44，框/图标比在各档屏幕上稳定在
+        // 约 2.1 倍（图标占框宽 ~47%，左右各留 ~26%）—— 常见图标按钮的内边距比例。
+        //
+        // 历代公式（记录一下，免得再来回折腾）：
+        //   railIconBox + 10，下限 40  → 框 40 宽 × 图标 11dp = 3.6x（又宽又扁，实机吐槽）
+        //   itemH × 0.94（上一版）      → 2.55x（仍偏宽）
+        //   itemH × 0.84（现在）        → 2.1x
+        //
+        // 注意：clamp 作用在**框**上（不含两侧余量），否则小屏上会先被下限顶起来、
+        // 再加上余量，反而又变宽 —— 上一版就是因为这个没达到预期。
+        int railBoxW = clamp(Math.round(railItemH * 0.84f), 22, 50);
+        railCollapsedW = railBoxW + RAIL_FOCUS_BLEED * 2;
         railExpandedW = clamp(Math.round(wDp * 0.24f), 168, 260);
 
         actionBtnH = clamp(Math.round(hDp * 0.085f), 28, 40);

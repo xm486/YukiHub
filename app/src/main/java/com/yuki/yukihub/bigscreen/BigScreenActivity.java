@@ -589,7 +589,15 @@ public class BigScreenActivity extends AppCompatActivity
         if (searchLayer != null) { searchLayer.setTouchUi(touchUi); }
         // 「退出大屏」现在是常驻按钮（手柄侧栏到顶也能进入它，不再做触摸限定）。
         // 手柄插拔时若有焦点落在顶栏按钮上，收回焦点避免悬空。
-        if (!touchUi && topBarFocus >= 0) { setTopBarFocus(-1); }
+        //
+        // ★ M23 修正（上一版顶栏按钮「手柄选不中」的真凶）：
+        //   原先这里判断 `!touchUi`（= 手柄模式）就 setTopBarFocus(-1)，
+        //   而调用链是  setTopBarFocus → updateHints → applyTouchUi → 这里，
+        //   于是**手柄模式下刚设好的顶栏焦点会被自己立刻清掉** ——
+        //   按 ↑ 进顶栏后视觉毫无反应，按 Ⓐ 也没有任何动作。
+        //   现在只在「从手柄切到触摸」（即 touchUi 为真）时才收回焦点，
+        //   手柄模式本身不再干预顶栏焦点。
+        if (topBarFocus >= 0 && touchUi) { setTopBarFocus(-1); }
     }
 
     // ================= 顶栏按钮焦点（退出 / 菜单）=================
@@ -2175,6 +2183,54 @@ List<Shelf> defs = new ArrayList<>();
     }
 
     /**
+     * LB / RB 循环切换分类（**不改变焦点区**）。
+     *
+     * <p>M23 修正：上一版这里改成了"先把焦点拉进侧栏再移动"，用户反馈
+     * 「按 LR 你还强制切到分类去，太煞笔了」—— 确实：手柄正在内容区翻卡片时
+     * 被硬拉进侧栏，是很烦的抢焦点行为。现在只推"当前生效的分类"，焦点区保持原样。
+     *
+     * <p>实现上与侧栏的"焦点即生效"解耦，所以走 {@link #switchFilterTo}
+     * （它会同步侧栏高亮 + 重建列表），再用 Toast 告诉用户切到哪了。
+     */
+    private void cycleFilter(int delta) {
+        // 焦点已经在侧栏里：照旧移动光标（onEntryFocused 会把分类跟着切过去），
+        // 这样"光标位置"和"当前分类"始终一致，不会出现光标与筛选对不上的怪状态。
+        if (railZone) {
+            rail.moveFocus(delta);
+            announceCategory();
+            return;
+        }
+        List<BigScreenRailView.Entry> entries = rail.entries();
+        if (entries == null || entries.isEmpty()) { return; }
+        // 焦点不在侧栏（正在翻卡片 / 在按钮排）：只推"当前分类"，**不动焦点**。
+        int cur = -1;
+        for (int i = 0; i < entries.size(); i++) {
+            BigScreenRailView.Entry e = entries.get(i);
+            if (!F_SEARCH.equals(e.id) && e.id.equals(filter)) { cur = i; break; }
+        }
+        int size = entries.size();
+        // 跳过「搜索」项：它不是筛选，切分类时不该停在它上面
+        int next = cur < 0 ? 0 : cur;
+        for (int k = 0; k < size; k++) {
+            next = (next + delta + size) % size;
+            if (!F_SEARCH.equals(entries.get(next).id)) { break; }
+        }
+        switchFilterTo(entries.get(next).id);
+        announceCategoryById(entries.get(next).id);
+    }
+
+    /** LB/RB 切分类后的提示 —— 按 id 找文案（此时侧栏焦点不一定在这条上） */
+    private void announceCategoryById(String id) {
+        if (banner == null) { return; }
+        for (BigScreenRailView.Entry e : rail.entries()) {
+            if (e.id.equals(id)) {
+                banner.show(e.label + " · " + e.count + " 款");
+                return;
+            }
+        }
+    }
+
+    /**
      * M22：切到指定分类（切完刷新侧栏选中态 + 重建列表）。
      *
      * <p>侧栏的「焦点即生效」只覆盖手柄移动；搜索结果、「按最近游玩排序」这类
@@ -2994,14 +3050,10 @@ List<Shelf> defs = new ArrayList<>();
                 // M12：单排设计下 focusEngine.page() 已经没有"上一行"了（rowCount==1），
                 // LB/RB 改为**切换分类**（Steam / Playnite 的惯例），并给一句提示。
                 //
-                // M23 修：移动之前**必须先进入侧栏焦点区**。原来直接 rail.moveFocus()
-                // 而 railZone 仍是 false，于是：
-                //   ① 侧栏的焦点描边不画（zoneFocused=false）→ 用户看不出选中了哪个分类；
-                //   ② 这时按 Ⓐ 会落到内容区分支 launch(focusedGame()) → **直接进游戏**，
-                //      而不是打开搜索/应用该分类 —— 正是实机反馈的那个 bug。
-                if (!railZone) { setRailZone(true); }
-                rail.moveFocus(intent == InputRouter.Intent.PAGE_L ? -1 : 1);
-                announceCategory();
+                // M23 修：切分类时**只推"当前分类"，不抢焦点区**。
+                // 上一版我在这里 setRailZone(true)，用户反馈「按 LR 强制切到分类去，太煞笔了」——
+                // 手柄正在内容区操作时被硬拉进侧栏，确实很烦。现在焦点区保持原样。
+                cycleFilter(intent == InputRouter.Intent.PAGE_L ? -1 : 1);
                 break;
             case FAVORITE:
                 if (!railZone) { toggleFavorite(focusedGame()); }
