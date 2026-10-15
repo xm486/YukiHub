@@ -32,8 +32,9 @@ apply_fvp_additive_blend_patch.py  # 9. PrimSetBlend(id,1) 走加法混合（上
 apply_fvp_mask_dissolve_patch.py   # 10. Mask dissolve 遮罩渐变（上游 e95f275a）· YHFVP-MASKDISSOLVE-1.0
 apply_fvp_dissolve_snapshot_patch.py # 11. 转场改为「擦掉起始帧」（上游 2a9ff58a）· YHFVP-DISSOLVESNAPSHOT-1.0
 apply_fvp_jis_tunnel_patch.py      # 12. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
+apply_audio_silent_fix_patch.py    # 13. SoundSilentOn/AudioSilentOn 不再真静音（上游 be92e540）
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 14. video-sys 解码器 ByteBuffer 模式
 ```
 
 > 9 与 10 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
@@ -64,6 +65,7 @@ video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
 | `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
 | `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `script/parser.rs` | **官中版 SJIS 替身字还原**（解码后 Unicode→Unicode），标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
+| `apply_audio_silent_fix_patch.py` | `audio_player/se_player.rs` / `bgm_player.rs` | `SoundSilentOn`/`AudioSilentOn` **不再真的静音**（对齐上游 10.15，见 3.11） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -837,27 +839,66 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 
 ---
 
-### 3.11 【已否决】`SoundSilentOn` / `AudioSilentOn` 语义修正 —— 对我们**不适用**
+### 3.11 `SoundSilentOn` / `AudioSilentOn` 不再真的静音（对齐上游 10.15）
 
-**上游**：`be92e540`（"fix audio"，2026-10-15）。上游新版 `channels.rs` 把
-`silent_on` 改成空操作，并注明 *"scripts call it on a slot while its sound plays
-(**Sakura, on the voice slot at every line**), and that sound is heard in the original engine."*
+**来源**：上游 `be92e540`（"fix audio"，2026-10-15）。上游把 SE/BGM 的公共槽位逻辑
+重构成了 `audio_player/channels.rs`；**我们不跟那个重构**（`se_player` / `bgm_player`
+从基线到新版分别差 440 / 489 行），只把语义改对。
 
-**看起来很像是我们的 bug，但实测证明不适用**：
+**上游原文（直接点了我们这款游戏的名）**：
 
-| 版本 | 音频表现 |
-|---|---|
-| **10.09（我们的基线）** | ✅ **正常**（顶多底噪/声音糊，属音源本身） |
-| 10.12 | ❌ 出现「对话没声音」 |
-| 10.15 | ✅ 修复（即 `be92e540` 修的是 **10.12 自己的回归**） |
+```rust
+/// `AudioSilentOn` / `SoundSilentOn`. It does not mute the slot: scripts call it on a slot
+/// while its sound plays (Sakura, on the voice slot at every line), and that sound is heard
+/// in the original engine.
+pub fn silent_on(&mut self, _slot: i32, _tween: Tween) {}
+```
 
-**为什么基线没出问题**：基线的 `silent_on` 确实会写 `se_muted[slot] = true`，
-但实测多款游戏**均无「语音被吞」现象** —— 说明在我们这条路径上，
-脚本并没有走到会触发它的组合（或上游重构时才引入新的调用路径）。
-**结论：10.09 的音频不需要动。**
+**我们基线（10.09）的实现 —— 真的静音**：
 
-**处置**：补丁已写好后**主动撤销**（提交历史里可查），不纳入构建。
-理由：既然现状正常，改它只有风险没有收益。
+```rust
+pub fn silent_on(&mut self, slot: i32, tween: Tween) {
+    self.se_muted[slot] = true;
+    if let Some(handle) = self.se_slots[slot].as_mut() {
+        handle.set_volume(0.0, tween);        // <- 音量拉到 0
+    }
+}
+```
+
+而且 `se_muted` 还**参与此后所有音量计算**（`se_player.rs` 4 处）：
+
+```rust
+let actual_volume = if self.se_muted[slot] { 0.0 } else { self.effective_volume_for_slot(slot) };
+```
+
+**10.15 的做法**：`channels.rs` 里连 `muted` 字段都**彻底删除**了，`silent_on` 是
+**空操作**；`restore` 里也注明 *"`muted` is ignored: saves made while SilentOn muted
+a slot would bring it back."* —— 即**静音这件事整体被移除**。
+
+**改动**（`se_player.rs` / `bgm_player.rs` 各三处，合计约 12 行）：
+
+| # | 改动 | 目的 |
+|---|---|---|
+| 1 | `silent_on` → 空操作（**保留一条 `YHPROBE SilentOn` 探针**） | 对齐原引擎 |
+| 2 | 4 处 `if muted { 0.0 } else { X }` → 直接用 `X` | `muted` 彻底退出音量计算 |
+| 3 | `apply_snapshot_v1` 恢复存档时 `muted` 一律置 `false` | 旧存档不会把静音带回来 |
+
+> 注：我们保留 `se_muted` / `bgm_muted` 字段（不删），只是**不再使用**它 —— 
+> 功能上与 10.15 等价，但改动面更小、更易回滚。
+
+**为什么带探针**：用户实测反馈「10.09 多款游戏语音均正常，只是声音偏糊/有底噪」，
+与「`silent_on` 会真静音」的代码分析不完全吻合。探针用来**确认脚本到底有没有调
+`SilentOn`、调用频率多少** —— 一次构建同时拿到「修复后的表现」和「调用事实」。
+确认后可按 §5 移除。
+
+**与其它补丁的关系**：独占 `audio_player/`，与其余补丁**零文件重叠**。
+
+**验证（本轮）**：
+- dry-run：8 个锚点全部命中；幂等复跑全绿；
+- 全部补丁按 workflow 顺序**串行全绿**，且**二次复跑全部幂等**；
+- `rustc 1.75 --edition 2021` 逐个语法检查 → 0 语法错误；括号平衡 ✅。
+
+**待实测**：真机确认语音表现 + 读 `YHPROBE SilentOn` 日志。
 
 ---
 
@@ -929,6 +970,7 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 | `SLOT click i=.. ld=.. su=.. sk=.. sp=.. v=AA/BB swa=..` | `app.rs` | 按下瞬间**无条件** dump 全部 32 槽 |
 | `click complete+SWALLOW / complete only` | `app.rs` | 补全/吞点击的实际决策 |
 | `TextResume ignored` | `vm_runner.rs` | 崩溃保护拦截记录 |
+| `SilentOn slot=..` | `audio_player/se_player.rs` · `bgm_player.rs` | **脚本是否在调 `SoundSilentOn`/`AudioSilentOn`**（见 3.11） |
 
 **已知会逐字出现的槽**（由 `REVEALMASK` 实测）：
 `0x1` = slot 0（对话）、`0x20` = slot 5、`0x80000000` = slot 31（设置页）。
@@ -957,8 +999,10 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
       我们已照搬（含 `dissolve_serial`、sRGB、`MaskFadeIn` 硬边语义）。
       待验证：转场是否从「黑一下」变成「擦出新场景」。
 
-- [ ] **音频：`SoundSilentOn` 语义修正已否决**（见 3.11），10.09 基线音频不需要动。
-      底噪/声音发糊属音源本身，不属本仓库补丁范围。
+- [ ] **音频：`SoundSilentOn` 语义修正已应用，待真机确认**（见 3.11）。
+      带 `YHPROBE SilentOn` 探针：既要对齐 10.15（不静音），
+      也要用日志确认脚本到底调没调、调了几次。
+      注：「声音糊/底噪」是另一条线，不在本补丁范围（10.15 也未专门处理它）。
 - [ ] 关注上游 commit：出现 `dissolve` / `render` / `audio` 相关改动时回来看。
 - [x] ~~**官中版 SJIS 替身字还原：待真机验证**~~ → **已完成**（见 3.10.3）。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、

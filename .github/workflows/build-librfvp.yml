@@ -50,6 +50,7 @@ jobs:
           cp rfvp-build/apply_fvp_mask_dissolve_patch.py rfvp/
           cp rfvp-build/apply_fvp_dissolve_snapshot_patch.py rfvp/
           cp rfvp-build/apply_fvp_jis_tunnel_patch.py rfvp/
+          cp rfvp-build/apply_audio_silent_fix_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -69,6 +70,9 @@ jobs:
           # 官方简体中文版的「SJIS 替身字」还原（YHFVP-JISTUNNEL-1.0）。
           # 与 text_patch 顺序无关（锚点刻意避开对方区域），已双顺序实测。
           python3 apply_fvp_jis_tunnel_patch.py
+          # 音频：SoundSilentOn / AudioSilentOn 不应真的静音（对齐上游 be92e540 / 10.15 语义）。
+          # 带一条 YHPROBE SilentOn 探针，用于确认脚本调用事实。
+          python3 apply_audio_silent_fix_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
