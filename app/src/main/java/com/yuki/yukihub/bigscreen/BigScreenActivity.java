@@ -598,6 +598,11 @@ public class BigScreenActivity extends AppCompatActivity
     private static final int TOPBAR_EXIT = 0;
     private static final int TOPBAR_MENU = 1;
 
+    /** 进入顶栏区之前所在的区 —— ↓ / Ⓑ 时**原路返回**，而不是一律塞回侧栏 */
+    private static final int RETURN_RAIL = 0;
+    private static final int RETURN_INFO = 1;
+    private int topBarReturn = RETURN_RAIL;
+
     /** 设置顶栏焦点（-1 = 离开顶栏区），并刷新两颗按钮的视觉。 */
     /**
      * 侧栏焦点是否已在第一个可选条目（且没有因循环滚动而跳走）。
@@ -637,6 +642,28 @@ public class BigScreenActivity extends AppCompatActivity
     private void moveTopBarFocus(int delta) {
         setTopBarFocus((topBarFocus + delta + 2) % 2);
         BigScreenSound.tick();
+    }
+
+    /**
+     * 进入顶栏按钮区（退出 / 菜单）。
+     *
+     * @param returnTo 从哪个区进来的 —— ↓ / Ⓑ 会原路返回那里。
+     */
+    private void enterTopBar(int returnTo) {
+        topBarReturn = returnTo;
+        // 默认落「菜单」：它是高频入口，退出按钮在它左边可一步到达
+        setTopBarFocus(TOPBAR_MENU);
+    }
+
+    /** 离开顶栏区，回到进来时的那个区（不触发原生的 finish()） */
+    private void leaveTopBar() {
+        setTopBarFocus(-1);
+        if (topBarReturn == RETURN_INFO
+                && infoActions != null && infoActions.getChildCount() > 0) {
+            setInfoZone(true);
+        } else {
+            setRailZone(true);
+        }
     }
 
     /** 按下当前聚焦的顶栏按钮 */
@@ -2890,21 +2917,13 @@ List<Shelf> defs = new ArrayList<>();
         if (topBarFocus >= 0) {
             switch (intent) {
                 case UP: case DOWN:
-                    // ↓ 离开顶栏、恢复侧栏焦点区（侧栏焦点还停在原来的条目上）；
-                    // ↑ 在顶栏里无事可做
-                    if (intent == InputRouter.Intent.DOWN) {
-                        setTopBarFocus(-1);
-                        setRailZone(true);
-                    }
+                    // ↓ 离开顶栏、原路返回进来的那个区；↑ 在顶栏里无事可做
+                    if (intent == InputRouter.Intent.DOWN) { leaveTopBar(); }
                     break;
                 case LEFT: moveTopBarFocus(-1); break;
                 case RIGHT: moveTopBarFocus(1); break;
                 case CONFIRM: runTopBarAction(); break;
-                case BACK:
-                    // Ⓑ 离开顶栏区，回到侧栏 —— 不触发原生的 finish()
-                    setTopBarFocus(-1);
-                    setRailZone(true);
-                    break;
+                case BACK: leaveTopBar(); break;
                 default:
                     // 顶栏区里不响应翻页/收藏/详情等游戏操作（PAGE_L/R 等），
                     // 这些都依赖"侧栏/内容区当前焦点"，在顶栏区上下文里无意义。
@@ -2915,17 +2934,24 @@ List<Shelf> defs = new ArrayList<>();
         switch (intent) {
             case UP:
                 if (railZone) {
-                    // 侧栏已在第一项再按 ↑ → 进入顶栏按钮区（焦点默认落在菜单按钮上：
-                    // 它是高频入口，退出按钮在它左边可一步到达）。
+                    // 侧栏已在第一项再按 ↑ → 进入顶栏按钮区。
                     // 必须在 moveFocus **之前**检测 —— RailView.moveFocus 是循环的，
                     // 第一项再按 ↑ 会直接绕到最后一项，事后查 focusedIndex 已经晚了。
                     if (railAtTop()) {
                         setRailZone(false);
-                        setTopBarFocus(TOPBAR_MENU);
+                        enterTopBar(RETURN_RAIL);
                     } else { rail.moveFocus(-1); }
                 }
-                // M14：从卡片排按 ↑ 进入"启动/收藏/详情/更多"按钮排（之前上方向键完全没用）
-                else if (!infoZone && infoActions != null && infoActions.getChildCount() > 0) {
+                // M23：★ 操作按钮排（启动/收藏/详情/更多）再按 ↑ → 进入顶栏按钮区。
+                // 用户反馈「希望手柄也能直接选到右上角这两个按钮」——
+                // 原本 ↑ 在按钮排里是死路（走 else 分支去 focusEngine.move(UP)，
+                // 而 focusEngine 不知道顶栏的存在，按了没反应）。
+                else if (infoZone) {
+                    setInfoZone(false);
+                    enterTopBar(RETURN_INFO);
+                }
+                // 从卡片排按 ↑ 进入"启动/收藏/详情/更多"按钮排
+                else if (infoActions != null && infoActions.getChildCount() > 0) {
                     setInfoZone(true);
                 } else { focusEngine.move(FocusEngine.DIR_UP); }
                 break;
@@ -2964,13 +2990,17 @@ List<Shelf> defs = new ArrayList<>();
                 else { finish(); }
                 break;
             case PAGE_L:
-                // M12：单排设计下 focusEngine.page() 已经没有"上一行"了（rowCount==1），
-                // LB/R1 改为**切换分类**（Steam / Playnite 的惯例），并给一句提示
-                rail.moveFocus(-1);
-                announceCategory();
-                break;
             case PAGE_R:
-                rail.moveFocus(1);
+                // M12：单排设计下 focusEngine.page() 已经没有"上一行"了（rowCount==1），
+                // LB/RB 改为**切换分类**（Steam / Playnite 的惯例），并给一句提示。
+                //
+                // M23 修：移动之前**必须先进入侧栏焦点区**。原来直接 rail.moveFocus()
+                // 而 railZone 仍是 false，于是：
+                //   ① 侧栏的焦点描边不画（zoneFocused=false）→ 用户看不出选中了哪个分类；
+                //   ② 这时按 Ⓐ 会落到内容区分支 launch(focusedGame()) → **直接进游戏**，
+                //      而不是打开搜索/应用该分类 —— 正是实机反馈的那个 bug。
+                if (!railZone) { setRailZone(true); }
+                rail.moveFocus(intent == InputRouter.Intent.PAGE_L ? -1 : 1);
                 announceCategory();
                 break;
             case FAVORITE:
@@ -3204,9 +3234,10 @@ List<Shelf> defs = new ArrayList<>();
                     + keys.fourth() + " 菜单　" + keys.back() + " 关闭");
         } else if (railZone) {
             hintView.setText("↑↓ 选分类（含「搜索」）　" + keys.confirm() + "/→ 回游戏　" + keys.fourth() + " 展开　"
-                    + keys.lb() + "/" + keys.rb() + " 切分类　" + keys.menu() + " 主菜单");
+                    + keys.lb() + "/" + keys.rb() + " 切分类　↑到顶 顶栏　" + keys.menu() + " 主菜单");
         } else if (infoZone) {
-            hintView.setText("← → 选择　" + keys.confirm() + " 执行　↓/" + keys.back() + " 回到游戏");
+            // M23：↑ 现在能进顶栏按钮区，提示里补一句
+            hintView.setText("← → 选择　" + keys.confirm() + " 执行　↑ 顶栏　↓/" + keys.back() + " 回到游戏");
         } else {
             // M14-1：文案与实际绑定一一对齐 —— LB/RB 才是切分类；☰ 是主菜单；「更多」没独立按键
             hintView.setText("方向键 移动　↑ 操作按钮　" + keys.confirm() + " 启动　"

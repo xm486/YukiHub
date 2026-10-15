@@ -22,6 +22,21 @@ import android.content.res.Configuration;
  */
 public class BigScreenSizes {
 
+    /**
+     * 侧栏左右给「焦点放大」留的余量（dp）。
+     *
+     * <p>为什么需要：焦点态条目会 {@code scaleX(1.03)}（见 RailView.applyFocusVisual），
+     * 而收起态侧栏紧贴屏幕左缘 —— 左侧那 1.5% 的放大直接伸出屏幕外被裁掉，
+     * 于是选中框左边的圆角被切平，观感就是「框显示不全、左右被裁剪」。
+     * 给侧栏加这点 padding 后，放大部分有地方可去，圆角完整。
+     *
+     * <p>它是**加在侧栏总宽之外**的：条目宽度仍 = {@code railCollapsedW − 2×BLEED}，
+     * 所以框本身的视觉宽度不变，只是两侧各多一丝留白（也让框不贴屏幕边）。
+     * RailView 直接引用这个常量设自己的左右 padding —— 两处必须一致，
+     * 否则条目宽度会算错。
+     */
+    public static final int RAIL_FOCUS_BLEED = 3;
+
     /** 侧栏分类数（用来摊分高度） */
     // 侧栏条目数（M22：加回顶部「搜索」后是 7 个 —— 搜索/全部/收藏/最近/游玩中/已完成/未游玩）
     // 注意：这个数字只用来"摊分高度"，必须与实际条目数一致，否则底部条目会被裁掉。
@@ -114,19 +129,19 @@ public class BigScreenSizes {
         railIconBox = clamp(Math.round(railItemH * 0.92f), 24, 46);
         // ===== 收起态宽度：**让框去贴合图标** =====
         //
-        // 先搞清楚一件事：收起态那个亮起来的框就是「条目」本身，而条目是
-        // MATCH_PARENT（= 侧栏宽）。所以**框有多宽，完全由这一行决定**。
+        // 先搞清楚一件事：收起态那个亮起来的框就是「条目」本身，而条目在
+        // RailView 的 padding 内 MATCH_PARENT。所以**框有多宽由这一行决定**。
         // 想让它裹住图标，就得在这里把侧栏收窄 ——
         // 反过来"把图标放大去填满框"是南辕北辙（试过，实机评价"难看的要死"）。
         //
-        // 取值 = 条目高度 × 0.94（比行高略窄，读起来是个方正的按钮）。
-        // 配合 BigScreenRailView.ICON_RATIO = 0.44，框/图标比稳定在 2.3 倍左右，
-        // 即图标左右各留 ~35% 内边距 —— 常见的图标按钮比例。
+        // 取值 = 条目高度 × 0.94（比行高略窄，读起来是个方正的按钮）
+        //      + RAIL_FOCUS_BLEED（给焦点放大留的左右余量，见下方常量）。
+        // 配合 BigScreenRailView.ICON_RATIO = 0.44，框/图标比稳定在 2.3 倍左右。
         //
         // 旧公式是 railIconBox + 10 且**下限写死 40**：小屏横屏上 railItemH 触底
         // 28dp（railIconBox 26，算出来本该 36）会被抬到 40，于是
-        // 「框 40 宽 × 28 高、图标只有 11dp」—— 又宽又扁，正是截图里那副样子。
-        railCollapsedW = clamp(Math.round(railItemH * 0.94f), 26, 48);
+        // 「框 40 宽 × 28 高、图标只有 11dp」—— 又宽又扁。
+        railCollapsedW = clamp(Math.round(railItemH * 0.94f) + RAIL_FOCUS_BLEED * 2, 34, 60);
         railExpandedW = clamp(Math.round(wDp * 0.24f), 168, 260);
 
         actionBtnH = clamp(Math.round(hDp * 0.085f), 28, 40);
