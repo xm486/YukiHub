@@ -110,13 +110,23 @@ public class BigScreenSizes {
         rowH = cardH + headerH + gap * 2;
 
         railItemH = clamp((content - 12) / RAIL_ENTRY_COUNT, 28, 52);
-        // 图标容器（收起态图标在其中居中，展开态靠左让位给文字）。
-        // 条目高度决定它 —— 与条目等高才不会在展开态显得图标偏上/偏下。
+        // 图标容器（展开态图标靠左，右侧留给文字）。
         railIconBox = clamp(Math.round(railItemH * 0.92f), 24, 46);
-        // 收起宽度：**由 iconBox 推导**而不是由条目高度（旧公式 railItemH + 14）。
-        // 旧公式与图标尺寸没有关系，导致收起态「框很宽、图标很小」—— 实测框宽
-        // 是图标的 4.5 倍。现在 = 图标容器 + 左右各 5dp 余量，框正好裹住图标。
-        railCollapsedW = clamp(railIconBox + 10, 40, 78);
+        // ===== 收起态宽度：**让框去贴合图标** =====
+        //
+        // 先搞清楚一件事：收起态那个亮起来的框就是「条目」本身，而条目是
+        // MATCH_PARENT（= 侧栏宽）。所以**框有多宽，完全由这一行决定**。
+        // 想让它裹住图标，就得在这里把侧栏收窄 ——
+        // 反过来"把图标放大去填满框"是南辕北辙（试过，实机评价"难看的要死"）。
+        //
+        // 取值 = 条目高度 × 0.94（比行高略窄，读起来是个方正的按钮）。
+        // 配合 BigScreenRailView.ICON_RATIO = 0.44，框/图标比稳定在 2.3 倍左右，
+        // 即图标左右各留 ~35% 内边距 —— 常见的图标按钮比例。
+        //
+        // 旧公式是 railIconBox + 10 且**下限写死 40**：小屏横屏上 railItemH 触底
+        // 28dp（railIconBox 26，算出来本该 36）会被抬到 40，于是
+        // 「框 40 宽 × 28 高、图标只有 11dp」—— 又宽又扁，正是截图里那副样子。
+        railCollapsedW = clamp(Math.round(railItemH * 0.94f), 26, 48);
         railExpandedW = clamp(Math.round(wDp * 0.24f), 168, 260);
 
         actionBtnH = clamp(Math.round(hDp * 0.085f), 28, 40);
