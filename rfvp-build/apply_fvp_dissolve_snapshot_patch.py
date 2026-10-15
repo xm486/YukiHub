@@ -68,7 +68,11 @@ MASK_DISSOLVE_RS = '''//! Shared 8-bit mask dissolve. Source alpha is retained; 
 //! through the mask, revealing the scene under it; the renderer hands that frame over with
 //! `set_snapshot`. Only `MaskFadeOut` still fades the mask to black.
 
-/// YukiHub patch marker - CI greps the built .so for this string to prove the patch landed.
+/// YukiHub patch markers - CI greps the built .so for these strings to prove the patches landed.
+/// NOTE: this file **replaces** the one written by `apply_fvp_mask_dissolve_patch.py`,
+/// so it must keep BOTH markers (mask dissolve + dissolve snapshot).
+#[no_mangle]
+pub static YHFVP_MASK_DISSOLVE_MARKER: [u8; 22] = *b"YHFVP-MASKDISSOLVE-1.0";
 #[no_mangle]
 pub static YHFVP_DISSOLVE_SNAPSHOT_MARKER: [u8; 26] = *b"YHFVP-DISSOLVESNAPSHOT-1.0";
 
@@ -333,13 +337,23 @@ def main() -> int:
         return 1
 
     # 1. mask_dissolve.rs 整体替换
+    #
+    # 注意：本文件是「整体覆盖」。若只判断 `wants_snapshot` 就跳过，会把
+    # apply_fvp_mask_dissolve_patch.py 写的 YHFVP-MASKDISSOLVE 标记留在旧版里
+    # 而修不回来（早先的构建即在 CI 校验处失败）。因此除了内容版本，
+    # 还要确认两个标记都在 —— 缺任一个就重写一次（写入本身是幂等的）。
     mask_path = Path(MASK_RS)
     mask_text = mask_path.read_text(encoding="utf-8")
-    if "wants_snapshot" in mask_text:
+    marks_ok = (
+        "YHFVP-MASKDISSOLVE-1.0" in mask_text
+        and "YHFVP-DISSOLVESNAPSHOT-1.0" in mask_text
+    )
+    if "wants_snapshot" in mask_text and marks_ok:
         print(f"[OK]   {MASK_RS}: 已应用（幂等）")
     else:
+        reason = "内容或 CI 标记缺失" if "wants_snapshot" not in mask_text else "CI 标记缺失"
         mask_path.write_text(MASK_DISSOLVE_RS, encoding="utf-8")
-        print(f"[OK]   {MASK_RS}: 已替换为快照版（{len(MASK_DISSOLVE_RS.splitlines())} 行）")
+        print(f"[OK]   {MASK_RS}: 已替换为快照版（{len(MASK_DISSOLVE_RS.splitlines())} 行 / {reason}）")
 
     # 2. motion_manager
     mo_path = Path(MOTION)
