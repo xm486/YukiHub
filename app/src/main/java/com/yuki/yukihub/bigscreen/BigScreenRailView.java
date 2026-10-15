@@ -178,8 +178,13 @@ public class BigScreenRailView extends LinearLayout {
         super(context, attrs);
         setOrientation(VERTICAL);
         setClipChildren(false);
+        // ★ 必须关掉：clipToPadding 默认是 true —— 它会把子视图的绘制**限制在 padding 以内**，
+        // 于是"给缩放留的余量"根本用不上，放大出来的部分照样被裁。
+        // 关掉之后子视图才能画进 padding 区域，焦点框放大时圆角才是完整的。
+        // （这正是上一版「加了 padding 但框还是被裁」的原因。）
+        setClipToPadding(false);
         // 左右留出「焦点放大」的余量：焦点态条目 scaleX(1.03)，而收起态侧栏紧贴
-        // 屏幕左缘 —— 不留这点边距的话，左侧放大部分会直接伸出屏幕被裁掉，
+        // 屏幕左缘 —— 不留这点边距的话，左侧放大部分会伸出屏幕被裁掉，
         // 表现为「选中框显示不全、左边圆角被切平」。
         // 这个值必须和 BigScreenSizes.RAIL_FOCUS_BLEED 一致（那边算总宽时已计入）。
         final int bleed = dp(BigScreenSizes.RAIL_FOCUS_BLEED);
@@ -262,22 +267,23 @@ public class BigScreenRailView extends LinearLayout {
         rebuild();
     }
 
-    // ===== 条目背景的**唯一**判定入口 =====
-    //
-    // 三种状态，互斥、优先级从高到低：
-    //   focus   —— 手柄焦点所在项 → bs_rail_item_active（**唯一画粉描边的**）
-    //   current —— 当前生效的分类   → bs_rail_item_current（只有淡底色，不画描边）
-    //   其余                        → bs_rail_item（全透明）
-    //
-    // 为什么必须分开：原先 focus 和 current 共用带描边的 active 资源，只要焦点
-    // 离开当前分类，屏幕上就出现两个一模一样的粉框。最典型的是「搜索」项 ——
-    // 它不是筛选、永远不会 current，焦点一移上去必然两个框。
-    //
-    // 三处调用点（rebuild / refreshStates / applyFocusVisual）都必须走这里，
-    // 否则又会各写一套判据而不同步。
+    /**
+     * 条目背景判定（**唯一入口**）。
+     *
+     * <p>核心规则：**任何时候侧栏里最多只出现一个框。**
+     *
+     * <ul>
+     *   <li>焦点在侧栏内时：只画焦点框（粉描边），当前分类**不画底色** ——
+     *       上一版让两者同时画，用户看到的就是"同时存在两个选中框"。</li>
+     *   <li>焦点不在侧栏内时：用淡底色标出"当前分类"（没有粉描边，不与焦点混淆）。</li>
+     * </ul>
+     *
+     * <p>三处调用点（rebuild / refreshStates / applyFocusVisual）都必须走这里，
+     * 否则又会各写一套判据而不同步。
+     */
     private int itemBackground(boolean focused, boolean current) {
         if (focused) { return R.drawable.bs_rail_item_active; }
-        if (current) { return R.drawable.bs_rail_item_current; }
+        if (current && !zoneFocused) { return R.drawable.bs_rail_item_current; }
         return R.drawable.bs_rail_item;
     }
 
@@ -363,10 +369,9 @@ public class BigScreenRailView extends LinearLayout {
             LayoutParams lp = new LayoutParams(LayoutParams.MATCH_PARENT, dp(itemHeightDp));
             lp.bottomMargin = dp(2);
             item.setLayoutParams(lp);
-            // 初始背景：此刻 zoneFocused 还没定，统一按"当前分类"画淡底色，
-            // 焦点描边随后由 applyFocusVisual() 叠加（rebuild 尾部会调用它）。
-            item.setBackgroundResource(entry.active
-                    ? R.drawable.bs_rail_item_current : R.drawable.bs_rail_item);
+            // 初始背景先给"常态"，焦点/当前分类的框由 rebuild 尾部的
+            // applyFocusVisual() + refreshStates() 统一画（都走 itemBackground）。
+            item.setBackgroundResource(R.drawable.bs_rail_item);
             item.setClickable(true);
             // 触摸：点一下就应用该筛选（手柄则靠方向键 + Ⓐ）
             item.setOnClickListener(v -> {
