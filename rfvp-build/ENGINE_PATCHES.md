@@ -61,7 +61,7 @@ video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
 | `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
-| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `script/parser.rs` / `save_manager.rs` | **SJIS 替身字还原**（解码后 Unicode→Unicode）。表来源双认：`Sakura.dll`（樱花萌放官中版）/ `uif_config.json`（UIF 系汉化，如 HappyMarguerite_CHS），标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
+| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `text_manager.rs` / `save_manager.rs` | **SJIS 替身字还原**（Unicode→Unicode）。表来源双认：`Sakura.dll`（樱花萌放官中版）/ `uif_config.json`（UIF 系汉化，如 HappyMarguerite_CHS）。**挂在文字路径 `set_text_content`（不是解析路径，避免改坏资源名）**，标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
 | `apply_audio_silent_fix_patch.py` | `audio_player/se_player.rs` / `bgm_player.rs` | `SoundSilentOn`/`AudioSilentOn` **不再真的静音**（对齐上游 10.15，见 3.11） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
@@ -721,14 +721,18 @@ Unicode→Unicode 还原。
 
 | # | 位置 | 方向 | 函数 |
 |---|---|---|---|
-| 1 | `script/parser.rs::decode_string_bytes()` | 脚本 → 屏幕 | `restore()` |
+| 1 | `text_manager.rs::set_text_content()` | 文字 → 屏幕 | `restore()` |
 | 2 | `save_manager.rs::decode_bytes()` | 存档 → 屏幕 | `restore()` |
 | 3 | `save_manager.rs::enc()` | 屏幕 → 存档 | `to_surrogate()` |
 
-- 1 是**所有脚本文本**的唯一解码出口（`read_cstring` 两条路径都汇到这里）；
-- 2/3 是**存档**的唯一读/写出口 —— `load_from_file` 与 `load_from_mem` 里
-  6 个调用点全走 `decode_bytes()`；全 workspace 只有 `enc()` 一处把文本编码回 Shift-JIS
-  （其余都在 `assembler` / `lua2hcb_compiler` 这类 PC 端工具 crate 里）。
+- **1 必须挂在「文字」上，不能挂在「解析」上** —— 见 3.10.1 末尾那条
+  「资源名不会被误伤」的实测：挂在 `decode_string_bytes()` 会把
+  HappyMarguerite 的立绘文件名（日文汉字）也改掉，导致贴图整片消失。
+  `set_text_content` 全 workspace 只有 2 个调用点，都在 `text_print` 里。
+- 2/3 是**存档**的 3 个显示字段（`title` / `scene_title` / `script_content`）
+  的唯一读/写出口 —— `load_from_file` 与 `load_from_mem` 里 6 个调用点全走
+  `decode_bytes()`；全 workspace 只有 `enc()` 一处把文本编码回 Shift-JIS。
+  这两个函数**只处理显示文字，不处理资源名**，所以挂在这里是安全的。
 
 **脚本文件与存档文件都一个字节都不改**：盘上存的仍是替身字，格式与 PC 版完全一致，
 存档还能拿到 PC 版上用。
@@ -782,9 +786,31 @@ Unicode→Unicode 还原。
 > 它依赖具体编码语义（strict `shift_jis` 下 HappyMarguerite 的 value 是 0/1004
 > 无码位，但 `cp932` 下有 12 个有码位），写死会变成脆弱判据。命中率自证足够。
 
-**资源名风险 = 0**（实测）：表 key 全是**汉字**，资源名是纯 ASCII。
-官方脚本里 7,267 条纯 ASCII 字符串、3,764 条含路径分隔符的（`voice/01000060`、`se/001`…），
-被还原改动的**都是 0 条** —— 数据上也验证过，物理上碰不到。
+**资源名不会被误伤（实测）—— ⚠️ 这条结论只在「注入点选对」时才成立**
+
+表里所有 key 都是**汉字**，而**樱花官中版**的资源名是纯 ASCII（实测 `Sakura.hcb` 里
+6,082 个标识符，含非 ASCII 的 **0 个**），所以在樱花身上「还原改不到资源名」
+**成立**。当时据此写下「资源名风险 = 0」。
+
+**但这个结论是条件性的，不是普适的。** HappyMarguerite 的资源名是**日文汉字**：
+
+```
+CHR_練_基_道着竹刀L   CHR_撫子   CHR_爺   CHR_悠綺   CHR_響   CHR_稲穂_貨２_セーラー服L
+```
+
+共 **7 个**含表 key。第一版把 `restore()` 挂在 `script/parser.rs` 的
+`decode_string_bytes()`（所有脚本字符串的出口）上，于是这些资源名被改成
+`CHR_觑_…` / `CHR_垫子` / `CHR_练` / `CHR_悠凿` / `CHR_晚`，
+`graph_load` 全部 `file not found` → **立绘与贴图整片消失**（文字却正常）。
+
+修法：把还原挪到**「文字 → 屏幕」这一步**（`text_manager.rs::set_text_content`），
+而不是「字符串解码」这一步。这样资源名/文件名**物理上不经过它** —— 这也正是
+PC 端 UIF 的做法（在 `DrawTextA` 这个**绘制** API 上替换，碰不到文件名）。
+
+| 阶段 | 流过资源名？ | 能挂还原吗 |
+|---|---|---|
+| `script/parser.rs::decode_string_bytes()` | ✅ 会 | ❌ **不要挂这里** |
+| `text_manager.rs::set_text_content()` | ❌ 不会 | ✅ 挂这里 |
 
 **端到端还原效果**（樱花官中 64,779 条跑一遍，49,649 条被还原 = 76.6%）：
 
@@ -821,7 +847,33 @@ FIX  我已经见过这个场景无数次了。      ✅
 > 都返回 `None`（表现为"表读不出来"，光看代码完全看不出）。
 > 结论：**判据类代码必须拿真实文件跑一遍**，不能只做语法/编译检查。
 
-### 3.10.2 迭代中修掉的三个坑（真机实测逐个暴露）
+### 3.10.2 迭代中修掉的四个坑（真机实测逐个暴露）
+
+**坑 4（最隐蔽）：注入点选在「数据」而不是「用途」上 —— 贴图整片消失**
+
+第一版把 `restore()` 挂在 `script/parser.rs::decode_string_bytes()`（**所有**脚本
+字符串的出口，包括资源名）。HappyMarguerite 的立绘文件名是**日文汉字**：
+
+```
+CHR_練_基_道着竹刀L  CHR_撫子  CHR_爺  CHR_悠綺  CHR_響  CHR_稲穂_貨２_セーラー服L
+```
+
+共 **7 个**含表 key，被改成 `CHR_觑_…` / `CHR_垫子` / `CHR_练` / `CHR_悠凿` / `CHR_晚`
+→ `graph_load` 全部 `file not found`（logcat：`syscall error: file not found in pack:
+CHR_練_基_道着竹刀L`）→ **立绘与贴图整片消失，但文字正常**（文字本来就该被改）。
+
+> 用户症状是「汉化有了，但贴图丢了」—— 这两件事是**同一个错误的两面**。
+
+樱花官中版完全没暴露：它的资源名是**纯 ASCII**（`Sakura.hcb` 里 6,082 个标识符，
+含非 ASCII 的 **0 个**）。所以 §3.10.1 里那句「表 key 全是汉字，物理上碰不到资源名」
+**只在纯 ASCII 资源名时成立** —— 这是个**条件性结论**，不能当普适保证用。
+
+修法：把注入点从「字符串解码」挪到「**文字 → 屏幕**」——
+`text_manager.rs::set_text_content()`（只有 2 个调用点，都在 `text_print` 里）。
+对齐 PC 端 UIF：它在 `DrawTextA` 这个**绘制** API 上替换，物理上碰不到文件名。
+
+> 口诀：**替身字还原要挂在「文字」上，不要挂在「数据」上。**
+
 
 **坑 1：表提取漏掉了「禳 → —」（9,211 处显示成两个粘一起的字）**
 
@@ -923,13 +975,17 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 > `LOGS OVER PROC QUOTA ... DROPPED`（97 次）的主因。等点击功能稳定、按 §5 撤掉探针后
 > 日志会清爽很多。
 
-**案例 2 ·《HappyMarguerite》漢化版（2026-10-15，本地全绿，待真机）**
+**案例 2 ·《HappyMarguerite》漢化版（2026-10-15）**
 
-本地**真 Rust 模块**跑真实文件的结果（`extract_table` / `script_charset` /
-`find_script` / `restore` / `to_surrogate` 全套真实代码）：
+**第一次真机**（注入点在解析路径）→ 文字正常 ✅，但 **立绘与贴图整片消失** ❌
+（见坑 4）。
+
+**修正后**（注入点挪到文字路径 `set_text_content`）：
 
 | 检查 | 结果 |
 |---|---|
+| 真机日志 | `YukiHub jis-tunnel active: uif_config.json (1004 entries, 1002 hits)` ✅ |
+| 资源名 | **7 个**原本会被误改的（`CHR_撫子` / `CHR_爺` / `CHR_練_…` / `CHR_悠綺` / `CHR_響` …）→ 现在**全部原样** ✅ |
 | 表提取 | `uif_config.json` → 1,004 对（双射，交集 0） |
 | 判据（正向） | `Marguerite.bch`：1,002 / 1,004 = 99.8%（需 903）→ **ACCEPT** ✅ |
 | 判据（反向 ×3） | `Marguerite.hcb` 711、`Hoshimemo_HD.hcb` 731、`Sakura.hcb` 520 → 全部 **reject** ✅ |
@@ -939,11 +995,10 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 | 编译 | 最小 crate `cargo build` **0 error 0 warning** ✅ |
 | 双顺序 A/B + 幂等 | 全通过，A/B 产物 `diff` 一致 ✅ |
 
-**回归总表（22 项全绿）**：语法 6 项、真编译 2 项、功能 5 项、双顺序+幂等 2 项、
-注入点落位 7 项。
+**回归总表（24 项全绿）**：语法 6 项、真编译 2 项、功能 5 项、双顺序+幂等 2 项、
+注入点落位 9 项（含「`parser.rs` 未被改动」这条反向检查）。
 
-> ⏳ **待真机**：需要在游戏中确认对话不再是 `我已識戰経記…` 而是
-> `我已经见过这个场景无数次了。`；存档标题同理。
+> ⏳ **待真机复验**：确认立绘/贴图回来 + 文字仍是 `我已经见过这个场景无数次了。`
 >
 > **要加第三个来源**：在 `load_table` 的文件名数组里加一行
 > （`extract_table` 已经按 `TableKind` 分发）。判据本身**不绑定作品/文件名**，
@@ -1149,13 +1204,13 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
       存档标题 `寅却稾稾地…`→`她却轻轻地…`；旧存档（带 `&#NNNNN;`）读出来也正常；
       日志 0 panic、E 级全是既有上游噪音。
-- [ ] **HappyMarguerite 漢化版文本：本地全绿，待真机**（见 3.10.3）。
-      jis-tunnel 已加第二个表来源（`uif_config.json`，UIF 系补丁），
-      本地真 Rust 跑真实文件 22 项全绿（判据正向 99.8% 启用、反向 3 组拒绝、
-      樱花回归 1206/1206、真实脚本字节还原正确）。
-      **待确认**：游戏内对话不再是 `我已識戰経記个麼景无数次了。`
-      而是 `我已经见过这个场景无数次了。`；存档标题同理。
-      另需注意：该作的**旧存档**里若已写入 `&#NNNNN;` 字面量，重新存一次即可。
+- [ ] **HappyMarguerite 漢化版：注入点已修正，待真机复验**（见 3.10.3 / 坑 4）。
+      第一次真机暴露「文字正常但**贴图整片消失**」—— 根因是 `restore()` 挂在
+      解析出口 `decode_string_bytes()`，把 7 个日文汉字资源名（`CHR_撫子` /
+      `CHR_爺` / `CHR_練_…` / `CHR_悠綺` / `CHR_響` …）也改了。
+      **已修**：注入点挪到文字路径 `text_manager.rs::set_text_content()`。
+      **待确认**：立绘/贴图回来，且文字仍是 `我已经见过这个场景无数次了。`；
+      樱花官中版回归不受影响。
 - [ ] 可选：`uif_config.json` 的解析器目前**遇到反斜杠转义就整表放弃**。
       实测两个真实文件反斜杠数为 0，所以够用；若将来遇到带转义的版本，
       再补一个小型 JSON 字符串反转义即可（改动局限在 `parse_json_string`）。
