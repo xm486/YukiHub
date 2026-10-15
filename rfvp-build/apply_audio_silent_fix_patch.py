@@ -32,16 +32,24 @@
 **语音会被永久静音**（槽一旦 muted 就一直为真，直到读档重置）。
 症状就是「对话语音不对劲 / 像是没声音或只剩背景音」。
 
-附注（本轮实测）
+附注（本轮实测 · 2026-10-15）
 ----
-用户反馈当前版本「语音没被静音」，与本补丁的代码分析不符。因此本补丁
-**同时注入一条临时探针**（YHPROBE SilentOn），用来确认脚本是否真的在调它、
-以及调用频率。探针见下方 `PROBE`，确认结论后可按 TODO 移除。
+曾注入一条临时探针（`YHPROBE SilentOn`）确认脚本的调用事实，日志结果：
+
+    YHPROBE SilentOn slot=3     <- 11 次 / 3.5 分钟，**全部来自 bgm_player**
+    （se_player 一次都没有）
+
+即：脚本只对 **BGM 槽 3** 调它，**从不碰语音槽** —— 这解释了
+「对话语音一直正常」的现象，也说明本补丁改的是 BGM 那边。
+探针**已移除**（CI 现在会在产物里发现 YHPROBE 时报错）。
+
+> 以后若需重新诊断：把 `PROBE_ON` 置为 `True` 即可（见下方常量），
+> 或参考 git 历史里的旧版本。
 
 改动
 ----
 `se_player.rs` / `bgm_player.rs` 各三处：
-  1. `silent_on` -> 空操作（对齐原引擎；顺带打探针）
+  1. `silent_on` -> 空操作（对齐原引擎 10.15）
   2. 4 处音量计算的 `if muted { 0.0 } else { ... }` -> 直接用有效音量
   3. `apply_snapshot_v1` 恢复存档时忽略 `muted`（否则旧存档会把静音带回来）
 """
@@ -66,9 +74,10 @@ VOL_TMPL = (
 )
 VOL_NEW = r"\g<i>let actual_volume = self.effective_volume_for_slot(slot);"
 
-# 探针：留着能证明脚本到底调没调；确认后连同本注释一起删掉。
-# 缩进 8 空格 —— 它插在函数体第一行。
-PROBE = '        log::info!("YHPROBE SilentOn slot={}", slot);\n'
+# 诊断开关：置 True 会在 silent_on 里加一行 YHPROBE（缩进 8 空格，插在函数体首行）。
+# ⚠️ 开着它 CI 的「无探针」校验会失败 —— 只在本机诊断时临时打开。
+PROBE_ON = False
+PROBE = '        log::info!("YHPROBE SilentOn slot={}", slot);\n' if PROBE_ON else ""
 
 
 def silent_on_block(prefix: str, field: str) -> "tuple[str, str]":
@@ -89,7 +98,7 @@ def silent_on_block(prefix: str, field: str) -> "tuple[str, str]":
         f"    /// is still heard. YukiHub: keep the call, drop the mute.\n"
         f"    pub fn silent_on(&mut self, slot: i32, tween: Tween) {{\n"
         f"{PROBE}"
-        f"        let _ = tween;\n"
+        f"        let _ = (slot, tween);\n"
         f"    }}\n"
     )
     return old, new
@@ -107,7 +116,14 @@ def restore_anchor(field: str, snap_field: str) -> "tuple[str, str]":
 def patch(path: Path, prefix: str, field: str, slots_field: str) -> int:
     text = path.read_text(encoding="utf-8")
 
-    if "YHPROBE SilentOn" in text:
+    # 幂等判断：真实标志是「silent_on 已变成空操作」。
+    # ⚠️ 不能用 YHPROBE 判断 —— 探针已默认关闭（PROBE_ON=False），
+    #    用它会永远判为「未应用」，导致每次构建都重跑（并在锚点已消失时误报 FAIL）。
+    already = (
+        "does **not** mute in the original engine" in text
+        and f"self.{field}[slot] = s.muted;\n" not in text
+    )
+    if already:
         print(f"[OK]   {path.name}: 已应用（幂等）")
         return 0
 
@@ -136,7 +152,8 @@ def patch(path: Path, prefix: str, field: str, slots_field: str) -> int:
     text = text.replace(old, new, 1)
 
     path.write_text(text, encoding="utf-8")
-    print(f"[OK]   {path.name}: silent_on 改空操作 + 4 处音量 + 存档恢复已应用")
+    probe_note = "（含诊断探针）" if PROBE_ON else ""
+    print(f"[OK]   {path.name}: silent_on 改空操作 + 4 处音量 + 存档恢复已应用{probe_note}")
     return 0
 
 
