@@ -307,6 +307,27 @@ edition2024 依赖都需要更新的 cargo，所以只能这样单模块验证�
 
 > **口诀：替身字还原要挂在「文字」上，不要挂在「数据」上。**
 
+**第四个 bug（CI 又红一次）：注入的代码也必须真编译。**
+
+`restore()` 返回 `Cow<'_, str>`。在 history.rs 里写成：
+
+    let value = crate::jis_tunnel::restore(value);
+    game_data.history_manager.set_name(value.to_owned());   // ❌
+
+`Cow: Clone` 让**泛型 blanket impl** `impl<T: Clone> ToOwned for T` 胜出，
+所以 `Cow::to_owned()` 返回的还是 `Cow`，而 `set_name` 要 `String`
+→ CI 报 `E0308: expected String, found Cow<'_, str>`（2 处）。
+正确写法是 `value.into_owned()`。
+
+**为什么本地没抓到**：最小 crate 只验 `jis_tunnel.rs` **本体**，
+**注入到宿主文件的那些行从来没被编译过**。补上的手段：
+
+    抽 OLD/NEW 锚点 → 取 NEW 里新增的行 → 塞进一个带【上游真实签名】的
+    stub（set_name(String) / parse_content_text(&str) …）→ cargo build
+
+反向验证过：把 `into_owned` 换回 `to_owned`，本地就精确复现 CI 那两条 E0308。
+已并入回归（第 2b 项）。
+
 第三个 bug 的教训还有一个方法论点：前两个 bug 是「代码写错」，这个 bug 是
 **「位置选错」** —— 光靠单测/编译/静态检查**永远发现不了**，只有真机能暴露
 （或者像本次这样，先看清调用链上「谁消费这个数据」再决定挂在哪）。
@@ -867,8 +888,11 @@ HIST_NAME_NEW = """        Ok(HistoryFunction::Name) => match value.as_string() 
             Some(value) => {
                 // YukiHub patch: backlog text is a *second* copy of the line, so
                 // it needs the same restoration the on-screen text gets.
+                // NOTE: `into_owned()`, not `to_owned()` — `restore` returns a
+                // `Cow`, and `Cow: Clone` makes the blanket `ToOwned` impl win,
+                // so `to_owned()` would yield a `Cow`, not a `String`.
                 let value = crate::jis_tunnel::restore(value);
-                game_data.history_manager.set_name(value.to_owned());
+                game_data.history_manager.set_name(value.into_owned());
             }"""
 
 HIST_CONTENT_OLD = """        Ok(HistoryFunction::Content) => match value.as_string() {
@@ -880,7 +904,7 @@ HIST_CONTENT_NEW = """        Ok(HistoryFunction::Content) => match value.as_str
             Some(value) => {
                 // YukiHub patch: see the Name branch above — backlog content.
                 let value = crate::jis_tunnel::restore(value);
-                game_data.history_manager.set_content(value.to_owned());
+                game_data.history_manager.set_content(value.into_owned());
             }"""
 
 
