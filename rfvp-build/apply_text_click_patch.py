@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YukiHub 补丁：「点击补全点字动画」—— 诊断插桩版（不改行为）。
+"""YukiHub 补丁：「点击补全点字动画」（正式版 · 已移除诊断探针）。
 
 背景
 ----
@@ -13,7 +13,7 @@
         thread_text_wait(tid)  ->  VM 把该线程置 CONTEXT_STATUS_TEXT(8)
         collect_completed_sync_print_waiters() -> thread_text_resume(tid)
         全库只有 Ctrl / ControlPulse 会 force_reveal_all_non_suspended()
-        => 鼠标点击完全没有接进"补全文字"
+        => 鼠标点击完全没有接进"补全文字"（本补丁补上）
   - should_use_sync_print_wait(): skip_mode!=0 -> 不阻塞；
         ctrl/pulse -> 不阻塞；否则 effective_reveal_speed_units(g0) > 0 才阻塞
 
@@ -25,25 +25,28 @@
      ClickCompletesText slots=[31]，且 TextWaitArm 大多是 thread=15
      （非主线程的 UI 文字槽）—— 把 UI 线程的 reveal 也当成对话点字，
      结果点击被吞：设置页点不动、对话也过不去。
+  v3（诊断插桩版）：只加探针不改行为，一次实机日志定死了槽位/线程/阻塞判据。
+  v4（本版）：按实测判据实现，并**移除全部 YHPROBE 诊断探针**。
 
-本版策略：**先把行为退回安全状态**（不吞任何触摸），只加诊断探针，
-用一次实机日志把下面这些定死，再做精确修复：
-  1. 对话 message 用哪个槽（TextWaitArm/Done 带 slot id）
-  2. 它为什么（不）阻塞：TextPrint 决策 spd/skip/g0/ctrl/pulse/block
-  3. 点击那一帧各槽完整状态：vis/tot/wp/nxt/pwm/psw/spd/swa/skip/rect
-  4. 设置页预览文字用哪个槽、哪个线程
+本版策略（实测确定的判据）
+--------------------------
+  按下这一刻：
+    incomplete = 任何槽 visible<total（含设置页）      -> 需要补全
+    nb         = 正在逐字出现 且 skip_mode!=0          -> 脚本会看到这次点击，必须吞
+                 （对话消息槽 slot 0：sk=3；设置页描述槽 slot 31：sk=0，永不吞）
+  => 先判断要不要吞，再补全（顺序关键：补全会让判据失效）。
 
-探针清单
---------
-  YHPROBE TextPrint id=.. loaded=.. spd=.. skip=.. g0=.. ctrl=.. pulse=.. block=..
-  YHPROBE TextSkip id=.. skip=..
-  YHPROBE TextSpeed id=.. speed=..
-  YHPROBE TextWaitArm slot=.. thread=..
-  YHPROBE TextWaitDone slot=.. thread=..
-  YHPROBE TextForceReveal
-  YHPROBE ControlPulse
-  YHPROBE click armed=[..] incomplete=[..]
-  YHPROBE slotdump click id=.. su=.. vis=../.. wp=.. nxt=.. pwm=.. psw=.. spd=.. swa=.. skip=.. rect=..
+保留的功能函数（text_manager.rs）
+--------------------------------
+  force_reveal_slots()              把指定槽补全（核心动作）
+  incomplete_slot_ids()             列出"按引擎判据未完成"的槽
+  nonblocking_revealing_slot_ids()  列出"在逐字出现且不阻塞脚本"的槽
+
+另有一处**真实崩溃修复**（vm_runner.rs）：
+  ThreadRequest::TextResume 只对真的处于 CONTEXT_STATUS_TEXT 的线程生效。
+  实测 slot 的 sync_wait_active 会残留，而该线程上下文可能已被
+  thread_exit / thread_start(0) 重建（pc=0）。强行置 RUNNING 会让它从地址 0
+  取指 -> "unknown opcode: 0x2b @ 0x000000" -> SIGABRT。
 """
 import sys
 from pathlib import Path
@@ -68,59 +71,38 @@ TM_EDITS = [
         """        out
     }
 
-    /// YukiHub 诊断：列出「脚本真的被阻塞、且逐字显示未完成」的文字槽。
-    pub fn sync_print_wait_revealing_ids(&self) -> Vec<usize> {
+    /// YukiHub: 只把指定槽位的逐字显示补全（“点击补全文字”的核心动作）。
+    pub fn force_reveal_slots(&mut self, ids: &[usize]) {
+        for &i in ids {
+            if i >= self.items.len() {
+                continue;
+            }
+            let t = &mut self.items[i];
+            let target = t.total_chars;
+            t.visible_chars = target;
+            t.pending_wait_ms = 0;
+            t.pending_special_wait = false;
+            t.reveal_carry = 0;
+            t.next_wait_index = t.wait_points.len();
+            if !t.layout_dirty {
+                t.apply_reveal_delta_to_current_target();
+            }
+            t.dirty = true;
+        }
+    }
+
+    /// YukiHub: 所有「已加载、未暂停、但按引擎判据未完成」的槽位。
+    ///
+    /// 判据沿用引擎自己的 reveal_is_complete()，而不是简单地 vis<tot ——
+    /// 后者会把 set_speed(0) 归零 wait_points 的静态槽也算进来（v1 的坑）。
+    pub fn incomplete_slot_ids(&self) -> Vec<usize> {
         let mut out = Vec::new();
         for (i, t) in self.items.iter().enumerate() {
-            if t.sync_wait_active
-                && !t.is_suspended
-                && t.total_chars > 0
-                && t.visible_chars < t.total_chars
-            {
+            if t.loaded && !t.is_suspended && !t.reveal_is_complete() {
                 out.push(i);
             }
         }
         out
-    }
-
-    /// YukiHub 诊断：无条件 dump 单个槽位（不过滤 loaded / reveal_complete）。
-    pub fn log_slot_state(&self, idx: usize, tag: &str) {
-        if idx >= self.items.len() {
-            return;
-        }
-        let t = &self.items[idx];
-        log::info!(
-            "YHPROBE SLOT {} i={} ld={} su={} sk={} sp={} v={}/{} swa={} th={} pwm={} nxt={} wp={}",
-            tag,
-            idx,
-            t.loaded as u8,
-            t.is_suspended as u8,
-            t.skip_mode,
-            t.speed,
-            t.visible_chars,
-            t.total_chars,
-            t.sync_wait_active as u8,
-            t.sync_wait_thread.map(|v| v as i64).unwrap_or(-1),
-            t.pending_wait_ms,
-            t.next_wait_index,
-            t.wait_points.len()
-        );
-    }
-
-    /// YukiHub 诊断：返回“正在逐字出现”的槽位掩码（bit i = slot i）。
-    pub fn revealing_mask(&self) -> u32 {
-        let mut cur: u32 = 0;
-        for (i, t) in self.items.iter().enumerate() {
-            if i < 32
-                && t.loaded
-                && !t.is_suspended
-                && t.total_chars > 0
-                && t.visible_chars < t.total_chars
-            {
-                cur |= 1u32 << i;
-            }
-        }
-        cur
     }
 
     /// YukiHub: “视觉上还在逐字出现、且不会阻塞脚本”的槽位（skip_mode != 0）。
@@ -143,166 +125,13 @@ TM_EDITS = [
         out
     }
 
-    /// YukiHub: 列出“视觉上还在逐字出现”的槽位（visible_chars < total_chars）。
-    /// 不要求脚本处于阻塞态 —— 实测对话的 reveal 可能很快（armed 已空），
-    /// 但玩家点击时画面上确实还在逐字出现，这时就应该补全。
-    pub fn revealing_slot_ids(&self) -> Vec<usize> {
-        let mut out = Vec::new();
-        for (i, t) in self.items.iter().enumerate() {
-            if t.loaded
-                && !t.is_suspended
-                && t.total_chars > 0
-                && t.visible_chars < t.total_chars
-            {
-                out.push(i);
-            }
-        }
-        out
-    }
-
-    /// YukiHub: 只把指定槽位的逐字显示补全（“点击补全文字”的核心动作）。
-    pub fn force_reveal_slots(&mut self, ids: &[usize]) {
-        for &i in ids {
-            if i >= self.items.len() {
-                continue;
-            }
-            let t = &mut self.items[i];
-            let target = t.total_chars;
-            t.visible_chars = target;
-            t.pending_wait_ms = 0;
-            t.pending_special_wait = false;
-            t.reveal_carry = 0;
-            t.next_wait_index = t.wait_points.len();
-            if !t.layout_dirty {
-                t.apply_reveal_delta_to_current_target();
-            }
-            t.dirty = true;
-        }
-    }
-
-    /// YukiHub 诊断：所有「已加载、未暂停、但按引擎判据未完成」的槽位。
-    pub fn incomplete_slot_ids(&self) -> Vec<usize> {
-        let mut out = Vec::new();
-        for (i, t) in self.items.iter().enumerate() {
-            if t.loaded && !t.is_suspended && !t.reveal_is_complete() {
-                out.push(i);
-            }
-        }
-        out
-    }
-
-    /// YukiHub 诊断：dump 每个「未完成或正在等待」的文字槽完整状态。
-    pub fn log_slot_dump(&self, tag: &str) {
-        for (i, t) in self.items.iter().enumerate() {
-            if !t.loaded {
-                continue;
-            }
-            if t.reveal_is_complete() && !t.sync_wait_active {
-                continue;
-            }
-            log::info!(
-                "YHPROBE slotdump {} id={} su={} vis={} tot={} wp={} nxt={} pwm={} psw={} spd={} swa={} skip={} rect={}x{} {}x{}",
-                tag,
-                i,
-                t.is_suspended as u8,
-                t.visible_chars,
-                t.total_chars,
-                t.wait_points.len(),
-                t.next_wait_index,
-                t.pending_wait_ms,
-                t.pending_special_wait as u8,
-                t.speed,
-                t.sync_wait_active as u8,
-                t.skip_mode,
-                t.offset_x,
-                t.offset_y,
-                t.w,
-                t.h
-            );
-        }
-    }
-
-    /// YukiHub 诊断：打印 text_print 的阻塞判定细节。
-    pub fn log_block_decision(&self, id: i32, global0: i32, ctrl: bool, pulse: bool) {
-        if !(0..32).contains(&id) {
-            return;
-        }
-        let t = &self.items[id as usize];
-        log::info!(
-            "YHPROBE TextPrint id={} loaded={} spd={} skip={} g0={} ctrl={} pulse={} block={}",
-            id,
-            t.loaded as u8,
-            t.speed,
-            t.skip_mode,
-            global0,
-            ctrl as u8,
-            pulse as u8,
-            self.should_block_on_print(id, global0, ctrl, pulse) as u8
-        );
-    }
-
     /// Tick reveal-by-time for all text slots.""",
-        ONE,
-    ),
-    (
-        """    pub fn arm_sync_print_wait(&mut self, id: i32, thread_id: u32) {
-        if !(0..32).contains(&id) {
-            return;
-        }
-        self.items[id as usize].arm_sync_print_wait(thread_id);
-    }""",
-        """    pub fn arm_sync_print_wait(&mut self, id: i32, thread_id: u32) {
-        if !(0..32).contains(&id) {
-            return;
-        }
-        // YHPROBE: 哪个槽把哪个线程卡住了（关键：区分对话线程 / UI 线程）
-        log::info!("YHPROBE TextWaitArm slot={} thread={}", id, thread_id);
-        self.items[id as usize].arm_sync_print_wait(thread_id);
-    }""",
-        ONE,
-    ),
-    (
-        """    pub fn collect_completed_sync_print_waiters(&mut self) -> Vec<u32> {
-        let mut out = Vec::new();
-        for t in self.items.iter_mut() {
-            if t.sync_wait_active && t.reveal_is_complete() {
-                if let Some(id) = t.sync_wait_thread.take() {
-                    out.push(id);
-                }
-                t.sync_wait_active = false;
-            }
-        }
-        out
-    }""",
-        """    pub fn collect_completed_sync_print_waiters(&mut self) -> Vec<u32> {
-        let mut out = Vec::new();
-        for (i, t) in self.items.iter_mut().enumerate() {
-            if t.sync_wait_active && t.reveal_is_complete() {
-                if let Some(id) = t.sync_wait_thread.take() {
-                    // YHPROBE: 哪个槽显示完了、唤醒了哪个线程
-                    log::info!("YHPROBE TextWaitDone slot={} thread={}", i, id);
-                    out.push(id);
-                }
-                t.sync_wait_active = false;
-            }
-        }
-        out
-    }""",
-        ONE,
-    ),
-    (
-        """    pub fn force_reveal_all_non_suspended(&mut self) {
-        for t in self.items.iter_mut() {""",
-        """    pub fn force_reveal_all_non_suspended(&mut self) {
-        // YHPROBE: 走了 Ctrl/ControlPulse 的"立即全显"路径
-        log::info!("YHPROBE TextForceReveal (ctrl/pulse)");
-        for t in self.items.iter_mut() {""",
         ONE,
     ),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2) app.rs：只加诊断 dump，**不吞任何触摸**（行为退回 v4）
+# 2) app.rs：「点击补全点字动画」的实际实现
 # ─────────────────────────────────────────────────────────────────────────────
 APP_EDITS = [
     (
@@ -334,13 +163,6 @@ APP_EDITS = [
             }
             if !nb.is_empty() {
                 gd.inputs_manager.suppress_next_mouse_click();
-                log::info!(
-                    "YHPROBE click complete+SWALLOW incomplete={:?} nb={:?}",
-                    incomplete,
-                    nb
-                );
-            } else if !incomplete.is_empty() {
-                log::info!("YHPROBE click complete only incomplete={:?}", incomplete);
             }
         }
 """,
@@ -374,12 +196,6 @@ VM_EDITS = [
                         st2.remove(ThreadState::CONTEXT_STATUS_TEXT);
                         st2.insert(ThreadState::CONTEXT_STATUS_RUNNING);
                         self.tm.set_context_status(id, st2);
-                    } else {
-                        log::warn!(
-                            "YHPROBE TextResume ignored (tid={} bits={} not TEXT)",
-                            id,
-                            st.bits()
-                        );
                     }
                 }""",
         ONE,
@@ -399,21 +215,22 @@ VM_EDITS = [
                             st2.remove(ThreadState::CONTEXT_STATUS_TEXT);
                             st2.insert(ThreadState::CONTEXT_STATUS_RUNNING);
                             self.tm.set_context_status(id, st2);
-                        } else {
-                            log::warn!(
-                                "YHPROBE TextResume ignored (tid={} bits={} not TEXT)",
-                                id,
-                                st.bits()
-                            );
                         }
                     }""",
         ONE,
     ),
 ]
 
-MOTION_MANAGER = "crates/rfvp/src/subsystem/resources/motion_manager/mod.rs"
-
-# 每帧追踪“哪些槽正在逐字出现”（唯一入口，update_text_reveal）
+# ─────────────────────────────────────────────────────────────────────────────
+# 以下三组仅为诊断探针，已随 YHPROBE 一起移除（保留空列表与注释，便于回溯）
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# MM_EDITS（motion_manager.rs）：曾逐帧打 REVEALMASK（哪些槽在逐字出现）。
+#   依赖 text_manager.revealing_mask()，该函数已随诊断一起删除。
+# INPUT_EDITS（syscalls/input.rs）：曾在脚本下发 ControlPulse 时打点。
+# TEXT_EDITS（syscalls/text.rs）：曾打 TextSpeed / TextSkip / TextPrint 决策。
+#
+# 若将来需要重新诊断，从 git 历史取回本文件即可（提交 6af86dc 之前）。
 MM_EDITS = [
     (
         """        if elapsed < 0 {
@@ -427,17 +244,6 @@ MM_EDITS = [
         } else {
             self.text_manager
                 .tick(elapsed as u32, global_speed_var0, release_special_wait);
-        }
-        // YHPROBE: 逐帧追踪“哪些槽正在逐字出现”，只在集合变化时打日志。
-        {
-            use std::sync::atomic::{AtomicU32, Ordering};
-            static YH_LAST_MASK: AtomicU32 = AtomicU32::new(0);
-            let cur = self.text_manager.revealing_mask();
-            let last = YH_LAST_MASK.load(Ordering::Relaxed);
-            if cur != last {
-                log::info!("YHPROBE REVEALMASK {:#010x} -> {:#010x}", last, cur);
-                YH_LAST_MASK.store(cur, Ordering::Relaxed);
-            }
         }""",
         ONE,
     ),
@@ -448,16 +254,11 @@ INPUT_EDITS = [
         """pub fn control_pulse(game_data: &mut GameData) -> Result<Variant> {
     game_data.inputs_manager.set_control_pulse();""",
         """pub fn control_pulse(game_data: &mut GameData) -> Result<Variant> {
-    // YHPROBE: 脚本主动下发 ControlPulse（用于快速跳过文字显示）
-    log::info!("YHPROBE ControlPulse");
     game_data.inputs_manager.set_control_pulse();""",
         ONE,
     ),
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4) text.rs：TextSpeed / TextSkip / TextPrint 决策 探针
-# ─────────────────────────────────────────────────────────────────────────────
 TEXT_EDITS = [
     (
         """    if let Variant::Int(v) = speed {
@@ -467,8 +268,6 @@ TEXT_EDITS = [
     }""",
         """    if let Variant::Int(v) = speed {
         if (-1..=300000).contains(v) {
-            // YHPROBE: 脚本设置的文字显示速度
-            log::info!("YHPROBE TextSpeed id={} speed={}", id, v);
             game_data.motion_manager.text_manager.set_text_speed(id, *v);
         }
     }""",
@@ -485,8 +284,6 @@ TEXT_EDITS = [
     }""",
         """    if let Variant::Int(v) = skip {
         if (0..=3).contains(v) {
-            // YHPROBE: skip 模式（非 0 会关闭"打印阻塞脚本"的行为）
-            log::info!("YHPROBE TextSkip id={} skip={}", id, v);
             game_data
                 .motion_manager
                 .text_manager
@@ -511,11 +308,6 @@ TEXT_EDITS = [
                 != 0;
             let pulse = game_data.inputs_manager.peek_control_pulse();
             let global0 = GLOBAL.lock().unwrap().get_int_var(0);
-            // YHPROBE: 打印决策（为什么阻塞 / 为什么不阻塞）
-            game_data
-                .motion_manager
-                .text_manager
-                .log_block_decision(id, global0, ctrl_down, pulse);
             if game_data
                 .motion_manager
                 .text_manager
@@ -562,11 +354,8 @@ def apply_edits(path: str, edits, label: str) -> int:
 def main() -> int:
     for path, edits, label in (
         (VM_RUNNER, VM_EDITS, "vm_runner.rs"),
-        (MOTION_MANAGER, MM_EDITS, "motion_manager.rs"),
         (TEXT_MANAGER, TM_EDITS, "text_manager.rs"),
         (APP_RS, APP_EDITS, "app.rs"),
-        (INPUT_RS, INPUT_EDITS, "input.rs"),
-        (TEXT_RS, TEXT_EDITS, "text.rs"),
     ):
         rc = apply_edits(path, edits, label)
         if rc != 0:

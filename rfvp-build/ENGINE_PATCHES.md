@@ -26,18 +26,16 @@ apply_android_log_patch.py     # 3. android logger + 压制 wgpu 噪音
 apply_movie_patch.py           # 4. 电影播放（音频/层效果）
 apply_audio_fix_patch.py       # 5. MP4 声道回填 + SampleBuffer 按需分配
 apply_wmv_decoder_patch.py     # 6. WMA 解码器负数下标防护
-apply_probe_patch.py           # 7. YHPROBE 输入探针（诊断期）
-apply_text_click_patch.py      # 8. 点击补全文字 + vm_runner resume 保护
-apply_fvp_additive_blend_patch.py  # 9. PrimSetBlend(id,1) 走加法混合（上游 ffc73809）
-apply_fvp_mask_dissolve_patch.py   # 10. Mask dissolve 遮罩渐变（上游 e95f275a）· YHFVP-MASKDISSOLVE-1.0
-apply_fvp_dissolve_snapshot_patch.py # 11. 转场改为「擦掉起始帧」（上游 2a9ff58a）· YHFVP-DISSOLVESNAPSHOT-1.0
-apply_fvp_jis_tunnel_patch.py      # 12. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
-apply_audio_silent_fix_patch.py    # 13. SoundSilentOn/AudioSilentOn 不再真静音（上游 be92e540）
+apply_text_click_patch.py      # 7. 点击补全文字 + vm_runner resume 保护（**已无探针**）
+apply_fvp_additive_blend_patch.py  # 8. PrimSetBlend(id,1) 走加法混合（上游 ffc73809）
+apply_fvp_mask_dissolve_patch.py   # 9. Mask dissolve 遮罩渐变（上游 e95f275a）· YHFVP-MASKDISSOLVE-1.0
+apply_fvp_dissolve_snapshot_patch.py # 10. 转场改为「擦掉起始帧」（上游 2a9ff58a）· YHFVP-DISSOLVESNAPSHOT-1.0
+apply_fvp_jis_tunnel_patch.py      # 11. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
+apply_audio_silent_fix_patch.py    # 12. SoundSilentOn/AudioSilentOn 不再真静音（上游 be92e540）
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 14. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 ```
-
-> 9 与 10 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
+> 8 与 9 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
 > 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
 
 > 11 与 2（`apply_text_patch`）都会改 `lib.rs`，但**锚点刻意错开**（11 插在
@@ -59,8 +57,7 @@ video-sys-cpu-read.patch       # 14. video-sys 解码器 ByteBuffer 模式
 | `apply_movie_patch.py` | `videoplayer.rs` | MP4 层效果电影保留音频；**WMV/MPEG 恢复原版 `(None, None)`**（不做同步音频解码） |
 | `apply_audio_fix_patch.py` | `videoplayer.rs` | ① 自研 MP4 box 解析器回填 `channels`；② `SampleBuffer` 按实际帧数惰性分配 |
 | `apply_wmv_decoder_patch.py` | `na_wmv_player/src/wma/decoder.rs` | WMA 指数解码负数下标 panic → 返回 `Err` |
-| `apply_probe_patch.py` | `syscalls/input.rs` 等 | YHPROBE 输入探针（`InputGetDown/Up/Event/SetClick/PrimHit`） |
-| `apply_text_click_patch.py` | `app.rs` / `text_manager.rs` / `vm_runner.rs` | **点击补全点字动画** + `TextResume` 状态保护 |
+| `apply_text_click_patch.py` | `app.rs` / `text_manager.rs` / `vm_runner.rs` | **点击补全点字动画** + `TextResume` 状态保护（**已无探针**，见 §4） |
 | `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
 | `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
@@ -953,36 +950,65 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
 
 ---
 
-## 4. YHPROBE 探针一览（诊断期）
+## 4. YHPROBE 探针（**已全部移除**）
 
-> 过滤：`adb logcat -s rfvp | grep YHPROBE`
+> 历史记录。探针在 2026-10-15 随点击补全稳定后**整体撤除**，
+> CI 现在会在产物里发现 `YHPROBE` 时报错（§见 build-librfvp.yml）。
+
+### 4.1 移除前的探针清单（备查）
 
 | 探针 | 位置 | 用途 |
 |---|---|---|
 | `InputGetDown/Up/Event/SetClick` | `syscalls/input.rs` | 脚本实际读取的输入通道 |
-| `PrimHit` | `syscalls/graph.rs` | 按钮判定（id + 结果 + 光标） |
+| `PrimHit` | `syscalls/graph.rs` | 按钮判定（id + 结果 + 光标）——曾占日志 **93%** |
 | `frame=` | `app.rs::next_frame` | 每帧输入快照（有输入才打） |
 | `TextPrint id=.. spd=.. skip=.. g0=.. block=..` | `text_manager.rs` | 打印决策：为什么（不）阻塞 |
 | `TextWaitArm/Done slot=.. thread=..` | `text_manager.rs` | 哪个槽卡住了哪个线程 |
 | `TextSpeed / TextSkip` | `syscalls/text.rs` | 脚本设置的显示速度 / skip 模式 |
 | `TextForceReveal` | `text_manager.rs` | 走了 Ctrl/ControlPulse 全显路径 |
-| `REVEALMASK 0x........ -> 0x........` | `motion_manager/mod.rs` | **逐帧**哪些槽在逐字出现（bit i = slot i） |
-| `SLOT click i=.. ld=.. su=.. sk=.. sp=.. v=AA/BB swa=..` | `app.rs` | 按下瞬间**无条件** dump 全部 32 槽 |
+| `REVEALMASK 0x........ -> 0x........` | `motion_manager/mod.rs` | **逐帧**哪些槽在逐字出现 |
+| `SLOT click / slotdump` | `app.rs` · `text_manager.rs` | 按下瞬间 dump 全部 32 槽 |
 | `click complete+SWALLOW / complete only` | `app.rs` | 补全/吞点击的实际决策 |
 | `TextResume ignored` | `vm_runner.rs` | 崩溃保护拦截记录 |
-| `SilentOn slot=..` | `audio_player/se_player.rs` · `bgm_player.rs` | **脚本是否在调 `SoundSilentOn`/`AudioSilentOn`**（见 3.11） |
+| `SilentOn slot=..` | `audio_player/*.rs` | 脚本是否在调 `SoundSilentOn`/`AudioSilentOn` |
 
-**已知会逐字出现的槽**（由 `REVEALMASK` 实测）：
+**已知会逐字出现的槽**（由 `REVEALMASK` 实测，留作参考）：
 `0x1` = slot 0（对话）、`0x20` = slot 5、`0x80000000` = slot 31（设置页）。
+
+### 4.2 移除范围
+
+| 项 | 处置 |
+|---|---|
+| `apply_probe_patch.py` | 🗑️ **整个删除**（input / graph / app 三处探针） |
+| `apply_text_click_patch.py` | 删掉 8 处探针 + 6 个纯诊断函数；保留 3 个功能函数与崩溃修复 |
+| `build-librfvp.yml` | 去掉 probe 两步；**探针检查恢复 fail 分支** |
+| 音频补丁的 `YHPROBE SilentOn` | 改为 `PROBE_ON = False` 开关（默认关，注释说明如何重开） |
+
+### 4.3 保留的功能（**不是探针**）
+
+| 函数 | 作用 |
+|---|---|
+| `force_reveal_slots()` | 把指定槽补全（「点击补全文字」的核心动作） |
+| `incomplete_slot_ids()` | 列出按引擎判据「未完成」的槽 |
+| `nonblocking_revealing_slot_ids()` | 列出「在逐字出现且不阻塞脚本」的槽 |
+| `vm_runner.rs` 的 `TextResume` 守卫 | **真实崩溃修复**（见 3.6），与探针无关 |
+
+### 4.4 以后要重新诊断怎么办
+
+1. **点击类**：从 git 历史取回 `apply_text_click_patch.py` 的旧版本
+   （`ec78a07` 之前），或按 §4.1 清单手动加回；
+2. **音频类**：把 `apply_audio_silent_fix_patch.py` 里的 `PROBE_ON` 置为 `True`；
+3. 临时诊断时记得把 CI 的「无探针」校验同步放宽
+   （否则构建会红 —— 这正是保护机制在起作用）。
 
 ---
 
 ## 5. 遗留事项 / TODO
 
-- [ ] **移除诊断探针**：确认点击补全长期稳定后，删除 `apply_probe_patch.py`
-      与 `apply_text_click_patch.py` 中的 YHPROBE 日志，并把
-      `build-librfvp.yml` 的"探针检查"恢复为 **fail** 分支
-      （当前是诊断期临时放行的 `::warning::`）。
+- [x] ~~**移除诊断探针**~~ → **已完成**（2026-10-15，见 §4）。
+      删除 `apply_probe_patch.py`、清理 `apply_text_click_patch.py` 里 8 处探针
+      与 6 个诊断函数、音频探针改为开关，CI 恢复 fail 分支。
+      实测依据：`PrimHit` 曾占日志 93%，且点击补全长期稳定运行。
 - [ ] 上游 ERROR 属**原有噪音**、非本补丁引入（已核对）：
       `motion: Invalid duration`、`Invalid alpha motion id`、`Invalid id`、
       `float_to_int: Invalid value type`、`history_set: unexpected value ... Nil`。
