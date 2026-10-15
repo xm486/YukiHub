@@ -88,13 +88,18 @@ JIS X 0208 里**没有码位**（「么 / 这 / 为 / 着 / 过 / 语 / 说 / �
 
 做法（**文字路径**，不是解析路径）
 --------------------------------
-新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**三条路径**上各接一次：
+新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**四条路径**上各接一次：
 
 | # | 位置 | 方向 | 函数 |
 |---|---|---|---|
-| 1 | `text_manager.rs` 的 `set_text_content()` | 文字 → 屏幕 | `restore()` |
-| 2 | `save_manager.rs` 的 `decode_bytes()` | 存档 → 屏幕 | `restore()` |
-| 3 | `save_manager.rs` 的 `enc()` | 屏幕 → 存档 | `to_surrogate()` |
+| 1 | `text_manager.rs` 的 `set_text_content()` | 对话文字 → 屏幕 | `restore()` |
+| 2 | `history.rs` 的 `HistorySet(Name)` / `HistorySet(Content)` | 回首过去 → 屏幕 | `restore()` |
+| 3 | `save_manager.rs` 的 `decode_bytes()` | 存档 → 屏幕 | `restore()` |
+| 4 | `save_manager.rs` 的 `enc()` | 屏幕 → 存档 | `to_surrogate()` |
+
+> 2 是「脚本**另存**了一份文字」造成的独立出口：屏幕上的那行（1）还原了，
+> backlog 里那份（2）不会自动跟着变 —— 两个游戏都用 `HistorySet`（各 1 处）。
+> 它俩都只拿得到对话文字/角色名，**拿不到资源名**，所以挂在这里安全。
 
 **1 为什么必须是 `set_text_content()` 而不是 `decode_string_bytes()`**
 
@@ -325,6 +330,7 @@ from pathlib import Path
 
 LIB_RS = "crates/rfvp/src/lib.rs"
 TEXT_RS = "crates/rfvp/src/subsystem/resources/text_manager.rs"
+HIST_RS = "crates/rfvp/src/subsystem/components/syscalls/history.rs"
 SAVE_RS = "crates/rfvp/src/subsystem/resources/save_manager.rs"
 TUNNEL_RS = "crates/rfvp/src/jis_tunnel.rs"
 
@@ -841,6 +847,42 @@ TEXT_NEW = """    pub fn set_text_content(&mut self, id: i32, content_text: &str
         self.items[id as usize].parse_content_text(&content_text);
     }"""
 
+# ------------------------------------------------------- history.rs（注入点 2）
+#
+# `HistorySet(Name/Content, 文字)` 是**回首过去（backlog）**的文字入口。
+# 这两个分支只拿得到对话文字与角色名，**拿不到任何资源名**，所以挂在这儿安全。
+#
+# 为什么必须有：显示路径（set_text_content）还原了，但 backlog 是脚本**另存**
+# 的一份文字 —— 两个游戏都用 `HistorySet`（各 1 处），不补这里的话，
+# 历史界面会显示载体字。
+#
+# 顺带给引擎留个「出口也还原」的兜底：脚本读 HistoryGet 拿到的也是真字，
+# 避免脚本自己拿去做二次显示时又是载体字。
+HIST_NAME_OLD = """        Ok(HistoryFunction::Name) => match value.as_string() {
+            Some(value) => {
+                game_data.history_manager.set_name(value.to_owned());
+            }"""
+
+HIST_NAME_NEW = """        Ok(HistoryFunction::Name) => match value.as_string() {
+            Some(value) => {
+                // YukiHub patch: backlog text is a *second* copy of the line, so
+                // it needs the same restoration the on-screen text gets.
+                let value = crate::jis_tunnel::restore(value);
+                game_data.history_manager.set_name(value.to_owned());
+            }"""
+
+HIST_CONTENT_OLD = """        Ok(HistoryFunction::Content) => match value.as_string() {
+            Some(value) => {
+                game_data.history_manager.set_content(value.to_owned());
+            }"""
+
+HIST_CONTENT_NEW = """        Ok(HistoryFunction::Content) => match value.as_string() {
+            Some(value) => {
+                // YukiHub patch: see the Name branch above — backlog content.
+                let value = crate::jis_tunnel::restore(value);
+                game_data.history_manager.set_content(value.to_owned());
+            }"""
+
 
 # ------------------------------------------------------ save_manager.rs
 #
@@ -900,7 +942,7 @@ def apply_anchors(text: str, rel: str, pairs) -> "tuple[int, str]":
 
 
 def main() -> int:
-    for rel in (LIB_RS, TEXT_RS, SAVE_RS):
+    for rel in (LIB_RS, TEXT_RS, HIST_RS, SAVE_RS):
         if not Path(rel).exists():
             # fail-fast：上游若重命名/移动了该文件，这里必须让 CI 红，而不是静默跳过。
             print(f"[FAIL] {rel} 不存在 —— 上游可能改了目录结构，补丁无法应用")
@@ -944,6 +986,25 @@ def main() -> int:
             return rc
         txt_path.write_text(txt_text, encoding="utf-8")
         print(f"[OK]   {TEXT_RS}: 替身字还原已接入 set_text_content（文字路径）")
+
+    # history.rs（注入点 2：回首过去 / backlog 的文字，是脚本另存的一份）
+    hist_path = Path(HIST_RS)
+    hist_text = hist_path.read_text(encoding="utf-8")
+    if "crate::jis_tunnel::restore" in hist_text:
+        print(f"[OK]   {HIST_RS}: 已应用（幂等）")
+    else:
+        rc, hist_text = apply_anchors(
+            hist_text,
+            HIST_RS,
+            [
+                ("HistorySet(Name) 入口", HIST_NAME_OLD, HIST_NAME_NEW),
+                ("HistorySet(Content) 入口", HIST_CONTENT_OLD, HIST_CONTENT_NEW),
+            ],
+        )
+        if rc != 0:
+            return rc
+        hist_path.write_text(hist_text, encoding="utf-8")
+        print(f"[OK]   {HIST_RS}: backlog 的 Name/Content 两个入口已接入")
 
     # save_manager.rs（写入方向 + 读取方向，同一文件）
     sav_path = Path(SAVE_RS)

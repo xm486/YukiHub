@@ -61,7 +61,7 @@ video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
 | `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
-| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `text_manager.rs` / `save_manager.rs` | **SJIS 替身字还原**（Unicode→Unicode）。表来源双认：`Sakura.dll`（樱花萌放官中版）/ `uif_config.json`（UIF 系汉化，如 HappyMarguerite_CHS）。**挂在文字路径 `set_text_content`（不是解析路径，避免改坏资源名）**，标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
+| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `text_manager.rs` / `history.rs` / `save_manager.rs` | **SJIS 替身字还原**（Unicode→Unicode）。表来源双认：`Sakura.dll`（樱花萌放官中版）/ `uif_config.json`（UIF 系汉化，如 HappyMarguerite_CHS）。**全部挂在文字路径**（对话/backlog/存档），不碰资源名，标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
 | `apply_audio_silent_fix_patch.py` | `audio_player/se_player.rs` / `bgm_player.rs` | `SoundSilentOn`/`AudioSilentOn` **不再真的静音**（对齐上游 10.15，见 3.11） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
@@ -717,22 +717,29 @@ Unicode→Unicode 还原。
 > `Marguerite.bch` / `README.md` 完全一致（2024-04-27 09:18）。
 > 同目录的 `.CTFontHook/` 属于**另一份已删除的汉化版**残留，代码完全不读它。
 
-**修复**：新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**三处**注入（幂等）：
+**修复**：新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**四处**注入（幂等）：
 
 | # | 位置 | 方向 | 函数 |
 |---|---|---|---|
-| 1 | `text_manager.rs::set_text_content()` | 文字 → 屏幕 | `restore()` |
-| 2 | `save_manager.rs::decode_bytes()` | 存档 → 屏幕 | `restore()` |
-| 3 | `save_manager.rs::enc()` | 屏幕 → 存档 | `to_surrogate()` |
+| 1 | `text_manager.rs::set_text_content()` | 对话文字 → 屏幕 | `restore()` |
+| 2 | `history.rs::HistorySet(Name)` / `HistorySet(Content)` | 回首过去 → 屏幕 | `restore()` |
+| 3 | `save_manager.rs::decode_bytes()` | 存档 → 屏幕 | `restore()` |
+| 4 | `save_manager.rs::enc()` | 屏幕 → 存档 | `to_surrogate()` |
 
 - **1 必须挂在「文字」上，不能挂在「解析」上** —— 见 3.10.1 末尾那条
   「资源名不会被误伤」的实测：挂在 `decode_string_bytes()` 会把
   HappyMarguerite 的立绘文件名（日文汉字）也改掉，导致贴图整片消失。
   `set_text_content` 全 workspace 只有 2 个调用点，都在 `text_print` 里。
-- 2/3 是**存档**的 3 个显示字段（`title` / `scene_title` / `script_content`）
+- **2 是「脚本另存了一份文字」造成的独立出口**：屏幕上的那行（1）还原了，
+  backlog 里那份不会自动跟着变。两个游戏都用 `HistorySet`（各 1 处）。
+  这两个分支只拿得到对话文字/角色名，**拿不到资源名**。
+- 3/4 是**存档**的 3 个显示字段（`title` / `scene_title` / `script_content`）
   的唯一读/写出口 —— `load_from_file` 与 `load_from_mem` 里 6 个调用点全走
   `decode_bytes()`；全 workspace 只有 `enc()` 一处把文本编码回 Shift-JIS。
   这两个函数**只处理显示文字，不处理资源名**，所以挂在这里是安全的。
+
+> **通用判据（拔链时问自己）**：这个出口上还会流过什么**非文本数据**？
+> （资源名、文件名、syscall 名…）只要会流过，就不能挂。
 
 **脚本文件与存档文件都一个字节都不改**：盘上存的仍是替身字，格式与 PC 版完全一致，
 存档还能拿到 PC 版上用。
@@ -795,22 +802,56 @@ Unicode→Unicode 还原。
 **但这个结论是条件性的，不是普适的。** HappyMarguerite 的资源名是**日文汉字**：
 
 ```
-CHR_練_基_道着竹刀L   CHR_撫子   CHR_爺   CHR_悠綺   CHR_響   CHR_稲穂_貨２_セーラー服L
+CHR_爺_基_道着竹刀L   CHR_撫子   CHR_悠綺   CHR_響   CHR_稲穂_貨２_セーラー服L
 ```
 
-共 **7 个**含表 key。第一版把 `restore()` 挂在 `script/parser.rs` 的
-`decode_string_bytes()`（所有脚本字符串的出口）上，于是这些资源名被改成
-`CHR_觑_…` / `CHR_垫子` / `CHR_练` / `CHR_悠凿` / `CHR_晚`，
-`graph_load` 全部 `file not found` → **立绘与贴图整片消失**（文字却正常）。
+共 **7 个**含表 key（`爺 U+723A→练`、`撫 U+64AB→垫`、`綺 U+7DBA→凿`、
+`響 U+97FF→晚`、`貨 U+8CA8→疯`…）。第一版把 `restore()` 挂在
+`script/parser.rs` 的 `decode_string_bytes()`（所有脚本字符串的出口）上，
+于是这些资源名被改掉，`graph_load` 全部 `file not found`
+（logcat 里能看到引擎打印的是**改后**的名字 `CHR_练_基_道着竹刀L`，
+而磁盘上的文件叫 `CHR_爺_基_道着竹刀L`）→ **立绘与贴图整片消失**。
 
-修法：把还原挪到**「文字 → 屏幕」这一步**（`text_manager.rs::set_text_content`），
-而不是「字符串解码」这一步。这样资源名/文件名**物理上不经过它** —— 这也正是
-PC 端 UIF 的做法（在 `DrawTextA` 这个**绘制** API 上替换，碰不到文件名）。
+修法：把还原挪到**「文字 → 屏幕」这一步**（`text_manager.rs::set_text_content`
++ `history.rs` 的两个 backlog 入口），而不是「字符串解码」这一步。
+这样资源名/文件名**物理上不经过它** —— 这也正是 PC 端 UIF 的做法
+（在 `DrawTextA` 这个**绘制** API 上替换，碰不到文件名）。
 
 | 阶段 | 流过资源名？ | 能挂还原吗 |
 |---|---|---|
 | `script/parser.rs::decode_string_bytes()` | ✅ 会 | ❌ **不要挂这里** |
 | `text_manager.rs::set_text_content()` | ❌ 不会 | ✅ 挂这里 |
+| `history.rs::HistorySet(Name/Content)` | ❌ 不会 | ✅ 挂这里 |
+
+### 樱花官中版为什么不受这次改动影响（运行时证据）
+
+推理链是闭的，不需要相信任何"启发式"：
+
+```
+旧注入点会对【所有】含载体字的字符串无差别 restore
+   ↓
+若樱花有含载体字的资源名，旧版必然产生 `file not found in pack`
+   ↓
+★ 实测（用户 2026-10-14 那份 logcat，29,686 行）：
+   樱花 `file not found in pack` = 0 次
+   （E 级 7,009 条全是上游既有噪音：motion/graph_load invalid id 等）
+   ↓
+⇒ 樱花没有含载体字的资源名
+   ↓
+⇒ 「资源名还原不还原」对樱花没有任何影响
+   ↓
+⇒ 旧注入点 与 新注入点 对樱花【完全等价】  ∎
+```
+
+对照组（证明这个推理有分辨力）：
+
+| 作品 | 旧注入点下 `file not found in pack` |
+|---|---|
+| 樱花官中 | **0 次** |
+| HappyMarguerite | **3 条**（`CHR_练_基_道着竹刀L` / `CHR_练_基_道着木刀L` / `CHR_稲穂_货２_セーラー服L`）|
+
+外加一条**结构性**保证：樱花脚本里 155,946 条「纯 ASCII 段」，
+含载体字在结构上不可能（ASCII 段只有 ASCII 码位，表 key 全是汉字）。
 
 **端到端还原效果**（樱花官中 64,779 条跑一遍，49,649 条被还原 = 76.6%）：
 
@@ -847,7 +888,23 @@ FIX  我已经见过这个场景无数次了。      ✅
 > 都返回 `None`（表现为"表读不出来"，光看代码完全看不出）。
 > 结论：**判据类代码必须拿真实文件跑一遍**，不能只做语法/编译检查。
 
-### 3.10.2 迭代中修掉的四个坑（真机实测逐个暴露）
+### 3.10.2 迭代中修掉的五个坑（真机实测逐个暴露）
+
+**坑 5：回首过去（backlog）漏还原 —— 「脚本另存了一份文字」**
+
+把注入点从解析路径挪到文字路径后，屏幕上的对话正常了，但**回首过去**里还是载体字。
+根因：脚本用 `HistorySet` **另存了一份**这行文字（`history_manager`），
+它不走 `text_print`，所以 1 号注入点覆盖不到。
+
+- 两个游戏都用 `HistorySet`（在脚本里各出现 **1 次**）→ **两个游戏都有这个漏点**。
+- 旧注入点（解析路径）恰好掩盖了它（那时解析阶段就还原了），所以这是**挪注入点时
+  才显现出来**的漏点，不是新引入的 bug。
+- 修法：`history.rs` 的 `HistorySet(Name)` / `HistorySet(Content)` 两个分支各加一次
+  `restore()`。它们只拿得到对话文字/角色名，**拿不到资源名**。
+
+> **教训**：一条数据被**存了两份**（屏幕上 + backlog 里）时，两个出口都要堵。
+> 找出口的方法：搜「这个文字还会被写进哪个容器」。这里就是
+> `history_manager.set_content/set_name`。
 
 **坑 4（最隐蔽）：注入点选在「数据」而不是「用途」上 —— 贴图整片消失**
 
@@ -1204,13 +1261,14 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
       存档标题 `寅却稾稾地…`→`她却轻轻地…`；旧存档（带 `&#NNNNN;`）读出来也正常；
       日志 0 panic、E 级全是既有上游噪音。
-- [ ] **HappyMarguerite 漢化版：注入点已修正，待真机复验**（见 3.10.3 / 坑 4）。
+- [ ] **HappyMarguerite 漢化版：注入点已修正 + backlog 已补，待真机复验**
+      （见 3.10.3 / 坑 4 / 坑 5）。
       第一次真机暴露「文字正常但**贴图整片消失**」—— 根因是 `restore()` 挂在
-      解析出口 `decode_string_bytes()`，把 7 个日文汉字资源名（`CHR_撫子` /
-      `CHR_爺` / `CHR_練_…` / `CHR_悠綺` / `CHR_響` …）也改了。
-      **已修**：注入点挪到文字路径 `text_manager.rs::set_text_content()`。
-      **待确认**：立绘/贴图回来，且文字仍是 `我已经见过这个场景无数次了。`；
-      樱花官中版回归不受影响。
+      解析出口 `decode_string_bytes()`，把日文汉字资源名（`CHR_爺_…` 等 **7 个**）
+      也改了。修法：全部挪到文字路径（`set_text_content` + `history.rs` backlog +
+      `save_manager`），资源名物理上不经过。
+      **待确认**：① 立绘/贴图回来 ② 文字正确 ③ **回首过去（backlog）也正确**
+      ④ 樱花官中版完全不受影响。
 - [ ] 可选：`uif_config.json` 的解析器目前**遇到反斜杠转义就整表放弃**。
       实测两个真实文件反斜杠数为 0，所以够用；若将来遇到带转义的版本，
       再补一个小型 JSON 字符串反转义即可（改动局限在 `parse_json_string`）。
