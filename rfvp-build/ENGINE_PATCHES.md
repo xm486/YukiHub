@@ -30,8 +30,8 @@ apply_probe_patch.py           # 7. YHPROBE 输入探针（诊断期）
 apply_text_click_patch.py      # 8. 点击补全文字 + vm_runner resume 保护
 apply_fvp_additive_blend_patch.py  # 9. PrimSetBlend(id,1) 走加法混合（上游 ffc73809）
 apply_fvp_mask_dissolve_patch.py   # 10. Mask dissolve 遮罩渐变（上游 e95f275a）· YHFVP-MASKDISSOLVE-1.0
-apply_fvp_jis_tunnel_patch.py      # 11. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
-apply_audio_silent_fix_patch.py    # 12. SoundSilentOn/AudioSilentOn 不再真静音（上游 be92e540）
+apply_fvp_dissolve_snapshot_patch.py # 11. 转场改为「擦掉起始帧」（上游 2a9ff58a）· YHFVP-DISSOLVESNAPSHOT-1.0
+apply_fvp_jis_tunnel_patch.py      # 12. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
 # 之后独立 git apply：
 video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 ```
@@ -62,8 +62,8 @@ video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 | `apply_text_click_patch.py` | `app.rs` / `text_manager.rs` / `vm_runner.rs` | **点击补全点字动画** + `TextResume` 状态保护 |
 | `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
+| `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
 | `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `script/parser.rs` | **官中版 SJIS 替身字还原**（解码后 Unicode→Unicode），标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
-| `apply_audio_silent_fix_patch.py` | `audio_player/se_player.rs` / `bgm_player.rs` | `SoundSilentOn`/`AudioSilentOn` **不再真的静音**（对齐原引擎语义，见 3.11） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -632,7 +632,8 @@ a solid overlay here"*），于是遮罩图被当成普通贴图直接画出来 
 **真机实测（2026-10-13）：暗带消失 ✅ 修复确认。**
 
 **同时观察到的副作用**：场景转场变得可见了 —— 从旧版的「硬切」变成「有过渡但偏生硬」。
-这不是回归，是 mask dissolve 首次真正生效的必然结果（旧版压根没画）。详见 §5 TODO。
+这不是回归，是 mask dissolve 首次真正生效的必然结果（旧版压根没画）。
+→ **后续已在 3.12 进一步修正**（从"盖黑"改为"擦掉起始帧"）。
 
 **注意**：我们 fork 的基线仍是上游 `81a8b685`，所以 `apply_wmv_decoder_patch.py`（补丁 6）
 **继续保留** —— 上游虽然自己修了 WMA 负数下标，但我们没同步。
@@ -836,60 +837,78 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 
 ---
 
-### 3.11 `SoundSilentOn` / `AudioSilentOn` 真的静音了（语音/音效被吞）
+### 3.11 【已否决】`SoundSilentOn` / `AudioSilentOn` 语义修正 —— 对我们**不适用**
 
-**来源**：上游 `be92e540`（"fix audio"，2026-10-15）的语义修正。
-上游把 SE/BGM 的公共槽位逻辑重构成了 `audio_player/channels.rs`，**我们不跟那个重构**
-（`se_player`/`bgm_player` 从基线到新版分别差了 440 / 489 行），只把语义改对。
+**上游**：`be92e540`（"fix audio"，2026-10-15）。上游新版 `channels.rs` 把
+`silent_on` 改成空操作，并注明 *"scripts call it on a slot while its sound plays
+(**Sakura, on the voice slot at every line**), and that sound is heard in the original engine."*
 
-**上游原文（直接点了我们这款游戏的名）**：
+**看起来很像是我们的 bug，但实测证明不适用**：
 
-```rust
-/// `AudioSilentOn` / `SoundSilentOn`. It does not mute the slot: scripts call it on a slot
-/// while its sound plays (Sakura, on the voice slot at every line), and that sound is heard
-/// in the original engine.
-pub fn silent_on(&mut self, _slot: i32, _tween: Tween) {}
-```
+| 版本 | 音频表现 |
+|---|---|
+| **10.09（我们的基线）** | ✅ **正常**（顶多底噪/声音糊，属音源本身） |
+| 10.12 | ❌ 出现「对话没声音」 |
+| 10.15 | ✅ 修复（即 `be92e540` 修的是 **10.12 自己的回归**） |
 
-**我们基线（10.09）的实现 —— 真的静音**：
+**为什么基线没出问题**：基线的 `silent_on` 确实会写 `se_muted[slot] = true`，
+但实测多款游戏**均无「语音被吞」现象** —— 说明在我们这条路径上，
+脚本并没有走到会触发它的组合（或上游重构时才引入新的调用路径）。
+**结论：10.09 的音频不需要动。**
 
-```rust
-pub fn silent_on(&mut self, slot: i32, tween: Tween) {
-    self.se_muted[slot] = true;
-    if let Some(handle) = self.se_slots[slot].as_mut() {
-        handle.set_volume(0.0, tween);        // <- 音量拉到 0
-    }
-}
-```
+**处置**：补丁已写好后**主动撤销**（提交历史里可查），不纳入构建。
+理由：既然现状正常，改它只有风险没有收益。
 
-而且 `se_muted` 还**参与此后所有音量计算**（`se_player.rs` 4 处）：
+---
 
-```rust
-let actual_volume = if self.se_muted[slot] { 0.0 } else { self.effective_volume_for_slot(slot) };
-```
+### 3.12 转场（dissolve）生硬 —— 从「盖黑」改成「擦掉开始时那一帧」
 
-**危害**：槽一旦被 muted 就一直是真，直到读档重置。若脚本每句台词都调
-`SoundSilentOn(语音槽)`，**语音会被永久静音**（只剩 BGM/音效）。
+**来源**：上游 `2a9ff58a`（"fix dissolve"，2026-10-15）。
 
-**改动**（`se_player.rs` / `bgm_player.rs` 各三处，合计约 12 行）：
+**问题**（2026-10-13 真机对比发现）：
 
-| # | 改动 | 目的 |
-|---|---|---|
-| 1 | `silent_on` → 空操作（**保留一条 `YHPROBE SilentOn` 探针**） | 对齐原引擎 |
-| 2 | 4 处 `if muted { 0.0 } else { X }` → 直接用 `X` | `muted` 彻底退出音量计算 |
-| 3 | `apply_snapshot_v1` 恢复存档时 `muted` 一律置 `false` | 旧存档不会把静音带回来 |
+| 版本 | 场景过渡表现 |
+|---|---|
+| 旧 so（无 mask dissolve） | **硬切**，完全没有过渡 |
+| 10.12 版 so（我们此前移植的 mask dissolve） | **有过渡，但偏生硬**（直接黑一下） |
+| PC 原版 | 平滑：有的白闪缓缓显现、有的小黑一下转换 |
 
-**为什么带探针**：用户实测反馈「当前版本语音**没被**静音」，与上面的代码分析不符。
-探针用来确认脚本到底有没有调 `SilentOn`、调用频率多少 —— 一次构建同时拿到
-「修复后的表现」和「调用事实」。确认后可按 §5 移除。
+**根因不是「曲线不够缓」，而是方向错了 —— 我们在"盖黑"而不是"擦画面"。**
 
-**与其它补丁的关系**：独占 `audio_player/`，与其余 11 个补丁**零文件重叠**。
+上游 10.15 删掉的 `setsumei/compatibility/DISSOLVE.md` 写明了原引擎的做法：
+
+> wipes **the frame shown when it started** away through the mask,
+> **revealing the new scene under it** … drawing black there blacks the
+> screen out at every transition
+
+即：正确做法 = **抓取转场开始那一刻的画面 → 按遮罩把它擦掉 → 露出下面的新场景**；
+而不是「往画面上盖一层逐渐变黑的东西」。
+
+**改动**（4 个文件）：
+
+| 文件 | 改动 |
+|---|---|
+| `motion_manager/mod.rs` | 新增 `dissolve_serial: u32`（`start_dissolve` 时 +1，标识快照属于哪一次转场）；mask 类转场初始 alpha 改 **1.0**（一开始整个被上一帧盖住）；`MaskFadeInOut` 曲线由三角波 `1.0-(2t-1).abs()` 改 **`1.0-t`** |
+| `rendering/gpu_prim.rs` | 新增 `mask_wants_snapshot()` / `set_mask_snapshot()`；mask 纹理改 **sRGB**（`GpuTexture::new`）—— 现在贴的是真实画面颜色，不再是黑图 |
+| `app.rs` | `rebuild` 之前：若需要快照，用 `RenderTarget::encode_readback_rgba8` + `map_to_rgba8` 回读当前渲染目标，交给 `set_mask_snapshot` |
+| `rendering/mask_dissolve.rs` | 整体替换为快照版：底图从黑图换成快照帧（遮罩按快照分辨率缩放）；还原原引擎 `MaskFadeIn` 的**硬边**擦除语义（wait=4 对 255 做 alpha 测试，wait=5 才软混合） |
+
+**依赖与顺序**：**必须在 `apply_fvp_mask_dissolve_patch.py` 之后**执行
+（本补丁是它的增量，复用它建立的 `DrawTextureKey::Mask`、`mask_frame` /
+`mask_texture`、`texture_bind_group` 分支与 `build()` 插入点）。
+脚本已加前置校验：前置缺失时**直接 fail**（不静默漏打）。
+
+**关键前提已核实**：`encode_readback_rgba8` / `map_to_rgba8` 在基线里**早就存在**
+（存档缩略图在用，`app.rs` 有现成调用），无需新增任何 API。
 
 **验证（本轮）**：
-- 12 个补丁按 workflow 顺序**串行全绿**，且**二次复跑全部幂等**；
-- `rustc 1.75 --edition 2021` 逐个语法检查 → 0 语法错误；括号平衡 ✅。
+- dry-run：4 个锚点全部命中；幂等复跑全绿；
+- **反序测试**：先跑本补丁会正确 fail（提示先跑前置）⇒ 不会静默漏打；
+- 全部 **12 个补丁按 workflow 顺序串行全绿**，且**二次复跑全部幂等**；
+- `rustc 1.75 --edition 2021` 逐个语法检查 → 0 语法错误；
+- 括号平衡与基线**完全一致**（`gpu_prim.rs` -3/1、`app.rs` -4/0 均为基线原有，非本次引入）。
 
-**待实测**：真机确认语音表现 + 读 `YHPROBE SilentOn` 日志。
+**待实测**：真机看转场是否变平滑（应能「擦」出下面的新场景，而非黑一下）。
 
 ---
 
@@ -910,7 +929,6 @@ let actual_volume = if self.se_muted[slot] { 0.0 } else { self.effective_volume_
 | `SLOT click i=.. ld=.. su=.. sk=.. sp=.. v=AA/BB swa=..` | `app.rs` | 按下瞬间**无条件** dump 全部 32 槽 |
 | `click complete+SWALLOW / complete only` | `app.rs` | 补全/吞点击的实际决策 |
 | `TextResume ignored` | `vm_runner.rs` | 崩溃保护拦截记录 |
-| `SilentOn slot=..` | `audio_player/se_player.rs` · `bgm_player.rs` | **脚本是否在调 `SoundSilentOn`/`AudioSilentOn`**（见 3.11） |
 
 **已知会逐字出现的槽**（由 `REVEALMASK` 实测）：
 `0x1` = slot 0（对话）、`0x20` = slot 5、`0x80000000` = slot 31（设置页）。
@@ -934,37 +952,13 @@ let actual_volume = if self.se_muted[slot] { 0.0 } else { self.effective_volume_
 - [x] ~~**已知残留：上游贴图 bug**~~ → **已修**（见 3.9）。
       移植上游 `e95f275a`（mask dissolve）+ `ffc73809`（加法混合），
       真机实测**暗带消失** ✅。FVP 模块功能已基本完备（文本/视频/输入/虚拟控件）。
-- [ ] **转场（dissolve）偏生硬 —— 上游 10.15 已给出正确实现，待移植。**
-      真机对比结论（2026-10-13）：
+- [ ] **转场（dissolve）生硬 —— 已移植上游 10.15 的正确实现，待真机实测**（见 3.12）。
+      根因是「盖黑」而非「擦画面」：上游 `2a9ff58a` 改成抓取转场起始帧再按遮罩擦除。
+      我们已照搬（含 `dissolve_serial`、sRGB、`MaskFadeIn` 硬边语义）。
+      待验证：转场是否从「黑一下」变成「擦出新场景」。
 
-      | 版本 | 场景过渡表现 |
-      |---|---|
-      | 旧 so（未移植） | **硬切**，完全没有过渡 |
-      | 本版 so（已移植 mask dissolve） | **有过渡，但偏生硬**（直接黑一下） |
-      | PC 原版 | 平滑：有的白闪缓缓显现、有的小黑一下转换 |
-
-      **根因不是曲线，是我们（和上游 10.12）都在"盖黑"而不是"擦画面"。**
-      上游 10.15 删掉的 `DISSOLVE.md` 写明了原引擎做法：
-
-      > wipes **the frame shown when it started** away through the mask,
-      > **revealing the new scene under it** … drawing black there blacks the
-      > screen out at every transition
-
-      上游 `2a9ff58a`（"fix dissolve"）的正确实现：
-      1. 过渡开始时先 **GPU 回读当前画面**（`RenderTarget::encode_readback_rgba8`，
-         我们基线已有，存档缩略图在用），作为"被擦掉的那一帧"；
-      2. `mask_dissolve` 拿这帧当底图，按遮罩擦除 → 露出下面的新场景；
-      3. 顺带还原原引擎的 `MaskFadeIn` 语义（wait=4 是**硬边**擦除，
-         `mask + 255 - 255t` 对 255 做 alpha 测试；wait=5 才是软混合）。
-      依赖：`MotionManager.dissolve_serial`（+4 行）、`GpuTexture` 用 sRGB。
-
-      ⚠️ 上游 10.15 的 `mask_dissolve.rs` 里**同时**引用了 `dissolve_serial`
-      和 `snapshot`，还删除了 `DISSOLVE.md` —— 说明该实现仍在快速迭代，
-      移植前需重新核对最新源码。
-
-- [ ] **音频：`SoundSilentOn` 语义修正已应用，待真机确认**（见 3.11）。
-      带着 `YHPROBE SilentOn` 探针一起上的：既要修（如果不该静音），
-      也要用日志确认脚本到底调没调。
+- [ ] **音频：`SoundSilentOn` 语义修正已否决**（见 3.11），10.09 基线音频不需要动。
+      底噪/声音发糊属音源本身，不属本仓库补丁范围。
 - [ ] 关注上游 commit：出现 `dissolve` / `render` / `audio` 相关改动时回来看。
 - [x] ~~**官中版 SJIS 替身字还原：待真机验证**~~ → **已完成**（见 3.10.3）。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
