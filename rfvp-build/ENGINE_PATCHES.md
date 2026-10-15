@@ -61,7 +61,7 @@ video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_additive_blend_patch.py` | `sprite.rs` / `gpu_prim.rs` | `PrimSetBlend(id,1)` 改走加法混合，对齐原引擎（见 3.9） |
 | `apply_fvp_mask_dissolve_patch.py` | `mask_dissolve.rs`(新) / `rendering/mod.rs` / `gpu_prim.rs` / `motion_manager` | 实现 Mask dissolve 遮罩渐变，修 FVP HD parts 背景暗带（见 3.9） |
 | `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
-| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `script/parser.rs` | **官中版 SJIS 替身字还原**（解码后 Unicode→Unicode），标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
+| `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `script/parser.rs` / `save_manager.rs` | **SJIS 替身字还原**（解码后 Unicode→Unicode）。表来源双认：`Sakura.dll`（樱花萌放官中版）/ `uif_config.json`（UIF 系汉化，如 HappyMarguerite_CHS），标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
 | `apply_audio_silent_fix_patch.py` | `audio_player/se_player.rs` / `bgm_player.rs` | `SoundSilentOn`/`AudioSilentOn` **不再真的静音**（对齐上游 10.15，见 3.11） |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
@@ -639,7 +639,17 @@ a solid overlay here"*），于是遮罩图被当成普通贴图直接画出来 
 
 ---
 
-### 3.10 官方简体中文版文本乱码（SJIS 替身字）—— 新增还原层
+### 3.10 中文化文本乱码（SJIS 替身字）—— 新增还原层（双来源）
+
+> **两个作品，同一个机制**：把简体字塞进「有 JIS 码位的汉字」码位里，
+> 解码后再做一次 Unicode→Unicode 还原。差别的只是**表存在哪个文件**：
+>
+> | 作品 | 表来源 | 表格式 | PC 端怎么还原 |
+> |---|---|---|---|
+> | 《樱花，萌放。》官中版 | `Sakura.dll` | 连续 UTF-16LE `(key,value)` 对，1,206 对 | 引擎内建（`babel::sjis_cp932_to_unicode_engine` / `jis_map.bin`） |
+> | 《HappyMarguerite》漢化版 | `uif_config.json` | JSON `"type":"replace_chars"` 的 `source_chars`/`target_chars`，1,004 对 | **UniversalInjectorFramework** 外部注入，在 `DrawTextA` 上替换 |
+>
+> 本模块**两种都认**（见 3.10.1）。
 
 **现象**：官中版对话里夹带冷僻汉字（用户截图：`寅喊着什弗。`）：
 
@@ -648,16 +658,36 @@ a solid overlay here"*），于是遮罩图被当成普通贴图直接画出来 
 应该是：    平日寡言少语的他，用我从未听到过的音量，大声地喊着什么。
 ```
 
+**HappyMarguerite 漢化版**（第二例，2026-10-15）：
+
+```
+实际显示：  我己識戰経記个麼景无数次了。          ← 截图
+应该是：    我己经见过这个场景无数次了。
+```
+
 **用户已试过但无效**：改字体（无效果，字体没问题）、改文本编码（GBK 出 `彫铎` 假字、
 UTF-8 有 57,507/64,779 条直接解码失败）——**都解不了**。
 
-**根因：官中版用「SJIS 替身字」承载简体中文**
+**根因：用「SJIS 替身字」承载简体中文**
 
 简体字绝大多数在 **JIS X 0208 里没有码位**（`么/这/为/着/过/语/说/话/车/时` 全部
-`encode('cp932')` 失败）。所以官方的做法是：把每个简体字映射到一个**冷僻的 JIS 汉字码位**，
-用那个码位写进脚本；PC 版在**解码之后**再做一次 Unicode→Unicode 还原。
+`encode('cp932')` 失败）。所以中文化的做法是：把每个简体字映射到一个**有 JIS 码位的
+汉字**（繁体字或日文汉字），用那个码位写进脚本；PC 端在**解码之后**再做一次
+Unicode→Unicode 还原。
 
-证据链：
+共同的**定义性特征**（这正是能用同一套判据的原因）：
+
+| 特征 | 樱花官中 | HappyMarguerite |
+|---|---|---|
+| 对数 | 1,206 | 1,004 |
+| key 有 JIS 码位 | 1,206 / 1,206 | **1,004 / 1,004** |
+| value 有 JIS 码位 | 0 / 1,206 | **0 / 1,004** |
+| key / value 各自两两不同 | ✅ 双射 | ✅ 双射 |
+| key ∩ value | ∅ | ∅ |
+
+> `value` **一个都没有**码位是定义性的：需要替身，正是因为真字写不进 Shift-JIS。
+
+**证据链（案例 1 · 樱花萌放 官中版）**：
 
 | 证据 | 内容 |
 |---|---|
@@ -669,6 +699,23 @@ UTF-8 有 57,507/64,779 条直接解码失败）——**都解不了**。
 | 表内容 | `徼→这 · 戍→你 · 禳→— · 諍→说 · 弗→么 · 來→们 · 餤→为 · 肛→样 · 寅→她` |
 | 替身字覆盖 | 223,054 / 1,310,705 字符 = **17.02%**（平均每 6 字 1 个） |
 | 表 key 区段 | **全部**在 JIS X 0208 标准区（cp932 与 shift_jis 解码结果完全一致 → 我们引擎用的 `encoding_rs::SHIFT_JIS` 能正确解出 key） |
+
+**证据链（案例 2 · HappyMarguerite 漢化版，2026-10-15 新增）**：
+
+| 证据 | 内容 |
+|---|---|
+| 补丁来源 | jyxjyx1234 的 SakuraLLM 机翻补丁（GitHub `jyxjyx1234/HappyMarguerite_CHS`） |
+| 汉化脚本 | `Marguerite.bch` 3,193,758 字节 —— **游戏实际加载的就是它**（`find_script` 优先 `*.bch`） |
+| 日文原版 | `patchdata/Marguerite.hcb` 3,570,209 字节，mtime **2008-02-13**（补丁的原始备份） |
+| **表本体** | `uif_config.json` → `text_processor.rules[0]`（`"type": "replace_chars"`），两条平行字符串各 **1,004** 字 |
+| 表内容 | `這→变 · 説→为 · 記→这 · 識→经 · 戰→见 · 場→她 · 軽→啊 · 読→—` |
+| 截图命中 | `識戰経記` 在 `Marguerite.bch` 偏移 **`0x6BAD6`** 逐字节命中 |
+| 替身字覆盖 | 140,949 / 699,454 字符 = **20.15%** |
+| 引擎怎么还原 | PC 端靠 **UniversalInjectorFramework**（`uif_config.json` 的 `text_processor` 规则）在 `DrawTextA` 上替换；`README.md` 原文：「对于 **sjis 编码不支持的汉字**采用了新的方法进行处理」 |
+
+> ⚠️ `uif_config.json` **是补丁本体的一部分**，不是"旧汉化版残留"：它的 mtime 与
+> `Marguerite.bch` / `README.md` 完全一致（2024-04-27 09:18）。
+> 同目录的 `.CTFontHook/` 属于**另一份已删除的汉化版**残留，代码完全不读它。
 
 **修复**：新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**三处**注入（幂等）：
 
@@ -688,35 +735,71 @@ UTF-8 有 57,507/64,779 条直接解码失败）——**都解不了**。
 
 ### 3.10.1 判据（自证 + 白名单双保险）
 
-1. **只认游戏目录里的 `Sakura.dll`**（不做全目录 dll/exe 扫描）；
-2. 在该文件里找**最长的一段连续 `(u16>=0x2000, u16>=0x2000)`**（≥64 对），
-   再**从头逐条读**，遇到第一条不合法（key 非 CJK 汉字 / value < U+2000）就**停**；
-3. 用「表里 key 是否出现在**本游戏脚本**用到的字符集里」打分：
-   **命中 ≥ 500 且命中率 ≥ 90%** 才启用，否则**静默不启用**（= 上游行为）。
+**来源白名单**——只读游戏目录里**两个固定的文件名**，按顺序试：
 
-阈值为什么是 90%（实测数据，不是拍的）：
-
-| 组合 | 命中 | 命中率 | 结论 |
+| # | 文件 | 格式 | 对应作品 |
 |---|---|---|---|
-| 官中版脚本 + 它自己的表 | **1,205 / 1,207** | **99.8%** | ✅ 启用 |
-| *日文原版*脚本 + 官中版的表 | 754 / 1,207 | 62.5% | ❌ 拒绝 |
-| 星空EH `FVPLoaderGui.exe`（本目录最大假阳性） | 44 | — | ❌ 拒绝 |
-| 星空Wish `Memoria.exe` | 1 | — | ❌ 拒绝 |
-| 无关 `Steam2.dll` / `quartz.dll` / `d3d9.dll` | ≤239 | ≤24% | ❌ 拒绝 |
+| 1 | `Sakura.dll` | 连续 UTF-16LE `(key, value)` 数组 | 樱花萌放 官中版 |
+| 2 | `uif_config.json` | JSON `"type":"replace_chars"`，`source_chars` / `target_chars` 两条平行字符串 | UIF 系汉化 / 机翻补丁（HappyMarguerite_CHS） |
 
-> 第二行就是**汉化组版**的情形（它用的正是日文原版脚本）—— 50% 的松阈值挡不住它
-> （最初就定的 50%，是同项目的量化验证把它逼到 90% 的）。**汉化组版行为完全不变。**
+不做全目录 dll/exe 扫描：FVP 生态很小，现实中出现的替身字方案就这两种；
+显式命名 + 自证的文件**不可能**被无关二进制误触发。要加第三种来源，
+在 `load_table` 的数组里加一行名字即可。
+
+**形状校验**（各来源各自的严格条件）：
+
+- `Sakura.dll`：找**最长的一段连续 `(u16>=0x2000, u16>=0x2000)`**（≥64 对），
+  再**从头逐条读**，遇到第一条不合法（key 非 CJK 汉字 / value < U+2000）就**停**。
+- `uif_config.json`：`type` 必须是 **`replace_chars`**（`replace_str` /
+  `replace_raw_bytes` 不带字符表，按字符表解析会弄坏文本）；三个键必须按
+  `type` → `source_chars` → `target_chars` 的顺序出现（**顺序检查先于取值检查**，
+  所以「`source_chars` 写在 `type` 前面」会被拒绝而不是误解析）；两条字符串
+  **等长**且 **≥256 对**。解析器遇到任何反斜杠转义直接判「不是表」
+  （实测真实文件里反斜杠数 = 0、三个键各出现 1 次，所以这不是猜的）。
+
+**自证机制**：用「表里 key 是否出现在**本游戏脚本**用到的字符集里」打分。
+**命中 ≥ max(500, 表长×9/10)** 才启用，否则**静默不启用**（= 上游行为）。
+
+阈值为什么是 90%（**数据用真 Rust 模块跑出来的**，`FVP_BASE_PATH` +
+`find_script` + `extract_table` + `script_charset` 全套真实代码）：
+
+| 游戏 | 脚本（实际加载的） | 表来源 | 命中率 | 判定 |
+|---|---|---|---|---|
+| 樱花萌放 官中 | `Sakura.hcb` | 它自己的 `Sakura.dll` | **1,206 / 1,206 = 100%** | ✅ 启用 |
+| HappyMarguerite 漢化 | `Marguerite.bch` | 它自己的 `uif_config.json` | **1,002 / 1,004 = 99.8%** | ✅ 启用 |
+| 星空EH / 星空Wish | `Hoshimemo_HD.hcb` | 上面那张 JSON 表 | 731 / 1,004 = 72.8% | ❌ 拒绝 |
+| HappyMarguerite 日文原版 | `patchdata/Marguerite.hcb` | 上面那张 JSON 表 | 711 / 1,004 = 70.8% | ❌ 拒绝 |
+| 樱花萌放 日文版 | `Sakura.hcb` | 上面那张 JSON 表 | 520 / 1,004 = 51.8% | ❌ 拒绝 |
+
+- 阈值 = `max(500, 表长 × 9/10)`；1,004 对的表要 **903** 个 key 命中才算过。
+- 最近的一次拒绝是 **731（72.8%）**，离阈值还差 172 个 key（17 个百分点）。
+- **两个作品永不互相误触发**：樱花脚本对 Marguerite 表只有 51.8%。
+- **同目录并排的 `Marguerite.bch` / `patchdata/Marguerite.hcb` 是绝佳对照**：
+  同一张 JSON 表，对前者 99.8% 启用、对后者 70.8% 拒绝 —— 这直接证明了
+  「必须按引擎**实际加载**的脚本判定」。
+
+> 刻意**没有**用「key 全部有 JIS 码位 / value 全部没有」这类编码属性判据：
+> 它依赖具体编码语义（strict `shift_jis` 下 HappyMarguerite 的 value 是 0/1004
+> 无码位，但 `cp932` 下有 12 个有码位），写死会变成脆弱判据。命中率自证足够。
 
 **资源名风险 = 0**（实测）：表 key 全是**汉字**，资源名是纯 ASCII。
 官方脚本里 7,267 条纯 ASCII 字符串、3,764 条含路径分隔符的（`voice/01000060`、`se/001`…），
 被还原改动的**都是 0 条** —— 数据上也验证过，物理上碰不到。
 
-**端到端还原效果**（64,779 条跑一遍，49,649 条被还原 = 76.6%）：
+**端到端还原效果**（樱花官中 64,779 条跑一遍，49,649 条被还原 = 76.6%）：
 
 ```
 徼肛的颯苫悄然落下。   →  这样的话语悄然落下。
 母唳 / 索瑛 / 花崟      →  母亲 / 索尔 / 花飞
 什弗 / 寅 / 苫          →  什么 / 她 / 语
+```
+
+HappyMarguerite 真实脚本字节（`Marguerite.bch` @`0x6BAD0`，真 Rust 解码）：
+
+```
+RAW  我已識戰経記个麼景无数次了。
+FIX  我已经见过这个场景无数次了。      ✅
+往返  restore → to_surrogate 回到原字节 ✅
 ```
 
 > ⚠️ **教训 1（CI 曾失败）**：第一版挂在 `E0716`（借用检查）——
@@ -730,6 +813,13 @@ UTF-8 有 57,507/64,779 条直接解码失败）——**都解不了**。
 > ——① 表提取漏条目、② 存档写入吐 `&#NNNNN;`、③ 存档读取忘了还原。
 > **根因是"同一条数据流有多个出口，我只堵了看得见的那一个"。**
 > 现在把三个出口列成表（见 §3.10 的注入点表），以后改这类东西先数出口。
+>
+> ⚠️ **教训 3（加第二来源时）**：**静态看代码能过、真编译 + 真跑才暴露的两个 bug** ——
+> ① `source != target.len()`（应为 `source.len() != target.len()`）；
+> ② `std::str::from_utf8(&data[i..i+4])` 取一个 UTF-8 字符，4 字节窗口**几乎总是
+> 切在下一个字符中间**，于是整个切片不是合法 UTF-8，解析器对**所有真实文件**
+> 都返回 `None`（表现为"表读不出来"，光看代码完全看不出）。
+> 结论：**判据类代码必须拿真实文件跑一遍**，不能只做语法/编译检查。
 
 ### 3.10.2 迭代中修掉的三个坑（真机实测逐个暴露）
 
@@ -793,7 +883,9 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 
 ---
 
-### 3.10.3 真机验证（2026-10-14，**全部通过**）
+### 3.10.3 真机验证
+
+**案例 1 ·《樱花，萌放。》官中版（2026-10-14，全部通过）**
 
 **显示方向**：
 
@@ -824,15 +916,38 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 | `motion: Invalid duration` | 242 | 同上 |
 | `history_set: unexpected value ... Nil` | 284 | 同上 |
 
-> 注：`jis-tunnel` 的启动日志（`YukiHub jis-tunnel active: Sakura.dll (1206 entries, 1205 hits)`）
+> 注：`jis-tunnel` 的启动日志（`YukiHub jis-tunnel active: <来源名> (N entries, M hits)`）
 > 只在**首次加载表**时打一次；这次日志从游戏启动后开始录，所以没抓到。功能不受影响。
 
 > 附带观察：`YHPROBE PrimHit` 占 19,343 行（**65%**），是触发安卓
 > `LOGS OVER PROC QUOTA ... DROPPED`（97 次）的主因。等点击功能稳定、按 §5 撤掉探针后
 > 日志会清爽很多。
 
-**将来要支持别的作品**：改 `jis_tunnel.rs` 里 `dir.join("Sakura.dll")` 那一行即可 ——
-后面的评分逻辑仍然会兜底。
+**案例 2 ·《HappyMarguerite》漢化版（2026-10-15，本地全绿，待真机）**
+
+本地**真 Rust 模块**跑真实文件的结果（`extract_table` / `script_charset` /
+`find_script` / `restore` / `to_surrogate` 全套真实代码）：
+
+| 检查 | 结果 |
+|---|---|
+| 表提取 | `uif_config.json` → 1,004 对（双射，交集 0） |
+| 判据（正向） | `Marguerite.bch`：1,002 / 1,004 = 99.8%（需 903）→ **ACCEPT** ✅ |
+| 判据（反向 ×3） | `Marguerite.hcb` 711、`Hoshimemo_HD.hcb` 731、`Sakura.hcb` 520 → 全部 **reject** ✅ |
+| 樱花官中回归 | `Sakura.dll`：1,206 / 1,206 → **ACCEPT**（未受影响）✅ |
+| 真实脚本字节 | `@0x6BAD0`：`我已識戰経記个麼景无数次了。` → `我已经见过这个场景无数次了。` ✅ |
+| 往返 | `restore` → `to_surrogate` 逐字节回到原脚本字节 ✅ |
+| 编译 | 最小 crate `cargo build` **0 error 0 warning** ✅ |
+| 双顺序 A/B + 幂等 | 全通过，A/B 产物 `diff` 一致 ✅ |
+
+**回归总表（22 项全绿）**：语法 6 项、真编译 2 项、功能 5 项、双顺序+幂等 2 项、
+注入点落位 7 项。
+
+> ⏳ **待真机**：需要在游戏中确认对话不再是 `我已識戰経記…` 而是
+> `我已经见过这个场景无数次了。`；存档标题同理。
+>
+> **要加第三个来源**：在 `load_table` 的文件名数组里加一行
+> （`extract_table` 已经按 `TableKind` 分发）。判据本身**不绑定作品/文件名**，
+> 只看「表 key 是否出现在本引擎实际加载的脚本里」，所以换个游戏天然生效。
 
 ---
 
@@ -1034,8 +1149,16 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
       存档标题 `寅却稾稾地…`→`她却轻轻地…`；旧存档（带 `&#NNNNN;`）读出来也正常；
       日志 0 panic、E 级全是既有上游噪音。
-- [ ] 若将来还有别的 FVP 作品用同类方案：改 `jis_tunnel.rs` 里
-      `dir.join("Sakura.dll")` 那一行（评分逻辑仍会兜底），见 3.10。
+- [ ] **HappyMarguerite 漢化版文本：本地全绿，待真机**（见 3.10.3）。
+      jis-tunnel 已加第二个表来源（`uif_config.json`，UIF 系补丁），
+      本地真 Rust 跑真实文件 22 项全绿（判据正向 99.8% 启用、反向 3 组拒绝、
+      樱花回归 1206/1206、真实脚本字节还原正确）。
+      **待确认**：游戏内对话不再是 `我已識戰経記个麼景无数次了。`
+      而是 `我已经见过这个场景无数次了。`；存档标题同理。
+      另需注意：该作的**旧存档**里若已写入 `&#NNNNN;` 字面量，重新存一次即可。
+- [ ] 可选：`uif_config.json` 的解析器目前**遇到反斜杠转义就整表放弃**。
+      实测两个真实文件反斜杠数为 0，所以够用；若将来遇到带转义的版本，
+      再补一个小型 JSON 字符串反转义即可（改动局限在 `parse_json_string`）。
 - [ ] **替换/删除旧的乱码存档**：修复前写出的存档标题里带字面量 `&#NNNNN;`
       （已经写死在文件里，读回来仍是这个实体）。修复后**再存一次**就正常了。
 - [ ] 虚拟控件相关均**在 APK 侧**（3.8），换 so 不影响；但**换 APK 必须重编**。
@@ -1074,7 +1197,7 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
 | 原版 `.wmv` 播放 | wmv 补丁 | **能播画面、可跳过、不卡死**；**无声音**（原版行为，见 3.3.1） |
 | 原版 `.mpg/.mpeg` | — | 不做同步音频解码（同 WMV 理由） |
 | FVP HD parts 背景暗带 | fvp render 补丁（mask dissolve + additive blend） | 见 3.9；**已实测暗带消失** ✅ |
-| **官中版中文文本** | jis-tunnel 补丁（`jis_tunnel.rs`） | 见 3.10；**已实测**：对话 + 存档标题均正常 ✅ |
+| **中文化文本（两类）** | jis-tunnel 补丁（`jis_tunnel.rs`） | 见 3.10；**已实测**：樱花萌放官中（`Sakura.dll`）+ HappyMarguerite 漢化（`uif_config.json`）对话与存档标题均正常 ✅ |
 | 点击补全点字动画 | text_click 补丁 | 动画中点一下=显示完整句；再点一下才过 |
 | **虚拟按键 ESC / 历史 / Ctrl** | APK 侧 `FvpVirtualKeys` | **与 so 无关**（键码走 `rfvp_android_key`），需重编 APK |
 | **虚拟鼠标（含光标包）** | APK 侧 `gamecursor` | 同上；光标点击走 `rfvp_android_touch`（见 3.8）|

@@ -65,7 +65,10 @@ jobs:
           # 转场：改成「擦掉开始时那一帧」，不再盖黑（上游 2a9ff58a）。
           # 依赖上一个补丁，必须紧随其后。
           python3 apply_fvp_dissolve_snapshot_patch.py
-          # 官方简体中文版的「SJIS 替身字」还原（YHFVP-JISTUNNEL-1.0）。
+          # 「SJIS 替身字」还原（YHFVP-JISTUNNEL-1.0）：表来源支持
+          #   - Sakura.dll        （樱花萌放官方简体中文版，二进制 UTF-16LE 表）
+          #   - uif_config.json   （UIF 系汉化/机翻补丁，如 HappyMarguerite_CHS）
+          # 判据自证（命中率 >= 90%），读不到或不匹配就静默不启用（= 上游行为）。
           # 与 text_patch 顺序无关（锚点刻意避开对方区域），已双顺序实测。
           python3 apply_fvp_jis_tunnel_patch.py
           # 音频：SoundSilentOn / AudioSilentOn 不应真的静音（对齐上游 be92e540 / 10.15 语义）。
@@ -169,7 +172,7 @@ jobs:
             echo "::error::librfvp.so 未包含 mask dissolve 补丁（缺 YHFVP-MASKDISSOLVE 标识）—— apply_fvp_mask_dissolve_patch.py 未生效"
             exit 1
           fi
-          # 官方简体中文版的 SJIS 替身字还原必须编进去
+          # SJIS 替身字还原必须编进去
           if grep -qa 'YHFVP-JISTUNNEL' "$SO"; then
             echo "SJIS 替身字还原补丁已编入 ✓ ($(grep -ao 'YHFVP-JISTUNNEL-[0-9.]*' "$SO" | head -1))"
           else
