@@ -86,19 +86,41 @@ JIS X 0208 里**没有码位**（「么 / 这 / 为 / 着 / 过 / 语 / 说 / �
 > （该游戏目录里的 `.CTFontHook/` 属于**另一份已删除的汉化版**残留，与本补丁无关，
 > 代码里也完全不读它。）
 
-做法
-----
+做法（**文字路径**，不是解析路径）
+--------------------------------
 新增模块 `crates/rfvp/src/jis_tunnel.rs`，在**三条路径**上各接一次：
 
 | # | 位置 | 方向 | 函数 |
 |---|---|---|---|
-| 1 | `script/parser.rs` 的 `decode_string_bytes()` | 脚本 → 屏幕 | `restore()` |
+| 1 | `text_manager.rs` 的 `set_text_content()` | 文字 → 屏幕 | `restore()` |
 | 2 | `save_manager.rs` 的 `decode_bytes()` | 存档 → 屏幕 | `restore()` |
 | 3 | `save_manager.rs` 的 `enc()` | 屏幕 → 存档 | `to_surrogate()` |
 
-1 是脚本文本的唯一解码出口；2/3 是存档的唯一读/写出口（`load_from_file` 与
-`load_from_mem` 里 6 个调用点全走 `decode_bytes`；全 workspace 只有 `enc()`
-一处把文本编码回 Shift-JIS）。
+**1 为什么必须是 `set_text_content()` 而不是 `decode_string_bytes()`**
+
+第一版把 1 接在 `script/parser.rs` 的 `decode_string_bytes()` 上（那是所有脚本
+字符串的唯一解码出口），结果**把资源名也一起改了**：HappyMarguerite 的立绘
+文件名是**日文汉字**（`CHR_練_…`、`CHR_撫子`、`CHR_爺`），表把它们改成
+`CHR_觑_…` / `CHR_垫子` / `CHR_练`，于是 `graph_load` 全部 `file not found`，
+**立绘和贴图整片消失**（文字却正常，因为文字本来就该被改）。
+
+樱花官中版没暴露这个问题，是因为它的资源名恰好是**纯 ASCII** ——
+「表里 key 全是汉字所以碰不到资源名」这个结论**只在纯 ASCII 资源名时成立**，
+对日文原版资源名完全不成立。这是第一版最根本的方法论错误。
+
+正确做法是**把还原放在"文字变成屏幕内容"的那一步**，让资源名/存档名等
+非显示字符串保持原样 —— 这也正是 PC 端 UIF 的方案（它在 `DrawTextA` 这个
+**绘制** API 上替换，物理上碰不到文件名）：
+
+| 阶段 | 是否包含资源名 | 能不能在这儿还原 |
+|---|---|---|
+| `decode_string_bytes()`（解析） | ✅ 包含 | ❌ |
+| `set_text_content()` → `parse_content_text()`（文字） | ❌ 不包含 | ✅ |
+| `text_print` / `text_reprint` 的 `history_set(Content)` | ❌ | ✅（已由 1 覆盖） |
+| `save_manager` 的 3 个字段（title/scene/script） | ❌ | ✅（由 2/3 覆盖） |
+
+`set_text_content` 全 workspace 只有 **2 个调用点**，都在 `text_print` 里
+（`Variant::String` 与 `Variant::ConstString` 两个分支），是文字内容的**唯一入口**。
 
 **脚本文件与存档文件都一个字节都不改**，所有字节偏移天然不变。
 
@@ -258,9 +280,32 @@ edition2024 依赖都需要更新的 cargo，所以只能这样单模块验证�
    都返回 `None`（表现为「表读不出来」，静态看代码完全看不出）。改成按首字节
    算长度、只取恰好一个字符。
 
-所以功能验证的搭法是：把模块贴进一个 **binary crate 的 `main.rs`**（而不是
-`lib.rs`），在后面接一个 `probe main`，就能直接调私有函数
-（`extract_table` / `script_charset` / `find_script`），再用**真实游戏目录**当输入：
+**第三个 bug（真机才暴露）：注入点选在了「数据」而不是「用途」上。**
+
+第一版把还原挂在 `script/parser.rs` 的 `decode_string_bytes()` —— 那是**所有**脚本
+字符串的出口，**资源名**也走它。HappyMarguerite 的立绘文件名是日文汉字：
+
+    CHR_練_基_道着竹刀L  ->  CHR_觑_基_道着竹刀L
+    CHR_撫子             ->  CHR_垫子
+    CHR_爺               ->  CHR_练
+    CHR_悠綺             ->  CHR_悠凿
+    CHR_響               ->  CHR_晚
+
+于是 `graph_load` 全部 `file not found`，**立绘与贴图整片消失**（文字却正常）。
+樱花官中版完全没暴露，因为它资源名是**纯 ASCII**（实测 6,082 个标识符里含
+非 ASCII 的 **0 个**）——「表 key 全是汉字所以碰不到资源名」这个结论
+**只在纯 ASCII 资源名时成立**。
+
+修法：把还原挪到**「文字 → 屏幕」这一步**（`text_manager.rs::set_text_content`），
+而不是「字符串解码」这一步 —— 资源名/文件名物理上不经过它
+（对齐 PC 端 UIF 在 `DrawTextA` 这个**绘制** API 上替换）。
+
+> **口诀：替身字还原要挂在「文字」上，不要挂在「数据」上。**
+
+第三个 bug 的教训还有一个方法论点：前两个 bug 是「代码写错」，这个 bug 是
+**「位置选错」** —— 光靠单测/编译/静态检查**永远发现不了**，只有真机能暴露
+（或者像本次这样，先看清调用链上「谁消费这个数据」再决定挂在哪）。
+拔调用链时一定要问：**这个出口上还流过什么非文本数据？**
 
     # gate: 表能不能被接纳
     FVP_BASE_PATH=<游戏目录> ./jtprobe gate
@@ -279,7 +324,7 @@ import sys
 from pathlib import Path
 
 LIB_RS = "crates/rfvp/src/lib.rs"
-PARSER_RS = "crates/rfvp/src/script/parser.rs"
+TEXT_RS = "crates/rfvp/src/subsystem/resources/text_manager.rs"
 SAVE_RS = "crates/rfvp/src/subsystem/resources/save_manager.rs"
 TUNNEL_RS = "crates/rfvp/src/jis_tunnel.rs"
 
@@ -762,26 +807,40 @@ pub mod rfvp_render;
 
 LIB_NEW = """#[cfg(all(not(feature = "no_std"), feature = "gpu-render"))]
 pub mod rfvp_render;
-// YukiHub patch: SJIS-tunnel surrogate restoration (official Simplified-Chinese
-// releases store their text as Shift-JIS with surrogate kanji; see module docs).
+// YukiHub patch: SJIS-tunnel surrogate restoration (Chinese releases store their
+// text as Shift-JIS with surrogate kanji; see the module docs).
 #[cfg(not(feature = "no_std"))]
 pub mod jis_tunnel;
 """
-
-# ---------------------------------------------------------------- parser.rs
+# ------------------------------------------------- text_manager.rs（注入点 1）
 #
-# `decode_string_bytes` 是**所有**脚本字符串（剧情/人名/syscall 名/标题）的唯一
-# 解码出口（`read_cstring` 的两条路径都汇到这里）。
-PARSER_OLD = """        Ok(s.to_string())
-    }
-"""
-PARSER_NEW = """        // YukiHub patch: official Simplified-Chinese builds encode text as
-        // Shift-JIS with surrogate kanji; restore them before returning.
-        #[cfg(not(feature = "no_std"))]
-        let s = crate::jis_tunnel::restore(&s);
-        Ok(s.to_string())
-    }
-"""
+# `set_text_content` 是**显示文字**的唯一入口 —— 全 workspace 只有 2 个调用点，
+# 都在 `syscalls/text.rs` 的 `text_print` 里（`Variant::String` 与
+# `Variant::ConstString` 两个分支）。
+#
+# 为什么不是 `script/parser.rs` 的 `decode_string_bytes()`：
+#   那是**所有**脚本字符串的出口，**资源名**也走它。HappyMarguerite 的立绘
+#   文件名是日文汉字（`CHR_練_…` / `CHR_撫子` / `CHR_爺`），第一次就把它们改成了
+#   `CHR_觑_…` / `CHR_垫子` / `CHR_练` → `graph_load` 全部 file not found
+#   → **立绘和贴图整片消失**。樱花官中版资源名是纯 ASCII 才没暴露这个问题。
+#   放在这里，资源名/文件名**永远不会被碰**（这也对齐 PC 端 UIF 在 DrawTextA 上替换）。
+#
+# 注意 text_manager.rs 这个 impl 块**没有 cfg 属性**，所以注入点不能带
+# `#[cfg(not(feature = "no_std"))]`（会让属性贴到 `let` 语句上报错）。
+# `jis_tunnel` 模块与 `String` 在两种构建下都可用，无需门控。
+TEXT_OLD = """    pub fn set_text_content(&mut self, id: i32, content_text: &str) {
+        self.items[id as usize].parse_content_text(content_text);
+    }"""
+
+TEXT_NEW = """    pub fn set_text_content(&mut self, id: i32, content_text: &str) {
+        // YukiHub patch: restore SJIS-tunnel surrogate kanji here, on the *text*
+        // path. Doing it in the script parser instead would also rewrite the
+        // resource / file names the script carries, which silently breaks every
+        // `graph_load` for titles whose asset names use kanji.
+        let content_text = crate::jis_tunnel::restore(content_text);
+        self.items[id as usize].parse_content_text(&content_text);
+    }"""
+
 
 # ------------------------------------------------------ save_manager.rs
 #
@@ -841,7 +900,7 @@ def apply_anchors(text: str, rel: str, pairs) -> "tuple[int, str]":
 
 
 def main() -> int:
-    for rel in (LIB_RS, PARSER_RS, SAVE_RS):
+    for rel in (LIB_RS, TEXT_RS, SAVE_RS):
         if not Path(rel).exists():
             # fail-fast：上游若重命名/移动了该文件，这里必须让 CI 红，而不是静默跳过。
             print(f"[FAIL] {rel} 不存在 —— 上游可能改了目录结构，补丁无法应用")
@@ -872,19 +931,19 @@ def main() -> int:
         lib_path.write_text(lib_text, encoding="utf-8")
         print(f"[OK]   {LIB_RS}: jis_tunnel 模块已注册")
 
-    # parser.rs
-    par_path = Path(PARSER_RS)
-    par_text = par_path.read_text(encoding="utf-8")
-    if "crate::jis_tunnel::restore" in par_text:
-        print(f"[OK]   {PARSER_RS}: 已应用（幂等）")
+    # text_manager.rs（注入点 1：显示文字）
+    txt_path = Path(TEXT_RS)
+    txt_text = txt_path.read_text(encoding="utf-8")
+    if "crate::jis_tunnel::restore" in txt_text:
+        print(f"[OK]   {TEXT_RS}: 已应用（幂等）")
     else:
-        rc, par_text = apply_anchors(
-            par_text, PARSER_RS, [("decode_string_bytes 出口", PARSER_OLD, PARSER_NEW)]
+        rc, txt_text = apply_anchors(
+            txt_text, TEXT_RS, [("set_text_content 入口", TEXT_OLD, TEXT_NEW)]
         )
         if rc != 0:
             return rc
-        par_path.write_text(par_text, encoding="utf-8")
-        print(f"[OK]   {PARSER_RS}: 替身字还原已接入 decode_string_bytes")
+        txt_path.write_text(txt_text, encoding="utf-8")
+        print(f"[OK]   {TEXT_RS}: 替身字还原已接入 set_text_content（文字路径）")
 
     # save_manager.rs（写入方向 + 读取方向，同一文件）
     sav_path = Path(SAVE_RS)
