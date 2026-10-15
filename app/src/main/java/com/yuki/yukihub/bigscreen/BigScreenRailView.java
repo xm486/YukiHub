@@ -178,7 +178,12 @@ public class BigScreenRailView extends LinearLayout {
         super(context, attrs);
         setOrientation(VERTICAL);
         setClipChildren(false);
-        setPadding(0, dp(6), 0, dp(6));
+        // 左右留出「焦点放大」的余量：焦点态条目 scaleX(1.03)，而收起态侧栏紧贴
+        // 屏幕左缘 —— 不留这点边距的话，左侧放大部分会直接伸出屏幕被裁掉，
+        // 表现为「选中框显示不全、左边圆角被切平」。
+        // 这个值必须和 BigScreenSizes.RAIL_FOCUS_BLEED 一致（那边算总宽时已计入）。
+        final int bleed = dp(BigScreenSizes.RAIL_FOCUS_BLEED);
+        setPadding(bleed, dp(6), bleed, dp(6));
         setLayoutParams(new ViewGroup.LayoutParams(dp(collapsedWidthDp), ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
@@ -257,6 +262,30 @@ public class BigScreenRailView extends LinearLayout {
         rebuild();
     }
 
+    // ===== 条目背景的**唯一**判定入口 =====
+    //
+    // 三种状态，互斥、优先级从高到低：
+    //   focus   —— 手柄焦点所在项 → bs_rail_item_active（**唯一画粉描边的**）
+    //   current —— 当前生效的分类   → bs_rail_item_current（只有淡底色，不画描边）
+    //   其余                        → bs_rail_item（全透明）
+    //
+    // 为什么必须分开：原先 focus 和 current 共用带描边的 active 资源，只要焦点
+    // 离开当前分类，屏幕上就出现两个一模一样的粉框。最典型的是「搜索」项 ——
+    // 它不是筛选、永远不会 current，焦点一移上去必然两个框。
+    //
+    // 三处调用点（rebuild / refreshStates / applyFocusVisual）都必须走这里，
+    // 否则又会各写一套判据而不同步。
+    private int itemBackground(boolean focused, boolean current) {
+        if (focused) { return R.drawable.bs_rail_item_active; }
+        if (current) { return R.drawable.bs_rail_item_current; }
+        return R.drawable.bs_rail_item;
+    }
+
+    /** 图标/文字的高亮判据：焦点 或 当前分类 都算「亮」 */
+    private boolean itemHighlighted(boolean focused, boolean current) {
+        return focused || current;
+    }
+
     /** 仅刷新计数与选中态（不重建视图，避免焦点闪烁） */
     public void refreshStates() {
         for (int i = 0; i < entries.size() && i < itemViews.size(); i++) {
@@ -271,9 +300,9 @@ public class BigScreenRailView extends LinearLayout {
             // 后者的无脑覆盖会把刚画好的焦点描边擦掉，表现是「切分类后
             // 手柄焦点高亮莫名消失」。判据与 applyFocusVisual 保持一致。
             boolean focused = zoneFocused && i == focusedIndex;
-            boolean highlight = focused || e.active;
-            item.setBackgroundResource(highlight
-                    ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
+            boolean current = e.active;
+            boolean highlight = itemHighlighted(focused, current);
+            item.setBackgroundResource(itemBackground(focused, current));
             if (i < labelViews.size() && labelViews.get(i) != null) {
                 labelViews.get(i).setTextColor(ContextCompat.getColor(getContext(),
                         highlight ? R.color.bs_text : R.color.bs_text_muted));
@@ -334,8 +363,10 @@ public class BigScreenRailView extends LinearLayout {
             LayoutParams lp = new LayoutParams(LayoutParams.MATCH_PARENT, dp(itemHeightDp));
             lp.bottomMargin = dp(2);
             item.setLayoutParams(lp);
+            // 初始背景：此刻 zoneFocused 还没定，统一按"当前分类"画淡底色，
+            // 焦点描边随后由 applyFocusVisual() 叠加（rebuild 尾部会调用它）。
             item.setBackgroundResource(entry.active
-                    ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
+                    ? R.drawable.bs_rail_item_current : R.drawable.bs_rail_item);
             item.setClickable(true);
             // 触摸：点一下就应用该筛选（手柄则靠方向键 + Ⓐ）
             item.setOnClickListener(v -> {
@@ -444,13 +475,10 @@ public class BigScreenRailView extends LinearLayout {
             View item = itemViews.get(i);
             Entry e = entries.get(i);
             boolean focused = zoneFocused && i == focusedIndex;
-            // 焦点态与选中态共用同一个背景资源（bs_rail_item_active 的粉描边），
-            // 差别只在有无缩放动效 —— 手柄能看出"焦点在哪"，同时当前生效的分类
-            // 也保持描边（失焦时不清掉 active，与 refreshStates 判据一致）。
-            boolean highlight = focused || e.active;
-            item.setBackgroundResource(highlight
-                    ? R.drawable.bs_rail_item_active : R.drawable.bs_rail_item);
-            applyIconTint(i, highlight);
+            boolean current = e.active;
+            // 背景走统一判定：焦点项画粉描边，当前分类只有淡底色（不重复画框）。
+            item.setBackgroundResource(itemBackground(focused, current));
+            applyIconTint(i, itemHighlighted(focused, current));
             item.animate().cancel();
             if (focused) {
                 item.animate().scaleX(1.03f).scaleY(1.03f).setDuration(160L)

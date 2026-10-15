@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  侧栏条目「当前分类」态（M23）：极淡底色，**不画描边**。
+
+  为什么要把「当前分类」和「手柄焦点」分开：
+  原先两者共用 bs_rail_item_active（粉描边），于是只要焦点离开当前分类，
+  屏幕上就会同时出现两个一模一样的粉框 ——
+  最典型的是「搜索」项：它永远不是 active（它不是筛选），
+  焦点一移上去就必然是两个框，实机反馈「同时选中框存在两个，很怪」。
+
+  现在的分工：
+    bs_rail_item          常态        —— 全透明
+    bs_rail_item_current  当前分类     —— 只有淡底色（本文件）
+    bs_rail_item_active   手柄焦点     —— 粉描边 + 淡底色（唯一会画描边的）
+  这样任何时候屏幕上最多只有一个粉框，语义也不重叠。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#1FFFFFFF" />
+    <corners android:radius="8dp" />
+</shape>
