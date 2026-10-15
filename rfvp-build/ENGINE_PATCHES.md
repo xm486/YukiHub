@@ -1032,30 +1032,49 @@ fn decode_bytes(nls: Nls, bytes: &[u8]) -> String {
 > `LOGS OVER PROC QUOTA ... DROPPED`（97 次）的主因。等点击功能稳定、按 §5 撤掉探针后
 > 日志会清爽很多。
 
-**案例 2 ·《HappyMarguerite》漢化版（2026-10-15）**
+**案例 2 ·《HappyMarguerite》漢化版（2026-10-15，真机确认 ✅）**
 
 **第一次真机**（注入点在解析路径）→ 文字正常 ✅，但 **立绘与贴图整片消失** ❌
 （见坑 4）。
 
-**修正后**（注入点挪到文字路径 `set_text_content`）：
+**第二次真机**（注入点挪到文字路径 + 补 backlog，CI 修掉 `Cow`/`String` 后）：
 
 | 检查 | 结果 |
 |---|---|
 | 真机日志 | `YukiHub jis-tunnel active: uif_config.json (1004 entries, 1002 hits)` ✅ |
-| 资源名 | **7 个**原本会被误改的（`CHR_撫子` / `CHR_爺` / `CHR_練_…` / `CHR_悠綺` / `CHR_響` …）→ 现在**全部原样** ✅ |
-| 表提取 | `uif_config.json` → 1,004 对（双射，交集 0） |
-| 判据（正向） | `Marguerite.bch`：1,002 / 1,004 = 99.8%（需 903）→ **ACCEPT** ✅ |
-| 判据（反向 ×3） | `Marguerite.hcb` 711、`Hoshimemo_HD.hcb` 731、`Sakura.hcb` 520 → 全部 **reject** ✅ |
-| 樱花官中回归 | `Sakura.dll`：1,206 / 1,206 → **ACCEPT**（未受影响）✅ |
-| 真实脚本字节 | `@0x6BAD0`：`我已識戰経記个麼景无数次了。` → `我已经见过这个场景无数次了。` ✅ |
-| 往返 | `restore` → `to_surrogate` 逐字节回到原脚本字节 ✅ |
-| 编译 | 最小 crate `cargo build` **0 error 0 warning** ✅ |
-| 双顺序 A/B + 幂等 | 全通过，A/B 产物 `diff` 一致 ✅ |
+| **贴图/立绘** | **恢复** ✅ —— `graph.bin: CHR_…` 报错 **4 条 → 0 条** |
+| 对话文字 | 正常 ✅ |
+| 回首过去 | 正常 ✅ |
+| 资源名 | 7 个原本会被误改的（`CHR_爺_…` / `CHR_撫子` / `CHR_悠綺` / `CHR_響` …）→ **全部原样** ✅ |
+| 樱花官中 | **同一份日志里**也跑了：`Sakura.dll (1206 entries, 1206 hits)`，一切照旧 ✅ |
 
-**回归总表（24 项全绿）**：语法 6 项、真编译 2 项、功能 5 项、双顺序+幂等 2 项、
-注入点落位 9 项（含「`parser.rs` 未被改动」这条反向检查）。
+**同一会话内两个游戏先后运行**（logcat 行号即启动顺序）：
 
-> ⏳ **待真机复验**：确认立绘/贴图回来 + 文字仍是 `我已经见过这个场景无数次了。`
+```
+01:03:25  jis-tunnel active: uif_config.json (1004 entries, 1002 hits)   ← HappyMarguerite
+01:06:07  jis-tunnel active: Sakura.dll      (1206 entries, 1206 hits)   ← 樱花萌放
+```
+
+**残留的 4 类 `not found` 全部与补丁无关**（逐条证明）：
+
+| 报错 | 次数 | restore 后 | 结论 |
+|---|---|---|---|
+| `graph.bin: SYS_WINDOW_DW` | 3 | `SYS_WINDOW_DW`（不变） | 脚本自己引用了包里没有的条目 |
+| `graph.bin: SYS_WINDOW_UP` | 3 | `SYS_WINDOW_UP`（不变） | 同上 |
+| `se_sys.bin: 013` | 1 | `013`（不变） | 同上 |
+| `voice2.bin: 000004` | 1 | `000004`（不变） | 同上 |
+
+且这些名字在 `graph.bin` 里**根本不存在**（0 次命中）—— 纯原版行为。
+对比：修复前的 `graph.bin: CHR_…` 是 **4 条**，现在 **0 条**。
+
+**日志体检**（19,865 行 / 5.5 分钟）：0 panic / 0 FATAL / 0 SIGSEGV / 0 ANR / 0 OOM。
+- E 级全是既有噪音（`Invalid id` 3,600、`graph_load invalid id: Nil` 2,272、
+  `Invalid alpha motion id` 1,173、`history_set … Nil` 286 等）。
+- `YHPROBE` **0 条**（探针已按 §4 撤除）✅
+- 日志配额丢弃 `LOGS OVER PROC QUOTA` **14 次**（撤探针前是 **97 次**，降 85%）✅
+
+**回归总表（28 项全绿）**：语法 6 项、真编译 4 项（模块本体 + **注入代码 stub**）、
+功能 5 项、双顺序+幂等 2 项、注入点落位 11 项。
 >
 > **要加第三个来源**：在 `load_table` 的文件名数组里加一行
 > （`extract_table` 已经按 `TableKind` 分发）。判据本身**不绑定作品/文件名**，
@@ -1261,14 +1280,14 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
       存档标题 `寅却稾稾地…`→`她却轻轻地…`；旧存档（带 `&#NNNNN;`）读出来也正常；
       日志 0 panic、E 级全是既有上游噪音。
-- [ ] **HappyMarguerite 漢化版：注入点已修正 + backlog 已补，待真机复验**
-      （见 3.10.3 / 坑 4 / 坑 5）。
-      第一次真机暴露「文字正常但**贴图整片消失**」—— 根因是 `restore()` 挂在
-      解析出口 `decode_string_bytes()`，把日文汉字资源名（`CHR_爺_…` 等 **7 个**）
-      也改了。修法：全部挪到文字路径（`set_text_content` + `history.rs` backlog +
-      `save_manager`），资源名物理上不经过。
-      **待确认**：① 立绘/贴图回来 ② 文字正确 ③ **回首过去（backlog）也正确**
-      ④ 樱花官中版完全不受影响。
+- [x] ~~**HappyMarguerite 漢化版：待真机复验**~~ → **已完成**（2026-10-15，见 3.10.3）。
+      真机实测四项全通过：**贴图/立绘恢复**（`graph.bin: CHR_…` 报错 4 → 0）、
+      对话文字正常、回首过去正常、**樱花官中版在同一份日志里也跑了且一切照旧**
+      （`Sakura.dll 1206 entries, 1206 hits`）。
+      残留的 `SYS_WINDOW_UP/DW`、`se_sys: 013`、`voice2: 000004` 共 8 条
+      **逐条验证过 restore 后不变**（且名字在资源包里根本不存在）→ 原版行为，非本补丁。
+      日志体检：0 panic/FATAL/SIGSEGV/ANR/OOM；`YHPROBE` 0 条；
+      配额丢弃 97 → **14 次**（探针撤除的副产品）。
 - [ ] 可选：`uif_config.json` 的解析器目前**遇到反斜杠转义就整表放弃**。
       实测两个真实文件反斜杠数为 0，所以够用；若将来遇到带转义的版本，
       再补一个小型 JSON 字符串反转义即可（改动局限在 `parse_json_string`）。
@@ -1310,7 +1329,7 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
 | 原版 `.wmv` 播放 | wmv 补丁 | **能播画面、可跳过、不卡死**；**无声音**（原版行为，见 3.3.1） |
 | 原版 `.mpg/.mpeg` | — | 不做同步音频解码（同 WMV 理由） |
 | FVP HD parts 背景暗带 | fvp render 补丁（mask dissolve + additive blend） | 见 3.9；**已实测暗带消失** ✅ |
-| **中文化文本（两类）** | jis-tunnel 补丁（`jis_tunnel.rs`） | 见 3.10；**已实测**：樱花萌放官中（`Sakura.dll`）+ HappyMarguerite 漢化（`uif_config.json`）对话与存档标题均正常 ✅ |
+| **中文化文本（两类）** | jis-tunnel 补丁（`jis_tunnel.rs`） | 见 3.10；**两款作品真机均确认**：樱花萌放官中（`Sakura.dll`）+ HappyMarguerite 漢化（`uif_config.json`）对话 / 回首过去 / 存档标题 / 立绘贴图全部正常 ✅ |
 | 点击补全点字动画 | text_click 补丁 | 动画中点一下=显示完整句；再点一下才过 |
 | **虚拟按键 ESC / 历史 / Ctrl** | APK 侧 `FvpVirtualKeys` | **与 so 无关**（键码走 `rfvp_android_key`），需重编 APK |
 | **虚拟鼠标（含光标包）** | APK 侧 `gamecursor` | 同上；光标点击走 `rfvp_android_touch`（见 3.8）|
