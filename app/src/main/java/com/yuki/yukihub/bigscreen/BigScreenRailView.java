@@ -30,15 +30,22 @@ import java.util.List;
  *
  * <p>行为：
  * <ul>
- *   <li>默认 <b>72dp 纯图标</b></li>
- *   <li>焦点进入侧栏 → <b>整栏动画展开到 250dp</b>（图标 + 文字 + 计数）</li>
- *   <li>焦点离开侧栏 → <b>动画收回 72dp</b>（先收字、后收框，避免文字被压扁）</li>
+ *   <li>默认 <b>纯图标窄栏</b>（宽度由 {@code BigScreenSizes.railCollapsedW} 注入）</li>
+ *   <li>焦点进入侧栏 → <b>整栏动画展开</b>（图标 + 文字 + 计数）</li>
+ *   <li>焦点离开侧栏 → <b>动画收回</b>（先收字、后收框，避免文字被压扁）</li>
  *   <li>可"钉住"展开（{@link #setPinned(boolean)}），钉住后焦点离开也保持展开</li>
  * </ul>
  *
+ * <p>尺寸不在这里写死 —— 全部由 {@link #setMetrics} 按屏幕注入（见 BigScreenSizes），
+ * 因为横屏手机上可用高度可能只有 ~350dp，写死的值一定会在某一档屏幕上出问题。
+ *
  * <p>动画参数（spec §S2-2）：
- * 宽度 220ms FastOutSlowIn；文字 alpha/位移 180ms（延迟 60ms）；
+ * 宽度 220ms FastOutSlowIn；文字 alpha/位移/缩放 180ms（延迟 60ms）；
  * 收起时文字 140ms 先走，宽度 200ms 延后 80ms 跟。
+ *
+ * <p><b>收起态那个亮框就是"条目"本身</b>（MATCH_PARENT = 侧栏宽），
+ * 所以"框比图标宽多少"完全由 railCollapsedW 决定 —— 要调这个观感，
+ * 改的是尺寸预算，不是把图标放大（踩过这个坑，见 {@link #ICON_RATIO}）。
  */
 public class BigScreenRailView extends LinearLayout {
 
@@ -73,29 +80,35 @@ public class BigScreenRailView extends LinearLayout {
     private static final float ICON_BOX_DP = 46f;
     private static final float LABEL_SHIFT_DP = 6f;
     /**
-     * 图标边长占 iconBox 的比例 —— **按展开状态区分**。
+     * 图标边长占 iconBox 的比例。
      *
-     * <p>收起态用 0.75：此时条目里只剩图标，图标应当撑满、与条目框视觉匹配。
-     * （初版写死 0.44 是只为展开态考虑的，导致收起时「图标小小的，底框却很大」，
-     * 实测框宽是图标的 4.5 倍。）
+     * <p>**这是一开始的原始值 0.44，我把它改回来。**
      *
-     * <p>展开态用 0.62：iconBox 右侧要接 label + count，图标让位、留足文字宽度。
+     * <p>踩过的坑（记录一下免得再来一次）：上一轮实机反馈「选中框比图标宽出一截」，
+     * 我判断成"框太宽"，于是走了"把图标放大去填框"的路（0.44→0.62/0.75）。
+     * 但真正的原因在 {@code BigScreenSizes.railCollapsedW} —— 那个宽度被 clamp 的
+     * 下限 40dp 顶住了（小屏横屏上 railItemH 触底 28dp，算出来本该 36dp）。
+     * 把图标放大，等于在错误的方向上加码：图标确实变大了，但框还是那么宽，
+     * 而且图标一大，侧栏整体显得又粗又挤 —— 实机反馈「难看的要死」。
      *
-     * <p>两者配合 {@code BigScreenSizes.railCollapsedW}（= iconBox + 10）后，
-     * 框/图标比在各档屏幕上约 1.5~2.0 倍，是常见的图标按钮内边距比例。
+     * <p>正确做法：**保持图标小巧（0.44），把框收窄去贴合它**。
+     *
+     * <p>另一个坑：比例**不能按展开状态区分**。之前给收起态 0.75、展开态 0.62，
+     * 结果手柄一进出侧栏，图标就会在 20dp ⇄ 16dp 之间跳一下 —— 很出戏。
+     * 固定一个值、两个状态共用，切状态时图标纹丝不动，只有文字进出。
      */
-    private static final float ICON_RATIO_COLLAPSED = 0.75f;
-    private static final float ICON_RATIO_EXPANDED = 0.62f;
+    private static final float ICON_RATIO = 0.44f;
 
-    /** 当前展开状态下应使用的图标比例 */
+    /** 当前展开状态下应使用的图标比例（与状态无关，保留方法是为了调用点稳定） */
     private float iconRatio() {
-        return expanded ? ICON_RATIO_EXPANDED : ICON_RATIO_COLLAPSED;
+        return ICON_RATIO;
     }
 
     /**
-     * 按当前展开状态重算图标尺寸。
-     * 收起态图标大（0.75）、展开态图标小（0.62），切换状态时要跟着变 ——
-     * 否则收起后图标还停留在展开态的小尺寸，框大图标小的问题依旧。
+     * 按当前 iconBoxDp 重算图标尺寸（比例见 {@link #ICON_RATIO}）。
+     *
+     * <p>只在 setMetrics()（屏幕尺寸变化）时调用 —— 图标尺寸与展开状态无关，
+     * 展开/收起不需要重算。
      */
     private void applyIconSize() {
         final int iconSize = dp(Math.round(iconBoxDp * iconRatio()));
@@ -228,7 +241,7 @@ public class BigScreenRailView extends LinearLayout {
                 iconBox.setLayoutParams(ilp);
             }
         }
-        // 图标尺寸统一由 applyIconSize 负责（它按当前展开状态算比例），
+        // 图标尺寸统一由 applyIconSize 负责（按 iconBoxDp × ICON_RATIO 算），
         // 避免这里再写一遍缩放公式、两处将来不一致。
         applyIconSize();
     }
@@ -506,8 +519,11 @@ public class BigScreenRailView extends LinearLayout {
         // 1) 先让文字可见（透明）→ 宽度先开框
         // iconBox 从「居中」切回「靠左」：展开态右侧要塞文字，图标必须让位到左边。
         // 跟宽度动画同步切换即可 —— 期间宽度还在变，视觉上不会跳。
+        //
+        // 这里**不再调 applyIconSize()**：图标比例已经与展开状态无关（恒定 0.44），
+        // 图标尺寸不随切换变化。而 setLayoutParams() 会触发一次完整 measure/layout，
+        // 放在宽度动画正中间只会白白抖一下。
         applyIconBoxGravity(true);
-        applyIconSize();
         for (int i = 0; i < labelViews.size(); i++) {
             TextView label = labelViews.get(i);
             label.setVisibility(VISIBLE);
@@ -562,7 +578,6 @@ public class BigScreenRailView extends LinearLayout {
             if (gen != textAnimGeneration || expanded) { return; }
             // 文字收完后图标回居中：收起态下条目里只剩图标，居中才与框视觉匹配
             applyIconBoxGravity(false);
-            applyIconSize();
             animateWidth(collapsedWidthPx(), WIDTH_COLLAPSE_MS, 0L, () -> {
                 if (gen != textAnimGeneration || expanded) { return; }
                 for (TextView label : labelViews) { label.setVisibility(GONE); }
