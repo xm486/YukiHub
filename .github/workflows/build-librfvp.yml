@@ -53,7 +53,7 @@ jobs:
           cp rfvp-build/apply_fvp_timer_stop_patch.py rfvp/
           cp rfvp-build/apply_fvp_text_cancel_patch.py rfvp/
           cp rfvp-build/apply_fvp_stack_visit_patch.py rfvp/
-          cp rfvp-build/apply_fvp_alpha_probe_patch.py rfvp/
+          cp rfvp-build/apply_fvp_color_probe_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -89,11 +89,12 @@ jobs:
           # prim 树遍历的 visit 缓冲改栈数组（YHFVP-STACKVISIT-1.0，上游 cbe9f1fa）。
           # 纯性能：每帧少 2 次 4KiB 堆分配，渲染结果不变。
           python3 apply_fvp_stack_visit_patch.py
-          # 【临时诊断探针】对话框背景不透明（YHFVP-ALPHAPROBE-1.0，用完即撤）。
-          # 只给 collect_tree 加一个 parent_alpha 参数并打印，不改任何绘制行为。
-          # 目的：确认游戏是把 alpha 设在父 Group（需补累积）还是压根没设（另找机制）。
+          # 【临时诊断探针 v2】对话框背景颜色/透明度不生效（YHFVP-COLORPROBE-1.0，用完即撤）。
+          # v1 在 collect_tree 里打 alpha，17k 条把 logcat 配额打爆（丢弃 60 万行），已废弃。
+          # v1 的结论仍然有效：顶层 Group alpha 全为 0，所以「累积父 alpha」这条路是错的。
+          # v2 只记录 ColorSet 的每一次写入，量很小（一局几十条）。
           # 排查完请删除本行与本脚本。
-          python3 apply_fvp_alpha_probe_patch.py
+          python3 apply_fvp_color_probe_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -172,22 +173,22 @@ jobs:
           test -f "$SO"
           llvm-nm -D "$SO" | grep -E 'rfvp_android_(create|step|set_text_scale|set_forced_font)'
           # 诊断探针已全部移除（点击补全已验证稳定）——产物里**不应**再出现 YHPROBE。
-          # 例外：alpha 探针（对话框背景排查中），只允许 `YHPROBE ALPHA` 这一条，
-          # 其它任何 YHPROBE 仍然 fail。排查完删掉 apply_fvp_alpha_probe_patch.py 后，
+          # 例外：颜色探针（对话框背景排查中），只允许 `YHPROBE COLOR` 这一条，
+          # 其它任何 YHPROBE 仍然 fail。排查完删掉 apply_fvp_color_probe_patch.py 后，
           # 本段自动回到「一条都不许有」。
-          STRAY=$(grep -ao 'YHPROBE [A-Za-z]*' "$SO" | sort -u | grep -v '^YHPROBE ALPHA$' || true)
+          STRAY=$(grep -ao 'YHPROBE [A-Za-z]*' "$SO" | sort -u | grep -v '^YHPROBE COLOR$' || true)
           if [ -n "$STRAY" ]; then
             echo "::error::librfvp.so 仍含未授权的 YHPROBE 诊断探针：$STRAY"
             exit 1
           fi
-          if grep -qa 'YHPROBE ALPHA' "$SO"; then
-            echo "::warning::alpha 探针在产物中（对话框背景排查期，属预期）"
+          if grep -qa 'YHPROBE COLOR' "$SO"; then
+            echo "::warning::颜色探针在产物中（对话框背景排查期，属预期）"
           else
             echo "无诊断探针 ✓（YHPROBE 已全部移除）"
           fi
-          # alpha 探针若被打上，标记必须也在（防止探针被静默漏掉）
-          if grep -qa 'YHFVP-ALPHAPROBE' "$SO"; then
-            echo "alpha 探针标记已编入 ✓ ($(grep -ao 'YHFVP-ALPHAPROBE-[0-9.]*' "$SO" | head -1))"
+          # 颜色探针若被打上，标记必须也在（防止探针被静默漏掉）
+          if grep -qa 'YHFVP-COLORPROBE' "$SO"; then
+            echo "颜色探针标记已编入 ✓ ($(grep -ao 'YHFVP-COLORPROBE-[0-9.]*' "$SO" | head -1))"
           fi
           # 外部文本替换补丁必须编进去（防止缓存命中导致补丁丢失、却上传旧产物）
           if grep -qa 'YHFVP-TEXTPATCH' "$SO"; then
