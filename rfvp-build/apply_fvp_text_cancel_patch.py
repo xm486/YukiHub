@@ -57,7 +57,11 @@ TW_OLD = """    pub fn thread_exit(&mut self, id: Option<u32>) {
         self.requests.push_back(ThreadRequest::Exit(id));
     }"""
 
-TW_NEW = """    /// YukiHub: 丢弃指向 `id` 的过期文本请求（`id == 0` 时全部保留）。
+TW_NEW = """    /// YukiHub: 丢弃指向 `id` 的过期文本请求。
+    ///
+    /// `id == 0` 表示**主线程**（`ThreadManager::start_main` -> `thread_start(0, ..)`），
+    /// 重启主线程意味着整局脚本重来，因此此时**清空全部**文本请求。
+    /// 非 0 时只剔除指向该线程的 `TextWait` / `TextResume`。
     ///
     /// 线程销毁/重启后，队列里可能还留着指向已消失上下文的 `TextWait` /
     /// `TextResume`；消费它们会把 pc=0 的上下文重新唤醒（unknown opcode）。

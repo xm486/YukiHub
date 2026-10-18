@@ -1241,6 +1241,14 @@ if item.elapsed > item.resolution {
 
 **待实测**：`はっぴい☆マーガレット!` 的存档/读档按钮是否可点。
 
+**真机实测（2026-10-19）：按钮正常了 ✅**
+
+**边界复查（补丁安全性）**：
+- `timer_set` 会**拒绝** `resolution <= 0`（报 `resolution should be in range 1..100000` 并返回），
+  所以 timer 一旦 enabled，`resolution` 必 > 0 —— **不存在 resolution=0 被第一帧误关的风险**；
+- 顺带收益：即便将来出现 resolution=0 的路径，补丁也会让 `enabled` 先变 false，
+  从而避开 `TimerGet(id, default)` 里 `elapsed / resolution` 的**除零 panic**（已用模拟验证）。
+
 ---
 
 ### 3.14 遗留 TextWait / TextResume —— 移植上游 `513b3955`（`TextResume` 守卫的根治版）
@@ -1264,9 +1272,16 @@ if item.elapsed > item.resolution {
 
 | 文件 | 新增/改动 |
 |---|---|
-| `thread_wrapper.rs` | `cancel_text_requests(id)`：`retain` 掉该 id 的 `TextWait`/`TextResume`（`id == 0` 全保留） |
-| `text_manager.rs` | `cancel_sync_print_waits(thread_id)`：清 `sync_wait_thread`（`thread_id == 0` 全清） |
+| `thread_wrapper.rs` | `cancel_text_requests(id)`：`retain` 掉该 id 的 `TextWait`/`TextResume`；**`id == 0`（主线程）时清空全部** |
+| `text_manager.rs` | `cancel_sync_print_waits(thread_id)`：清 `sync_wait_thread`（`thread_id == 0` 时全清） |
 | `vm_runner.rs` | 3 处调用：`should_exit` 成立时 / 消费 `Start` 时 / 消费 `Exit` 时 |
+
+**为什么 `id == 0` 要全清**：`ThreadManager::start_main()` 走的是
+`thread_start(0, entry_point)` —— **线程 0 就是主线程**。重启主线程等于整局脚本
+从头来，队列里任何残留文本请求都不该跨局存活。
+
+**`Exit(None)` 走的是 `id.unwrap_or(tid)`**：`Exit(None)` 语义是「退出所有线程」，
+但我们只清 `tid` 那一条，而不是全清 —— 这是**照上游原样**实现的，没有额外扩大清除范围。
 
 **锚点冲突处理（关键）**：`vm_runner.rs` 已被 `apply_text_click_patch.py` 改过
 （两处 `TextResume` 守卫）。本补丁锚点**刻意避开那两段**，只落在
@@ -1391,7 +1406,7 @@ if item.elapsed > item.resolution {
       也要用日志确认脚本到底调没调、调了几次。
       注：「声音糊/底噪」是另一条线，不在本补丁范围（10.15 也未专门处理它）。
 - [ ] 关注上游 commit：出现 `dissolve` / `render` / `audio` 相关改动时回来看。
-- [x] ~~**老 FVP 按钮点不动（issue #49）**~~ → **已移植上游 `a1091393`，待真机实测**（见 3.13）。
+- [x] ~~**老 FVP 按钮点不动（issue #49）**~~ → **已移植上游 `a1091393`，真机实测通过**（见 3.13）。
       上游已关闭我们提的 issue #49。注意：**「点击穿透」是我们自己修的，与上游无关**
       （上游 10.18 并未修穿透）。
 - [ ] **10.18 未移植项（有意跳过）**：`7958dd37`（存档恢复时回放 GraphRGB）与
@@ -1402,6 +1417,25 @@ if item.elapsed > item.resolution {
       （`audio_player/*`、`rfvp_audio/*` 全无变化，`kira.rs` 与 10.09 逐字节相同）。
       若仍有噪音，真凶在别处（可能是 10.15 的 `fix audio` 我们尚未移植的
       `channels.rs` 重构 + kira 容量限制），需要单独排查。
+      **（2026-10-19 用户确认：噪音只在那一个作品的一段出现，不再追。）**
+- [x] ~~**日志体检（2026-10-19，按钮修复后）**~~ → **无新增问题**。
+      1,849 行 / 663 行 rfvp：**panic 0、SIGABRT 0、YHPROBE 0**。
+      E 级 179 行全部归为**上游原有噪音**，逐条核对过：
+      | 消息 | 次数 | 判定 |
+      |---|---|---|
+      | `motion: Invalid id` | 150 | 上游代码逐字相同（14 处 `log::error!`，基线 = 10.18）。集中在 383ms 内，是某段脚本批量调 `motion_*` 传了非 Int 的 id，函数**静默返回 Nil**，无副作用 |
+      | `history_set: ... set_voice/set_name : Nil` | 19 | 上游原有，`history.rs` 日志语句与基线一致（差异 4 行均为 `args: &[Variant]` 签名迁移） |
+      | `prim_set_xy: invalid id : Nil` | 3 | 上游原有 |
+      | `audio_load: open BGM stream from vfs: voice2/000004` + `file not found` | 4 | **游戏数据本身缺文件**（`voice2.bin` 里没有 `000004`），不是引擎 bug |
+      | `syscall error: file not found in pack .../HappyMarguerite` | 3 | 同上，资源缺失 |
+
+      **顺带核实的两个「看着可疑、其实正常」**：
+      - `text_patch: YHFVP-TEXTPATCH-1.0 (樱花，萌放。 ...) active` 出现在
+        `はっぴぃ☆マーガレット！` 的会话里 —— `PATCH_TARGET` 是**编译期写死的标签**，
+        真正的判据是「表 key 命中脚本偏移 >= 20%」（`hits * 5 < offsets.len()` 则跳过）。
+        樱花那条是 `active`（真的生效）；**マーガレット 没有打这行日志 = 判据没过、正确跳过**。
+      - `jis_tunnel active: uif_config.json (1004 entries, 1002 hits)` ——
+        1002/1004 命中，正常。
 - [x] ~~**官中版 SJIS 替身字还原：待真机验证**~~ → **已完成**（见 3.10.3）。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
       存档标题 `寅却稾稾地…`→`她却轻轻地…`；旧存档（带 `&#NNNNN;`）读出来也正常；
