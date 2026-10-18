@@ -50,6 +50,9 @@ jobs:
           cp rfvp-build/apply_fvp_dissolve_snapshot_patch.py rfvp/
           cp rfvp-build/apply_fvp_jis_tunnel_patch.py rfvp/
           cp rfvp-build/apply_audio_silent_fix_patch.py rfvp/
+          cp rfvp-build/apply_fvp_timer_stop_patch.py rfvp/
+          cp rfvp-build/apply_fvp_text_cancel_patch.py rfvp/
+          cp rfvp-build/apply_fvp_stack_visit_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -74,6 +77,17 @@ jobs:
           # 音频：SoundSilentOn / AudioSilentOn 不应真的静音（对齐上游 be92e540 / 10.15 语义）。
           # 带一条 YHPROBE SilentOn 探针，用于确认脚本调用事实。
           python3 apply_audio_silent_fix_patch.py
+          # timer 到点即停（YHFVP-TIMERSTOP-1.0，上游 a1091393，issue #49）。
+          # 老 FVP 的存档按钮靠 TimerGet(1)==0 判断空闲；rfvp 此前让 elapsed 无限增长，
+          # 条件永不成立 -> 按钮点不动。只改 tick()，与其它补丁无锚点重叠。
+          python3 apply_fvp_timer_stop_patch.py
+          # 线程结束/重启时清掉遗留的 TextWait/TextResume（YHFVP-TEXTCANCEL-1.0，上游 513b3955）。
+          # 是「TextResume 守卫」的根治版：守卫在消费端止血，本补丁在源头清除。
+          # 锚点刻意避开 apply_text_click_patch 改过的两处守卫，两者可叠加。
+          python3 apply_fvp_text_cancel_patch.py
+          # prim 树遍历的 visit 缓冲改栈数组（YHFVP-STACKVISIT-1.0，上游 cbe9f1fa）。
+          # 纯性能：每帧少 2 次 4KiB 堆分配，渲染结果不变。
+          python3 apply_fvp_stack_visit_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -184,6 +198,27 @@ jobs:
             echo "转场快照补丁已编入 ✓ ($(grep -ao 'YHFVP-DISSOLVESNAPSHOT-[0-9.]*' "$SO" | head -1))"
           else
             echo "::error::librfvp.so 未包含转场快照补丁（缺 YHFVP-DISSOLVESNAPSHOT 标识）—— apply_fvp_dissolve_snapshot_patch.py 未生效"
+            exit 1
+          fi
+          # timer 到点即停（issue #49）必须编进去
+          if grep -qa 'YHFVP-TIMERSTOP' "$SO"; then
+            echo "timer 到点即停补丁已编入 ✓ ($(grep -ao 'YHFVP-TIMERSTOP-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 timer 到点即停补丁（缺 YHFVP-TIMERSTOP 标识）—— apply_fvp_timer_stop_patch.py 未生效"
+            exit 1
+          fi
+          # 过期文本请求取消必须编进去
+          if grep -qa 'YHFVP-TEXTCANCEL' "$SO"; then
+            echo "过期文本请求取消补丁已编入 ✓ ($(grep -ao 'YHFVP-TEXTCANCEL-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含文本请求取消补丁（缺 YHFVP-TEXTCANCEL 标识）—— apply_fvp_text_cancel_patch.py 未生效"
+            exit 1
+          fi
+          # visit 缓冲改栈数组必须编进去
+          if grep -qa 'YHFVP-STACKVISIT' "$SO"; then
+            echo "visit 栈缓冲补丁已编入 ✓ ($(grep -ao 'YHFVP-STACKVISIT-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 visit 栈缓冲补丁（缺 YHFVP-STACKVISIT 标识）—— apply_fvp_stack_visit_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"

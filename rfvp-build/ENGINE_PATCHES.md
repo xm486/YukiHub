@@ -32,8 +32,11 @@ apply_fvp_mask_dissolve_patch.py   # 9. Mask dissolve 遮罩渐变（上游 e95f
 apply_fvp_dissolve_snapshot_patch.py # 10. 转场改为「擦掉起始帧」（上游 2a9ff58a）· YHFVP-DISSOLVESNAPSHOT-1.0
 apply_fvp_jis_tunnel_patch.py      # 11. 官中版 SJIS 替身字还原 · YHFVP-JISTUNNEL-1.0
 apply_audio_silent_fix_patch.py    # 12. SoundSilentOn/AudioSilentOn 不再真静音（上游 be92e540）
+apply_fvp_timer_stop_patch.py      # 13. timer 到点即停（上游 a1091393，issue #49）· YHFVP-TIMERSTOP-1.0
+apply_fvp_text_cancel_patch.py     # 14. 清掉遗留 TextWait/TextResume（上游 513b3955）· YHFVP-TEXTCANCEL-1.0
+apply_fvp_stack_visit_patch.py     # 15. visit 缓冲改栈数组（上游 cbe9f1fa）· YHFVP-STACKVISIT-1.0
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 16. video-sys 解码器 ByteBuffer 模式
 ```
 > 8 与 9 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
 > 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
@@ -63,6 +66,9 @@ video-sys-cpu-read.patch       # 13. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_dissolve_snapshot_patch.py` | `mask_dissolve.rs` / `gpu_prim.rs` / `motion_manager` / `app.rs` | 转场改为**擦掉开始时那一帧**（不再盖黑），修转场生硬（见 3.12）· **须紧跟上一个补丁** |
 | `apply_fvp_jis_tunnel_patch.py` | `jis_tunnel.rs`(新) / `lib.rs` / `text_manager.rs` / `history.rs` / `save_manager.rs` | **SJIS 替身字还原**（Unicode→Unicode）。表来源双认：`Sakura.dll`（樱花萌放官中版）/ `uif_config.json`（UIF 系汉化，如 HappyMarguerite_CHS）。**全部挂在文字路径**（对话/backlog/存档），不碰资源名，标识 `YHFVP-JISTUNNEL-1.0`（见 3.10） |
 | `apply_audio_silent_fix_patch.py` | `audio_player/se_player.rs` / `bgm_player.rs` | `SoundSilentOn`/`AudioSilentOn` **不再真的静音**（对齐上游 10.15，见 3.11） |
+| `apply_fvp_timer_stop_patch.py` | `timer_manager.rs` | timer 到点即停、`TimerGet(id,nil)` 归零，修老 FVP **按钮点不动**（见 3.13）· `YHFVP-TIMERSTOP-1.0` |
+| `apply_fvp_text_cancel_patch.py` | `thread_wrapper.rs` / `text_manager.rs` / `vm_runner.rs` | 线程结束/重启时清掉遗留 `TextWait`/`TextResume`，是 `TextResume` 守卫的**根治版**（见 3.14）· `YHFVP-TEXTCANCEL-1.0` |
+| `apply_fvp_stack_visit_patch.py` | `gpu_prim.rs` | prim 树遍历的 visit 缓冲由堆 `vec!` 改栈数组，每帧少 2 次 4KiB 分配（见 3.15）· `YHFVP-STACKVISIT-1.0` |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -1196,6 +1202,112 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
 
 ---
 
+### 3.13 老 FVP 按钮点不动（timer 到点不停）—— 移植上游 `a1091393`
+
+**来源**：上游 `a1091393`（"fix(timer): stop a timer once it reaches its resolution"，
+2026-10-18，closes **issue #49**）。issue 正文正是我们提的
+`upstream_issue_legacy_button_pairs.md`。
+
+**现象**：老 FVP 作品（如 `はっぴい☆マーガレット!`）里，存档/读档按钮**点不动**，
+点击落到了「文字推进」上。
+
+**根因**（上游用 IDA 反推 `sub_412430` / `sub_436EC0`）：
+
+| 引擎 | `tick()` 行为 | `TimerGet(id, nil)` |
+|---|---|---|
+| 原引擎 | elapsed 超过 resolution 时**夹到 resolution 并关闭 timer** | 走 `enabled == false` 分支 → **0** |
+| 基线 rfvp | 只做 `saturating_add`，elapsed 一直涨、timer 一直 enabled | 返回**无限增长的值**，永不为 0 |
+
+脚本用 `TimerGet(1) == 0` 判断「按钮空闲可点」，条件永不成立 → 按钮失效。
+
+**修复**（`timer_manager.rs`，4 行）：
+
+```rust
+if item.elapsed > item.resolution {
+    item.elapsed = item.resolution;
+    item.enabled = false;
+}
+```
+
+**顺带收益**：resolution 未设置（=0）的 timer 第一帧就停，
+规避了 `TimerGet` 里 `elapsed / resolution` 的除零。
+
+**与「点击穿透」的关系（重要，别混）**：
+- **穿透**是我们自己补丁修的（`apply_text_click_patch.py`），**上游 10.18 并没有修**；
+- 本补丁只负责让**按钮的脚本条件**能成立。两者互补，不是同一件事。
+
+**验证（本轮）**：锚点 1 处命中；幂等复跑全绿；`tick()` 与上游逐字一致（14 行）；
+括号平衡与基线一致；标记 `YHFVP-TIMERSTOP-1.0` 长度 19 ✅。
+
+**待实测**：`はっぴい☆マーガレット!` 的存档/读档按钮是否可点。
+
+---
+
+### 3.14 遗留 TextWait / TextResume —— 移植上游 `513b3955`（`TextResume` 守卫的根治版）
+
+**来源**：上游 `513b3955`（"fix(vm): cancel stale text completion requests"，2026-10-16）。
+
+**背景**：`ThreadWrapper` 的请求队列是**全局**的。线程销毁后，队列里可能还留着
+指向**已消失线程**的请求：
+
+| 遗留请求 | 被消费时的后果 |
+|---|---|
+| `TextResume(id)` | 给 pc=0 的上下文解除 TEXT 阻塞 → 下帧跳到 0 地址 → unknown opcode → **SIGABRT** |
+| `TextWait(id)` | 把已销毁的上下文重新标成 TEXT → 永远挂住 |
+
+**我们已有的防护**：`apply_text_click_patch.py` 在**消费端**加了守卫 ——
+只有 `st.contains(CONTEXT_STATUS_TEXT)` 才允许恢复。那是**止血**。
+
+**上游的解法**：在**源头**（线程退出/重启时）清掉该线程的过期请求 —— 这是**根治**。
+
+**修复**（3 个文件）：
+
+| 文件 | 新增/改动 |
+|---|---|
+| `thread_wrapper.rs` | `cancel_text_requests(id)`：`retain` 掉该 id 的 `TextWait`/`TextResume`（`id == 0` 全保留） |
+| `text_manager.rs` | `cancel_sync_print_waits(thread_id)`：清 `sync_wait_thread`（`thread_id == 0` 全清） |
+| `vm_runner.rs` | 3 处调用：`should_exit` 成立时 / 消费 `Start` 时 / 消费 `Exit` 时 |
+
+**锚点冲突处理（关键）**：`vm_runner.rs` 已被 `apply_text_click_patch.py` 改过
+（两处 `TextResume` 守卫）。本补丁锚点**刻意避开那两段**，只落在
+`thread_exit` / `Start` / `Exit` 三处，**两者可叠加**（已按 workflow 顺序实测）。
+
+**幂等注意**：标记 `YHFVP-TEXTCANCEL-1.0` 只落在 `thread_wrapper.rs`，
+所以**幂等判断按文件各用各的哨兵**（`fn cancel_text_requests` /
+`fn cancel_sync_print_waits` / `cancel_text_requests(tid)`）。
+用全局 MARKER 判断会让另两个文件永远"未应用"→ 重复插入。
+
+**验证（本轮）**：3 文件锚点全部 1 处命中；幂等第 2 遍全绿；
+`retain` 闭包 + `VecDeque` 单独用 `rustc` 编译并跑通；
+4 段代码块与上游逐字一致；括号平衡不变；标记长度 20 ✅。
+
+**待实测**：长流程（多分支/多结局）下是否还有 `unknown opcode` / SIGABRT。
+
+---
+
+### 3.15 prim 树遍历 visit 缓冲改栈数组 —— 移植上游 `cbe9f1fa`
+
+**来源**：上游 `cbe9f1fa`（"perf(render): use bounded stack traversal scratch"，
+2026-10-16，PR #54）。
+
+**问题**：`GpuPrimRenderer::build()` 每帧遍历两棵树（root 0 + overlay root），
+每次 `vec![0u8; 4096]` 分配 4 KiB 堆内存、用完即丢 → **约 120 次/秒**的堆分配/释放。
+
+**修复**：`vec![0u8; 4096]` → `[0u8; 4096]`（栈数组）。上界不变（仍 4096 项），
+只是不再走堆。
+
+**锚点注意**：两处 `let mut visit = vec![0u8; 4096];` 是**前缀关系**
+（`vec![0u8; 4096];` 本身是 `vec![0u8; 4096]; // do NOT reuse...` 的子串），
+只匹配第一行会 `count == 2`。必须带上后续行 `self.collect_tree(` 才能唯一定位。
+
+**验证（本轮）**：2 处命中且各只改 1 次；幂等复跑全绿；
+两行结果与上游逐字相同；栈数组 + `&mut [u8]` 单独 `rustc` 编译跑通；
+括号平衡不变；标记长度 20 ✅。
+
+**待实测**：纯性能改动，渲染结果应完全不变（暗带/转场均不受影响）。
+
+---
+
 ## 4. YHPROBE 探针（**已全部移除**）
 
 > 历史记录。探针在 2026-10-15 随点击补全稳定后**整体撤除**，
@@ -1259,6 +1371,9 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
       `motion: Invalid duration`、`Invalid alpha motion id`、`Invalid id`、
       `float_to_int: Invalid value type`、`history_set: unexpected value ... Nil`。
 - [ ] `TextResume` 保护可考虑反馈给上游（这是真实崩溃点）。
+      **更新（2026-10-18）**：上游 `513b3955` 已独立做出同样的 `if contains(CONTEXT_STATUS_TEXT)`
+      判断，并进一步做了源头清除（`cancel_text_requests`）。我们已移植（见 3.14）——
+      因此这条可以**关闭**：上游已知晓并修好了。
 - [ ] **WMV 音频：明确不做**（见 3.3.1）。若将来上游把 `wma/mdct.rs` 的
       `MdctNaive` 换成 FFT 实现（性能提升到实时以上），才值得重新评估
       "WMV 层效果也解音频"。**目前维持现状。**
@@ -1276,6 +1391,17 @@ a slot would bring it back."* —— 即**静音这件事整体被移除**。
       也要用日志确认脚本到底调没调、调了几次。
       注：「声音糊/底噪」是另一条线，不在本补丁范围（10.15 也未专门处理它）。
 - [ ] 关注上游 commit：出现 `dissolve` / `render` / `audio` 相关改动时回来看。
+- [x] ~~**老 FVP 按钮点不动（issue #49）**~~ → **已移植上游 `a1091393`，待真机实测**（见 3.13）。
+      上游已关闭我们提的 issue #49。注意：**「点击穿透」是我们自己修的，与上游无关**
+      （上游 10.18 并未修穿透）。
+- [ ] **10.18 未移植项（有意跳过）**：`7958dd37`（存档恢复时回放 GraphRGB）与
+      `783d7d57`（存档保留被改过的贴图快照）。两者都改 `graph_buff.rs` 的存档格式，
+      而我们在该文件已有 mask dissolve 的 `generation` 改动（基线→10.18 差 345 行）。
+      风险是**旧存档读不回来**。除非真遇到「读档后画面不对」，否则不动。
+- [ ] **10.18「音频噪音降低」= 未证实**。10.15→10.18 **零音频文件改动**
+      （`audio_player/*`、`rfvp_audio/*` 全无变化，`kira.rs` 与 10.09 逐字节相同）。
+      若仍有噪音，真凶在别处（可能是 10.15 的 `fix audio` 我们尚未移植的
+      `channels.rs` 重构 + kira 容量限制），需要单独排查。
 - [x] ~~**官中版 SJIS 替身字还原：待真机验证**~~ → **已完成**（见 3.10.3）。
       真机实测三项全通过：对话文本 `什弗`→`什么`、破折号 `禳禳`→`——`、
       存档标题 `寅却稾稾地…`→`她却轻轻地…`；旧存档（带 `&#NNNNN;`）读出来也正常；
