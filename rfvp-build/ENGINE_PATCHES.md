@@ -40,8 +40,9 @@ apply_fvp_colorset_signed_patch.py # 17. ColorSet 有符号检查（同 ADR-0001
 apply_fvp_syscall_semantics_patch.py # 18. PrimSetZ/TimerSuspend/PrimSetRS 语义（ADR-0003/0004）· YHFVP-SYSCALL-SEMANTICS-1.0
 apply_fvp_prev_frame_patch.py      # 19. Sprt -1 = 画上一帧（上游 ADR-0002）· YHFVP-PREVFRAME-1.0
 apply_fvp_audio_units_patch.py     # 20. 音频两个单位 bug：音量线性→dB、pan 0..1→-1..1 · YHFVP-AUDIO-UNITS-1.0
+apply_fvp_mimalloc_patch.py        # 21. mimalloc 全局分配器（对齐上游 10.19）· YHFVP-MIMALLOC-1.0
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 21. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 22. video-sys 解码器 ByteBuffer 模式
 ```
 > 8 与 9 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
 > 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
@@ -79,6 +80,7 @@ video-sys-cpu-read.patch       # 21. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_syscall_semantics_patch.py` | `graph.rs` / `timer.rs` | `PrimSetZ`/`TimerSuspend` 判 `True`；`PrimSetRS/RS2` 缩放钳到 [100,10000]（见 3.16）· `YHFVP-SYSCALL-SEMANTICS-1.0` |
 | `apply_fvp_prev_frame_patch.py` | `render_target.rs` / `gpu_prim.rs` / `app.rs` | **Sprt 纹理 -1 = 绘制上一帧**，修设置界面背景（见 3.16）· `YHFVP-PREVFRAME-1.0` |
 | `apply_fvp_audio_units_patch.py` | `bgm_player.rs` / `se_player.rs` | **音频两个单位 bug**：线性音量当 dB 传 kira、pan 没映射到 -1..1（见 3.17）· `YHFVP-AUDIO-UNITS-1.0` |
+| `apply_fvp_mimalloc_patch.py` | `Cargo.toml` / `lib.rs` | **mimalloc 全局分配器**，释放的大块真正还给系统（见 3.18）· `YHFVP-MIMALLOC-1.0` |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -1535,6 +1537,97 @@ fn panning(pan: f64) -> kira::Panning {
    修复只是把「两路就必爆」变成「需要更多路才爆」。
 
 **待实测**：噪音是否消失、音量滑条是否真的能调、是否还有偏右感。
+
+---
+
+### 3.18 mimalloc 全局分配器（对齐上游 10.19）
+
+**来源**：上游 10.19 把 `mimalloc` 加进了 default features。
+
+#### 上游原文
+
+```toml
+# crates/rfvp/Cargo.toml
+default = [..., "logging", "mimalloc"]
+mimalloc = ["dep:mimalloc"]
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "uefi")))'.dependencies]
+mimalloc = { version = "0.1", default-features = false, optional = true }
+```
+
+```rust
+// crates/rfvp/src/lib.rs
+/// The allocator of the desktop and mobile builds. The system mallocs keep freed large blocks
+/// resident for reuse (on macOS about 100 MiB once a game had decoded its pictures and read
+/// back a frame for a save); mimalloc gives freed memory back to the system.
+#[cfg(all(feature = "mimalloc", not(feature = "no_std"), not(target_arch = "wasm32"), not(target_os = "uefi")))]
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+```
+
+#### 为什么值得移植
+
+系统 malloc 对**大块**释放后倾向于「留着复用」，不还给 OS。游戏读过一堆图片、
+又为存档缩略图回读了一整帧之后，那块内存就一直占着（上游在 macOS 量到约 100 MiB）。
+mimalloc 会把空闲页真正归还 —— **对 Android 低端机（内存紧张、易被杀）有实际意义**。
+
+#### 我们补丁做了什么
+
+| 文件 | 改动 |
+|---|---|
+| `crates/rfvp/Cargo.toml` | `default` 加 `mimalloc`；新增 `mimalloc = ["dep:mimalloc"]`；在 `cfg(all(not(wasm32), not(uefi)))` 块里声明依赖 |
+| `crates/rfvp/src/lib.rs` | `compile_error!` 与 `pub mod host_api;` 之间插入 `#[global_allocator]` |
+
+**插入位置与上游完全一致**（上游是 1031 与 1039 行之间，我们是同一处），
+`Cargo.toml` 的 4 行与上游**逐字相同**（只有注释前缀 `YukiHub:` 不同）。
+
+#### 已验证（静态层面）
+
+| 项 | 结果 |
+|---|---|
+| 21 个补丁串行 + 二次幂等 | ✅ 全绿 |
+| `Cargo.toml` 的 mimalloc 4 行 vs 上游 10.19 | ✅ **逐字一致** |
+| `lib.rs` 的 cfg + `global_allocator` vs 上游 | ✅ **逐字一致**，位置相同 |
+| `tomllib` 解析 Cargo.toml | ✅ 合法，`default` 含 `mimalloc`，feature = `["dep:mimalloc"]` |
+| 标记 `YHFVP-MIMALLOC-1.0`（18 字节） | ✅ 声明/实际一致，rustc 编译通过 |
+| 括号平衡 | ✅ `{}` `()` `[]` 全部与基线一致 |
+| cfg 三重排除 | ✅ `not(no_std)` / `not(wasm32)` / `not(uefi)` 都在 |
+
+#### ⚠️ 编译通过 ≠ 没问题（重要）
+
+`mimalloc` 依赖 `libmimalloc-sys`，**含 C 代码**，交叉编译要靠 NDK 的 clang
+（CI 里 NDK r26d + `CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER` 已配好）。
+
+**但全局分配器是所有堆分配的地基，编译通过完全测不出运行时问题**：
+
+| 编译通过能证明 | 编译通过**不能**证明 |
+|---|---|
+| API/类型用对 | 运行时会不会随机崩溃 |
+| C 交叉工具链找得到 | TLS / 内存对齐在 Android 上是否正常 |
+| 链接能过 | 是否真的降低内存、有没有碎片/性能退化 |
+| | 长跑（几小时）是否泄漏或延迟暴露问题 |
+
+#### CI 新增校验
+
+```bash
+grep -qa 'YHFVP-MIMALLOC' "$SO"        # fail：补丁没打上
+grep -qa 'MiMalloc\|mi_malloc' "$SO"   # warn：标记在但分配器可能没真正启用
+```
+
+#### 真机验证清单（必须做）
+
+| # | 验证项 | 方法 |
+|---|---|---|
+| 1 | **能正常启动** | 跑起来不崩（分配器换掉后第一条验收） |
+| 2 | **长跑稳定性** | 连续玩 30~60 分钟，看有无随机崩溃 |
+| 3 | **内存对比** | 同一存档、同一场景，对比换之前/之后 `dumpsys meminfo` 的 PSS |
+| 4 | **性能不退化** | 切场景/存档读档是否变慢 |
+| 5 | **存档/回读正常** | 存档缩略图、回读那一帧（上游提到的场景）是否正常 |
+| 6 | **多设备** | 至少一台低端机 + 一台主力机 |
+
+**任何一项异常 → 本补丁可单独快速回退**（它只改 Cargo.toml 3 行 + lib.rs 1 段）。
+
+**待实测**：以上 6 项。
 
 #### 真机实测（2026-10-19，已通过）
 

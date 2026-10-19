@@ -58,6 +58,7 @@ jobs:
           cp rfvp-build/apply_fvp_syscall_semantics_patch.py rfvp/
           cp rfvp-build/apply_fvp_prev_frame_patch.py rfvp/
           cp rfvp-build/apply_fvp_audio_units_patch.py rfvp/
+          cp rfvp-build/apply_fvp_mimalloc_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -110,6 +111,10 @@ jobs:
           #  2) pan 没做 0..1 -> -1..1 映射 -> 所有音效偏右 50%。
           # 对照上游 10.19 的 rfvp_audio/kira.rs(decibels) 与 audio_player/channels.rs(params)。
           python3 apply_fvp_audio_units_patch.py
+          # mimalloc 全局分配器（YHFVP-MIMALLOC-1.0，对齐上游 10.19）：
+          # 系统 malloc 释放大块后不还给 OS；mimalloc 会归还，降低常驻内存。
+          # 注意：libmimalloc-sys 含 C 代码，靠下面配好的 NDK clang 交叉编译。
+          python3 apply_fvp_mimalloc_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -278,6 +283,19 @@ jobs:
           else
             echo "::error::librfvp.so 未包含音频单位补丁（缺 YHFVP-AUDIO-UNITS 标识）—— apply_fvp_audio_units_patch.py 未生效"
             exit 1
+          fi
+          # mimalloc 全局分配器必须编进去
+          if grep -qa 'YHFVP-MIMALLOC' "$SO"; then
+            echo "mimalloc 补丁已编入 ✓ ($(grep -ao 'YHFVP-MIMALLOC-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 mimalloc 补丁（缺 YHFVP-MIMALLOC 标识）—— apply_fvp_mimalloc_patch.py 未生效"
+            exit 1
+          fi
+          # 确认真的换成了 mimalloc 分配器（符号里应有 mi_malloc，而不是只有标记）
+          if grep -qa 'MiMalloc\|mi_malloc' "$SO"; then
+            echo "mimalloc 分配器符号存在 ✓"
+          else
+            echo "::warning::librfvp.so 里没找到 mi_malloc 符号 —— 标记在但分配器可能没真正启用，请核对 __rust_alloc 的实现"
           fi
           echo "补丁校验通过 ✓"
 
