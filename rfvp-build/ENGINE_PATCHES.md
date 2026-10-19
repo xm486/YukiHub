@@ -1651,12 +1651,12 @@ fn panning(pan: f64) -> kira::Panning {
 
 ### 5.2 单纯的差异（**未采纳，但值得知道**）
 
-| # | 差异 | 原引擎 | 我们 / rfvp | ⚠️ 风险 |
+| # | 差异 | 原引擎 | 我们 / rfvp | 处置 |
 |---|---|---|---|---|
-| 5 | **`IntToText` 的宽度** | 宽度是 1..10 的 Int → `%0Nd`；其它（含 **nil**）→ `%d`（不补零） | 非 Int → **返回 nil**；Int → 补零到该宽度 | ⚠️⚠️ **见 5.3，有真实 OOM 风险** |
-| 6 | **`TextFontSet(-1)`** | 接受 -5..字体数-1，并把 **-1 替换成 -2（MS Gothic）** 再查字体名 | `-1` 走 `is_valid_fontface_id` 判断，不成立就**静默忽略**（`text.rs:301`） | ⚠️ Marguerite 有 `TextFontSet(G[1032])`，值来自设置界面；**未确认过会不会是 -1** |
+| 5 | **`IntToText` 的宽度** | 宽度是 1..10 的 Int → `%0Nd`；其它（含 **nil**）→ `%d`（不补零） | 非 Int → **返回 nil**；Int → 补零到该宽度 | 📌 见 5.3：**已决定跟上游一样不改** |
+| 6 | **`TextFontSet(-1)`** | 接受 -5..字体数-1，并把 **-1 替换成 -2（MS Gothic）** 再查字体名 | `-1` 走 `is_valid_fontface_id` 判断，不成立就**静默忽略**（`text.rs:301`） | 📌 Marguerite 有 `TextFontSet(G[1032])`；未确认会不会是 -1，**未触发则不动** |
 
-### 5.3 ⚠️ 第 5 条的实测风险（我们自己验证过）
+### 5.3 第 5 条的实测风险 —— **决定：不动，与上游保持一致**
 
 我们的实现（`crates/rfvp/src/subsystem/components/syscalls/utils.rs:88`）：
 
@@ -1666,33 +1666,49 @@ let value = format!("{:0width$}", value, width = width as usize);
 
 **`width` 是 `i32`，负宽度 `as usize` 会变成天文数字：**
 
-| `width` | `as usize` 之后 | 后果 |
+| `width` | `as usize` 之后 | 现在的结果 |
 |---|---|---|
 | `0` | `0` | `"42"` 正常 |
 | `3` | `3` | `"042"` 正常 |
 | `8` | `8` | `"00000042"` 正常 |
-| **`-1`** | **`18446744073709551615`** | 尝试分配 **1600 万 TiB** → **直接 OOM 崩** |
+| **`-1`** | **`18446744073709551615`** | 尝试分配 **1600 万 TiB** → **OOM 崩** |
 | `-100` | `18446744073709551640` | 同上 |
 
-**上游 ADR 也点了这条**（"A negative width becomes a huge padding width in rfvp
-(`width as usize` in `utils.rs`), which can exhaust memory."）。
+**原引擎不会崩**（`0x413c50`：宽度 1..10 才 `%0Nd`，其它一律 `%d`，含 nil）。
 
-**目前没有作品触发**，但这是**真实的定时炸弹**：任何脚本只要传一次负宽度就会崩。
+#### ✅ 上游的处理方式：**只记录，不修**
 
-**如果要修（低风险、可独立提交）**：
+**上游 10.19 的 `int_to_text` 与我们逐字相同**（已 diff 确认），
+`utils.rs` 整个文件唯一的差异只是 `call(args: Vec<Variant>)` → `call(args: &[Variant])`
+的签名重构，**函数体一行没动**。
 
-```rust
-// 原引擎语义：宽度 1..=10 才补零，其它一律 %d
-let value = if (1..=10).contains(&width) {
-    format!("{:0width$}", value, width = width as usize)
-} else {
-    format!("{}", value)
-};
-```
+ADR-0005 的 Decision 原话：
 
-> 注：这样改同时修正了「非 Int 宽度返回 nil」的差异（原引擎返回 `%d`），
-> 但**会改变可见输出**（所有 `IntToText(x, nil)` 的调用点）。
-> 本地三个作品都在调（每个 9~22 次），改前后必须对比截图。
+> rfvp keeps its current behavior for every item below.
+> An item is revisited only when a title is found whose scripts depend on it.
+
+Consequences 还写了：
+
+> **An entry moves out of this record into its own ADR when it is implemented.**
+
+→ **条目还留在 ADR-0005 里 = 还没实现**。这是他们的"记录风险、暂不改"机制。
+
+#### ✅ 我们的决定：跟上游一样，**不改**
+
+2026-10-19 评估后决定**保持现状**，理由：
+
+1. **上游自己都没修**，没有理由单方面偏离；
+2. **实际游戏集中从未触发** —— 三个作品的日志里 `int_to_text` 报错 **0 次**
+   （说明从没传过非 Int 宽度，更没传过负数）；
+3. 试过的几种改法都不划算：
+   - `max(0)`：只堵负数，`width > 10`（如 99）仍会补 99 个零，
+     **既没完全解决，又多了与上游的差异**；
+   - 完整对齐原引擎（`1..=10` → `%0Nd`，其它 `%d`）：
+     **会改变 `IntToText(x, nil)` 的可见输出**（现在返回 `nil`，改后返回数字串），
+     而本地三个作品都在调这个（每个 9~22 次），**风险大于收益**。
+
+**结论：保持与上游 100% 一致，什么都不改。** 万一以后真遇到某个作品踩到，
+按 5.4 的第 2 条处理。
 
 ### 5.4 这份文档的用法
 
