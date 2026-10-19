@@ -1429,6 +1429,46 @@ Marguerite 的**设置界面**用 `Sprt -1`（prim 291，alpha 200）当背景�
 
 **待实测**：对话框背景是否变半透明粉、设置里拖窗口颜色是否实时生效、设置界面背景是否透出画面。
 
+#### 真机实测（2026-10-19，已通过）
+
+用户实测确认：**对话框背景、窗口颜色滑块、设置界面背景全部正常**。
+
+日志体检（13,454 行 / rfvp 12,082 行）：
+
+| 指标 | 结果 |
+|---|---|
+| panic / SIGABRT / FATAL | **0** ✅ |
+| YHPROBE 残留 | **0** ✅ |
+| E 级 | 11,267 行，**25 类全部是上游原有噪音或游戏自身缺资源** |
+
+**关键验证 —— 修复确实生效了：**
+
+```
+19:32:12.570  E rfvp: color: id must be in range 0..256
+```
+
+这一条**正是补丁在起作用**：游戏启动时调用 `ColorSet(-1, ...)`，我们按原引擎语义
+**拒绝了它**（而不是像修前那样静默写坏槽 255）。上游 `color.rs` 同一位置也是
+`log::error!("id must be in range 0..256")`，**逐字一致**，所以这条日志上游也会打。
+
+**E 级噪音白名单（本次核对，全部与上游源码逐字一致）**：
+
+| 消息 | 次数 | 结论 |
+|---|---|---|
+| `motion: Invalid duration` | 8,764 | 游戏脚本传非 Int duration（`motion.rs` 6 处同名日志）。**上游逐字一致** |
+| `motion: Invalid id` | 1,383 | 同上 |
+| `graph_load: invalid id : Nil` | 900 | 游戏脚本传 Nil id（`graph.rs` `graph_load`）。**上游逐字一致** |
+| `history_set: unexpected value for set_voice : Nil` | 64 | 游戏脚本行为 |
+| `text_print: invalid content type` | 49 | `text.rs` **上游逐字一致** |
+| `history_set: unexpected value for set_name : Nil` | 37 | 游戏脚本行为 |
+| `motion: Duration must be between N and N` | 19 | 上游原有 |
+| `file not found in pack ... voiceN.bin` | 7 | **游戏自身缺语音文件** |
+| `Gralloc4 / GraphicBuffer / AHardwareBuffer` | 各 8 | 系统图形分配，与我们无关 |
+
+> 注：`Invalid duration` 这次 8,764 次，比上一次日志的 2,176 次多。
+> 原因是**这局玩得久、调用的 motion 更多**（上次 1,849 行、这次 13,454 行），
+> 不是回归 —— 该行源码我们与上游 10.19 **逐字一致**。
+
 ---
 
 ## 4. YHPROBE 探针（**已全部移除**）
@@ -1514,7 +1554,7 @@ Marguerite 的**设置界面**用 `Sprt -1`（prim 291，alpha 200）当背景�
       也要用日志确认脚本到底调没调、调了几次。
       注：「声音糊/底噪」是另一条线，不在本补丁范围（10.15 也未专门处理它）。
 - [ ] 关注上游 commit：出现 `dissolve` / `render` / `audio` 相关改动时回来看。
-- [ ] **对话框背景不透明 + 设置里的颜色不生效 —— 已由上游修复（`cc8ac77`），我们已移植**（2026-10-19）。
+- [x] ~~**对话框背景不透明 + 设置里的颜色不生效**~~ → **已由上游修复（`cc8ac77`），我们已移植，真机实测通过**（2026-10-19）。
       ~~原计划交上游~~ → 上游当天就发了 `cc8ac77`，附 5 篇 ADR，**根因与我们的探针数据完全吻合**。
       详见 §3.16。
 
