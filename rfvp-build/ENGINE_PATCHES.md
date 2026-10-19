@@ -35,8 +35,12 @@ apply_audio_silent_fix_patch.py    # 12. SoundSilentOn/AudioSilentOn 不再真�
 apply_fvp_timer_stop_patch.py      # 13. timer 到点即停（上游 a1091393，issue #49）· YHFVP-TIMERSTOP-1.0
 apply_fvp_text_cancel_patch.py     # 14. 清掉遗留 TextWait/TextResume（上游 513b3955）· YHFVP-TEXTCANCEL-1.0
 apply_fvp_stack_visit_patch.py     # 15. visit 缓冲改栈数组（上游 cbe9f1fa）· YHFVP-STACKVISIT-1.0
+apply_fvp_tile_color_patch.py      # 16. Tile -1 = 全局窗口色（上游 cc8ac77 / ADR-0001，issue #55）· YHFVP-TILECOLOR-1.0
+apply_fvp_colorset_signed_patch.py # 17. ColorSet 有符号检查（同 ADR-0001）· YHFVP-COLORSET-SIGNED-1.0
+apply_fvp_syscall_semantics_patch.py # 18. PrimSetZ/TimerSuspend/PrimSetRS 语义（ADR-0003/0004）· YHFVP-SYSCALL-SEMANTICS-1.0
+apply_fvp_prev_frame_patch.py      # 19. Sprt -1 = 画上一帧（上游 ADR-0002）· YHFVP-PREVFRAME-1.0
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 16. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 20. video-sys 解码器 ByteBuffer 模式
 ```
 > 8 与 9 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
 > 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
@@ -69,6 +73,10 @@ video-sys-cpu-read.patch       # 16. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_timer_stop_patch.py` | `timer_manager.rs` | timer 到点即停、`TimerGet(id,nil)` 归零，修老 FVP **按钮点不动**（见 3.13）· `YHFVP-TIMERSTOP-1.0` |
 | `apply_fvp_text_cancel_patch.py` | `thread_wrapper.rs` / `text_manager.rs` / `vm_runner.rs` | 线程结束/重启时清掉遗留 `TextWait`/`TextResume`，是 `TextResume` 守卫的**根治版**（见 3.14）· `YHFVP-TEXTCANCEL-1.0` |
 | `apply_fvp_stack_visit_patch.py` | `gpu_prim.rs` | prim 树遍历的 visit 缓冲由堆 `vec!` 改栈数组，每帧少 2 次 4KiB 分配（见 3.15）· `YHFVP-STACKVISIT-1.0` |
+| `apply_fvp_tile_color_patch.py` | `color_manager.rs` / `gpu_prim.rs` | **Tile 色号 -1 = 全局窗口色**，修对话框背景不透明 + 设置颜色不生效（见 3.16）· `YHFVP-TILECOLOR-1.0` |
+| `apply_fvp_colorset_signed_patch.py` | `color.rs` | `ColorSet` 改有符号检查，`-1` 不再写坏槽 255（见 3.16）· `YHFVP-COLORSET-SIGNED-1.0` |
+| `apply_fvp_syscall_semantics_patch.py` | `graph.rs` / `timer.rs` | `PrimSetZ`/`TimerSuspend` 判 `True`；`PrimSetRS/RS2` 缩放钳到 [100,10000]（见 3.16）· `YHFVP-SYSCALL-SEMANTICS-1.0` |
+| `apply_fvp_prev_frame_patch.py` | `render_target.rs` / `gpu_prim.rs` / `app.rs` | **Sprt 纹理 -1 = 绘制上一帧**，修设置界面背景（见 3.16）· `YHFVP-PREVFRAME-1.0` |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -1323,6 +1331,106 @@ if item.elapsed > item.resolution {
 
 ---
 
+### 3.16 上游 `cc8ac77` 五连修（Tile -1 / ColorSet / Sprt -1 / 三个 syscall）
+
+**来源**：上游 `cc8ac77`（2026-10-19，附 5 篇 ADR，closes issue **#55**）。
+
+这一提交把 **143 个 syscall 全量扫了一遍**，用 IDA 对齐原引擎，修了 5 件事。
+我们的探针数据与它的结论**完全吻合**。
+
+#### ① Tile id -1 = 全局「窗口颜色」（ADR-0001）→ `apply_fvp_tile_color_patch.py`
+
+**这是对话框背景不透明的正解。**
+
+脚本用 `PrimSetTile(513, -1, ...)` / `(514, -1, ...)` 创建对话框，
+字节码真的推 `-1`（`push_i8 0xFF`）—— **-1 是刻意的，不是无效值**。
+
+| Tile id | 原引擎行为 |
+|---|---|
+| **-1** | 不查调色板，每帧读**全局 `G[5..8]`** 作为 R/G/B/A（取低字节） |
+| 其它 | 调色板 `[base + id*4 + 0xabd74]` |
+
+`G[5..8]` 就是配置界面「窗口颜色」滑块编辑的四个全局（Marguerite 有 1272 个非易失
+全局，所以实际是 `G[1277..1280]`）。引擎每帧读，所以拖滑块立刻生效。
+
+修复：`ColorManager::tile_color(tile)` —— `-1` 时 `get_int_var(5..8)`，其它走调色板。
+**依赖 `get_int_var` 我们基线里早就有**，无需新增 API。
+
+#### ② `ColorSet` 有符号检查（同 ADR-0001）→ `apply_fvp_colorset_signed_patch.py`
+
+原引擎 `ColorSet`（`0x4132c0`）做的是**有符号** `0 <= id < 256`，`ColorSet(-1, ...)` 什么都不做。
+我们写的是 `let id = id as u8;` 再检查 u8 —— **永远成立**，`-1` 被截成 255 写进去。
+
+连锁后果（这才是对话框变白的完整链路）：
+
+```
+ColorSet(-1,  174,118,118,170);   // 本想设半透明粉 → 实际写进槽 255
+ColorSet(255, 255,255,255,255);   // 紧接着把槽 255 覆盖成不透明白
+```
+
+配合 ①（Tile -1 不再读槽 255），两个 bug 同时消失。
+
+#### ③ Sprt 纹理 id -1 = 绘制「上一帧」（ADR-0002）→ `apply_fvp_prev_frame_patch.py`
+
+`PrimSetSprt` 接受 -2 起。我们画了 -2（电影帧），但 **-1 直接跳过**。
+Marguerite 的**设置界面**用 `Sprt -1`（prim 291，alpha 200）当背景，
+原版是「把刚才那帧铺在下面半透明」。
+
+原引擎 `Present`（`sub_4083B0`）每帧 `EndScene → Present → StretchRect`
+把后备缓冲拷进一个屏幕尺寸纹理，所以那纹理永远是**上一次 present 的那帧**。
+
+修复（只做 GPU 路径，见下面「未移植项」）：
+- `render_target.rs`：补 `logical_size()` + `encode_copy_to()`（上游新增的两个小方法）
+- `gpu_prim.rs`：`DrawTextureKey::PrevFrame`、`prev_frame`/`wants_prev_frame` 字段、
+  `capture_prev_frame()`、Sprt `-1` 分支、bind group 分支
+- `app.rs`：`build()` 之后、开渲染 pass 之前调用 `capture_prev_frame`
+
+**无 Sprt -1 的帧零开销**（`wants_prev_frame=false` → `prev_frame` 置 `None` 释放）。
+
+#### ④ `PrimSetZ` / `TimerSuspend` 判 `True`（ADR-0004）→ `apply_fvp_syscall_semantics_patch.py`
+
+原引擎 VM 标签：0=Nil、1=True、2=Int、3=Float、4/5=String。
+全量扫 143 个 handler，只有三处比标签 1/3：`FloatToInt`(3)、`PrimSetZ`(1)、`TimerSuspend`(1)。
+
+| syscall | 原引擎 | 我们（修前） |
+|---|---|---|
+| `PrimSetZ` | 标签 1（True）保留 z 并设 attr 0x04 | 写成了 `z.as_float()`，**True 反而清 bit** |
+| `TimerSuspend` | 存 `type != 1`，**只有 True 恢复**计时器 | `!on.canbe_true()`，**传 Int 反而恢复** |
+
+> 与 §3.13 的 `apply_fvp_timer_stop_patch.py` **不冲突**：那个改 `tick()`，这个改 `timer_suspend()`。
+
+#### ⑤ `PrimSetRS` / `PrimSetRS2` 缩放钳到 [100, 10000]（ADR-0003）→ 同上
+
+原引擎：Int 缩放**钳制**到 [100, 10000]，非 Int 保持不变。
+我们原来是「超出 0..=10000 就重置成 1000，0..=99 原样接受」：
+- `PrimSetRS2(id, nil, 0, 0)` 本该画成 10%，我们缩成 0（看不见）
+- 超范围缩放会突然跳回 100%
+
+#### 未移植项（有意）
+
+| 项 | 为什么 |
+|---|---|
+| `prim_commands.rs` / `no_std_core.rs`（host-command 的 Sprt -1） | Android 构建只走 `GpuPrimRenderer`；这两个文件我们与上游 10.18 已有差异且不参与构建 |
+| `soft_render/renderer.rs`（软件渲染器） | 同上 |
+| `app.rs` 的 `mem_report()` | 上游新增的 `RFVP_MEM_REPORT` 内存统计，纯诊断，与我们无关 |
+| `graph.rs` 的 `#[cfg(feature = "psx")]` 块 | PlayStation 专用 |
+
+#### 验证
+
+- 19 个补丁串行全绿，二次复跑全幂等；
+- `tile_color` / `capture_prev_frame` / `encode_copy_to` 与上游 10.19 **逐字一致**
+  （忽略空行/注释后逐行相等）；
+- 5 个新静态标记长度逐个核对 + 抽出来 rustc 编译通过
+  （过程中修掉两处自己算错：`TILECOLOR` 19→实际 19、`COLORSET-SIGNED` 24→25）；
+- 括号平衡与基线一致；
+- 锚点踩的坑都记在脚本注释里：
+  `mask_dissolve` 会先插 `mask_frame`、`stack_visit` 会改 `build()` 文档注释、
+  `prim_set_rs` 里空行、`color.rs` 的 `}` 与 `Ok()` 之间空行。
+
+**待实测**：对话框背景是否变半透明粉、设置里拖窗口颜色是否实时生效、设置界面背景是否透出画面。
+
+---
+
 ## 4. YHPROBE 探针（**已全部移除**）
 
 > 历史记录。探针在 2026-10-15 随点击补全稳定后**整体撤除**，
@@ -1406,28 +1514,25 @@ if item.elapsed > item.resolution {
       也要用日志确认脚本到底调没调、调了几次。
       注：「声音糊/底噪」是另一条线，不在本补丁范围（10.15 也未专门处理它）。
 - [ ] 关注上游 commit：出现 `dissolve` / `render` / `audio` 相关改动时回来看。
-- [ ] **对话框背景不透明 + 设置里的颜色不生效 —— 交给上游，我们不修**（2026-10-19 决定）。
-      现象：老 FVP（`はっぴぃ☆マーガレット!`）对话框背景是不透明白色，原版（Wine）是半透明粉；
-      设置里拖 R/G/B/A 画面无变化。**上游 10.18 同样有此现象**（用户确认）。
-      Issue 草稿：`upstream_issue_dialog_background_opaque.md`。
+- [ ] **对话框背景不透明 + 设置里的颜色不生效 —— 已由上游修复（`cc8ac77`），我们已移植**（2026-10-19）。
+      ~~原计划交上游~~ → 上游当天就发了 `cc8ac77`，附 5 篇 ADR，**根因与我们的探针数据完全吻合**。
+      详见 §3.16。
 
-      **排查结论（两轮探针，已全部撤除）**：
-      | 项 | 结论 |
-      |---|---|
-      | `ColorSet` → `color_manager` | ✅ **正常**。实测拖动滑块写入 `id=115` 的 r/g/b/a，含 a=58/128/208 |
-      | 绘制端读调色板 | ✅ **正常**。`tile_a` 与 `ColorSet` 写入值**逐个对得上**（78/128/58） |
-      | 「父 Group alpha 不累积」 | ❌ **这个方向是错的**。depth=1 的 7 个 `PrimTypeGroup` alpha **全为 0**；若真补累积，14609 个图元会全变 alpha=0、**画面消失** |
-      | 「不透明白色」是哪个 prim | ⚠️ **未定位**。最频繁的不透明 Tile 是 `prim=15/16`（`tile=5`, `tile_a=255`，各 243 次），但无法确认就是对话框 |
+      **根因（ADR-0001，issue #55）**：脚本用 `PrimSetTile(513, -1, ...)` 创建对话框，
+      而 **Tile id -1 在原引擎里不是调色板槽位** —— 它每帧读全局 `G[5..8]`
+      作为 R/G/B/A（正是配置界面「窗口颜色」滑块编辑的那四个全局）。
+      我们把它当成槽 255；同时 `ColorSet` 先 `as u8` 再检查，`ColorSet(-1, ...)`
+      被截成 255 写进去，随后又被 `ColorSet(255, 255,255,255,255)` 覆盖成不透明白。
+      两个 bug 叠加 → 对话框不透明白色。
 
-      **为什么不做**：`ColorSet` 和绘制端读数都正常，说明缺的是**原版的某个我们没实现的机制**
-      （脚本另调了什么 / 资源里带 alpha / 别的 syscall），需要 IDA 级别反查才能定位。
-      投入产出比不合适，交上游更合适。
+      **证物对得上**：v1 探针日志里 `prim=513/514 tile=-1 tile_a=255` 正是这两个对话框；
+      v2 探针 `id=115` 的写入值也与绘制端读到的 `tile_a` 逐个吻合。
+      当时只把 -1 当「无效值」，没想到它是特殊通道 —— 这个教训记下来。
 
-      **探针教训（重要，写死在这里）**：
+      **探针教训（仍然有效）**：
       v1 在 `collect_tree` 里逐帧打 alpha，17k 条把 Android logcat 配额打爆 ——
-      **55 次 QUOTA 丢弃，累计 603,348 行被丢**（是保留下来的 37 倍），`ColorSet` 等关键日志全没了。
-      **以后任何逐帧探针必须先限流/去重**，否则等于白跑。
-      v2 只打 `ColorSet`（一局几十条）就没这个问题。
+      **55 次 QUOTA 丢弃，累计 603,348 行被丢**（是保留下来的 37 倍）。
+      **以后任何逐帧探针必须先限流/去重。**
 - [x] ~~**老 FVP 按钮点不动（issue #49）**~~ → **已移植上游 `a1091393`，真机实测通过**（见 3.13）。
       上游已关闭我们提的 issue #49。注意：**「点击穿透」是我们自己修的，与上游无关**
       （上游 10.18 并未修穿透）。

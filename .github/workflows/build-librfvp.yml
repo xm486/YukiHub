@@ -53,6 +53,10 @@ jobs:
           cp rfvp-build/apply_fvp_timer_stop_patch.py rfvp/
           cp rfvp-build/apply_fvp_text_cancel_patch.py rfvp/
           cp rfvp-build/apply_fvp_stack_visit_patch.py rfvp/
+          cp rfvp-build/apply_fvp_tile_color_patch.py rfvp/
+          cp rfvp-build/apply_fvp_colorset_signed_patch.py rfvp/
+          cp rfvp-build/apply_fvp_syscall_semantics_patch.py rfvp/
+          cp rfvp-build/apply_fvp_prev_frame_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -88,6 +92,18 @@ jobs:
           # prim 树遍历的 visit 缓冲改栈数组（YHFVP-STACKVISIT-1.0，上游 cbe9f1fa）。
           # 纯性能：每帧少 2 次 4KiB 堆分配，渲染结果不变。
           python3 apply_fvp_stack_visit_patch.py
+          # Tile 色号 -1 = 全局「窗口颜色」（YHFVP-TILECOLOR-1.0，上游 cc8ac77 / ADR-0001，issue #55）。
+          # 修对话框背景不透明 + 设置里的窗口颜色滑块不生效。
+          python3 apply_fvp_tile_color_patch.py
+          # ColorSet 用有符号检查（YHFVP-COLORSET-SIGNED-1.0）。
+          # ColorSet(-1, ...) 不再写坏调色板槽 255 —— 必须与上一个补丁配套。
+          python3 apply_fvp_colorset_signed_patch.py
+          # 三个小 syscall 语义修正（YHFVP-SYSCALL-SEMANTICS-1.0，上游 ADR-0003 / ADR-0004）：
+          #   PrimSetZ / TimerSuspend 判 True（不是 Float / 真值）；PrimSetRS/RS2 缩放钳到 [100,10000]。
+          python3 apply_fvp_syscall_semantics_patch.py
+          # Sprt 纹理 id -1 = 绘制上一帧（YHFVP-PREVFRAME-1.0，上游 ADR-0002）。
+          # 修设置界面背景：原版会把刚才那帧铺在下面半透明。
+          python3 apply_fvp_prev_frame_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -220,6 +236,34 @@ jobs:
             echo "visit 栈缓冲补丁已编入 ✓ ($(grep -ao 'YHFVP-STACKVISIT-[0-9.]*' "$SO" | head -1))"
           else
             echo "::error::librfvp.so 未包含 visit 栈缓冲补丁（缺 YHFVP-STACKVISIT 标识）—— apply_fvp_stack_visit_patch.py 未生效"
+            exit 1
+          fi
+          # Tile -1 窗口色（对话框背景）必须编进去
+          if grep -qa 'YHFVP-TILECOLOR' "$SO"; then
+            echo "Tile 窗口色补丁已编入 ✓ ($(grep -ao 'YHFVP-TILECOLOR-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 tile 窗口色补丁（缺 YHFVP-TILECOLOR 标识）—— apply_fvp_tile_color_patch.py 未生效"
+            exit 1
+          fi
+          # ColorSet 有符号检查必须编进去
+          if grep -qa 'YHFVP-COLORSET-SIGNED' "$SO"; then
+            echo "ColorSet 有符号补丁已编入 ✓ ($(grep -ao 'YHFVP-COLORSET-SIGNED-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 ColorSet 有符号补丁（缺 YHFVP-COLORSET-SIGNED 标识）—— apply_fvp_colorset_signed_patch.py 未生效"
+            exit 1
+          fi
+          # syscall 语义修正必须编进去
+          if grep -qa 'YHFVP-SYSCALL-SEMANTICS' "$SO"; then
+            echo "syscall 语义补丁已编入 ✓ ($(grep -ao 'YHFVP-SYSCALL-SEMANTICS-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含 syscall 语义补丁（缺 YHFVP-SYSCALL-SEMANTICS 标识）—— apply_fvp_syscall_semantics_patch.py 未生效"
+            exit 1
+          fi
+          # Sprt -1 上一帧必须编进去
+          if grep -qa 'YHFVP-PREVFRAME' "$SO"; then
+            echo "上一帧补丁已编入 ✓ ($(grep -ao 'YHFVP-PREVFRAME-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含上一帧补丁（缺 YHFVP-PREVFRAME 标识）—— apply_fvp_prev_frame_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"
