@@ -39,8 +39,9 @@ apply_fvp_tile_color_patch.py      # 16. Tile -1 = 全局窗口色（上游 cc8a
 apply_fvp_colorset_signed_patch.py # 17. ColorSet 有符号检查（同 ADR-0001）· YHFVP-COLORSET-SIGNED-1.0
 apply_fvp_syscall_semantics_patch.py # 18. PrimSetZ/TimerSuspend/PrimSetRS 语义（ADR-0003/0004）· YHFVP-SYSCALL-SEMANTICS-1.0
 apply_fvp_prev_frame_patch.py      # 19. Sprt -1 = 画上一帧（上游 ADR-0002）· YHFVP-PREVFRAME-1.0
+apply_fvp_audio_units_patch.py     # 20. 音频两个单位 bug：音量线性→dB、pan 0..1→-1..1 · YHFVP-AUDIO-UNITS-1.0
 # 之后独立 git apply：
-video-sys-cpu-read.patch       # 20. video-sys 解码器 ByteBuffer 模式
+video-sys-cpu-read.patch       # 21. video-sys 解码器 ByteBuffer 模式
 ```
 > 8 与 9 是**同一批移植**（FVP 渲染修复），**顺序无关**：两个脚本都会自适应
 > 对方是否已应用（10 会检测 `emit_sprite_vertices` 是否已有 `additive` 形参）。
@@ -77,6 +78,7 @@ video-sys-cpu-read.patch       # 20. video-sys 解码器 ByteBuffer 模式
 | `apply_fvp_colorset_signed_patch.py` | `color.rs` | `ColorSet` 改有符号检查，`-1` 不再写坏槽 255（见 3.16）· `YHFVP-COLORSET-SIGNED-1.0` |
 | `apply_fvp_syscall_semantics_patch.py` | `graph.rs` / `timer.rs` | `PrimSetZ`/`TimerSuspend` 判 `True`；`PrimSetRS/RS2` 缩放钳到 [100,10000]（见 3.16）· `YHFVP-SYSCALL-SEMANTICS-1.0` |
 | `apply_fvp_prev_frame_patch.py` | `render_target.rs` / `gpu_prim.rs` / `app.rs` | **Sprt 纹理 -1 = 绘制上一帧**，修设置界面背景（见 3.16）· `YHFVP-PREVFRAME-1.0` |
+| `apply_fvp_audio_units_patch.py` | `bgm_player.rs` / `se_player.rs` | **音频两个单位 bug**：线性音量当 dB 传 kira、pan 没映射到 -1..1（见 3.17）· `YHFVP-AUDIO-UNITS-1.0` |
 | `video-sys-cpu-read.patch` | `video-sys` crate | 解码器输出改 ByteBuffer 模式（修 Qualcomm UBWC 白屏） |
 
 > **APK 侧（不涉及 so）**：输入映射 v4、设置滑条保存、**虚拟按键/虚拟鼠标**（见 3.8）。
@@ -1428,6 +1430,111 @@ Marguerite 的**设置界面**用 `Sprt -1`（prim 291，alpha 200）当背景�
   `prim_set_rs` 里空行、`color.rs` 的 `}` 与 `Ok()` 之间空行。
 
 **待实测**：对话框背景是否变半透明粉、设置里拖窗口颜色是否实时生效、设置界面背景是否透出画面。
+
+---
+
+### 3.17 音频两个单位 bug：线性音量当 dB、pan 没映射（爆音根因）
+
+**来源**：对照上游 10.19 的音频重写
+（`rfvp_audio/kira.rs` 的 `decibels()`、`audio_player/channels.rs` 的 `params()`）。
+
+用户在 `はっぴぃ☆マーガレット!` 里听到噪音，且**只有这一个游戏明显**。
+排查后确认是两个**单位换算缺失**，不是游戏特性。
+
+#### ① 线性音量被当成 dB 传给 kira（**爆音根因**）
+
+kira 的 `.volume()` 收的是 **Decibels**（从 `kira-0.10.8` 源码确认）：
+
+```rust
+/// Setting the volume of a sound to -60dB or lower makes it silent.
+pub struct Decibels(pub f32);
+
+impl From<f32> for Decibels {
+    fn from(value: f32) -> Self { Self(value) }   // 裸转换，不换算
+}
+
+pub fn as_amplitude(self) -> f32 {
+    if self <= Self::SILENCE { return 0.0; }
+    10.0f32.powf(self.0 / 20.0)                    // dB -> 振幅
+}
+```
+
+**我们一直把线性值（0..1）直接传进去。**
+
+| 我们传 | kira 实际增益 | 应为 | 差异 |
+|---|---|---|---|
+| `0.0` | **1.0000** | 0.0000 | **想静音反而满音量** |
+| `0.1` | 1.0116 | 0.1000 | 10 倍 |
+| `0.5` | 1.0593 | 0.5000 | 2.1 倍 |
+| `0.65` | 1.0777 | 0.6500 | 1.66 倍 |
+| `0.8` | 1.0965 | 0.8000 | 1.37 倍 |
+| `1.0` | **1.1220** | 1.0000 | 1.12 倍 |
+
+三个后果：
+1. **音量滑条 0%..100% 只让响度变化 12%**，几乎失效；
+2. `volume = 0.0`（游戏想静音）→ **满音量播放**；
+3. 所有声音恒定 > 1.0 倍，**多路 SE 叠加必硬削波**。
+
+**为什么只有 `はっぴぃ☆マーガレット!` 明显**：
+日志里 19:54:14~16 的 **2 秒内连播 8 次 SE**，多槽位并发。
+每路 1.078~1.122 倍，两路叠加就超过 1.0 → 削波。
+其它作品 SE 稀疏、音量滑条默认 100%，单个 1.122 倍听不太出来。
+
+#### ② pan 没做 0..1 → -1..1 映射（**全部偏右**）
+
+kira 的 `Panning`（同样源码确认）：
+
+```rust
+/// Valid panning values range from `-1.0` to `1.0`.
+/// A value of `0.0` will cause a sound to be played at an equal volume from both speakers.
+pub struct Panning(pub f32);
+```
+
+脚本的 pan 是 0..1（上游注释：*Scripts keep pan from 0 to 1*），上游做 `pan * 2.0 - 1.0`。
+我们直接 `Panning::from(pan)`，默认值 **0.5 就变成「偏右 50%」**。
+
+| 脚本 pan | 我们传 | 实际效果 | 正确 |
+|---|---|---|---|
+| 0.00（左） | 0.00 | 居中 | -1.00 左 |
+| 0.50（中） | 0.50 | **偏右 50%** | 0.00 居中 |
+| 1.00（右） | 1.00 | 右满 | 1.00 右 |
+
+#### 修复
+
+两个文件各加一对文件内辅助函数：
+
+```rust
+fn decibels(volume: f32) -> kira::Decibels {
+    if volume <= 0.0 { kira::Decibels::SILENCE }
+    else { kira::Decibels(20.0 * volume.log10()) }
+}
+
+fn panning(pan: f64) -> kira::Panning {
+    kira::Panning::from((pan as f32) * 2.0 - 1.0)
+}
+```
+
+- 9 处 `.volume(x)` / `handle.set_volume(x, …)` → 包 `decibels(...)`
+- 6 处 pan → `panning(pan)`
+
+#### 验证
+
+| 项 | 结果 |
+|---|---|
+| 20 个补丁串行 + 二次幂等 | ✅ 全绿 |
+| 裸 `.volume` / `set_volume` 残留 | **0 处** ✅ |
+| 标记 `YHFVP-AUDIO-UNITS-1.0`（21 字节） | ✅ 声明/实际一致，rustc 编译通过 |
+| 括号平衡 | ✅ 与基线一致 |
+| 数值：修复后增益 | `0.0→0.0`, `0.5→0.5`, `0.65→0.65`, `1.0→1.0` ✅ **全部精确** |
+
+#### ⚠️ 须知
+
+1. **改完音量会明显变小** —— 之前一直是 1.078~1.122 倍（偏响），现在才是正确值。
+2. 多路叠加**仍可能**削波：kira 主轨道默认 `Decibels::IDENTITY`（0 dB = 1.0 倍），
+   **没有限幅器**。4 路满音量叠加 = 4.0，一样会爆。上游同样如此。
+   修复只是把「两路就必爆」变成「需要更多路才爆」。
+
+**待实测**：噪音是否消失、音量滑条是否真的能调、是否还有偏右感。
 
 #### 真机实测（2026-10-19，已通过）
 

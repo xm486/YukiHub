@@ -57,6 +57,7 @@ jobs:
           cp rfvp-build/apply_fvp_colorset_signed_patch.py rfvp/
           cp rfvp-build/apply_fvp_syscall_semantics_patch.py rfvp/
           cp rfvp-build/apply_fvp_prev_frame_patch.py rfvp/
+          cp rfvp-build/apply_fvp_audio_units_patch.py rfvp/
           cd rfvp
           python3 apply_text_scale_patch.py
           python3 apply_text_patch.py
@@ -104,6 +105,11 @@ jobs:
           # Sprt 纹理 id -1 = 绘制上一帧（YHFVP-PREVFRAME-1.0，上游 ADR-0002）。
           # 修设置界面背景：原版会把刚才那帧铺在下面半透明。
           python3 apply_fvp_prev_frame_patch.py
+          # 音频两个单位 bug（YHFVP-AUDIO-UNITS-1.0）：
+          #  1) 线性音量被当成 dB 传给 kira -> 0.0 反而满音量、1.0 变 1.122 倍、多路叠加削波；
+          #  2) pan 没做 0..1 -> -1..1 映射 -> 所有音效偏右 50%。
+          # 对照上游 10.19 的 rfvp_audio/kira.rs(decibels) 与 audio_player/channels.rs(params)。
+          python3 apply_fvp_audio_units_patch.py
 
       - name: Patch video-sys (ByteBuffer decode mode — fixes OP playback on Qualcomm)
         run: |
@@ -264,6 +270,13 @@ jobs:
             echo "上一帧补丁已编入 ✓ ($(grep -ao 'YHFVP-PREVFRAME-[0-9.]*' "$SO" | head -1))"
           else
             echo "::error::librfvp.so 未包含上一帧补丁（缺 YHFVP-PREVFRAME 标识）—— apply_fvp_prev_frame_patch.py 未生效"
+            exit 1
+          fi
+          # 音频单位修正必须编进去
+          if grep -qa 'YHFVP-AUDIO-UNITS' "$SO"; then
+            echo "音频单位补丁已编入 ✓ ($(grep -ao 'YHFVP-AUDIO-UNITS-[0-9.]*' "$SO" | head -1))"
+          else
+            echo "::error::librfvp.so 未包含音频单位补丁（缺 YHFVP-AUDIO-UNITS 标识）—— apply_fvp_audio_units_patch.py 未生效"
             exit 1
           fi
           echo "补丁校验通过 ✓"
