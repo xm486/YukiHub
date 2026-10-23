@@ -234,6 +234,10 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
   <a href="https://b23.tv/a0215xx">
     <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="FVP tutorial" />
   </a>
+  
+  <a href="https://m.acfun.cn/v/?ac=48933271&sid=54090cd345609d17">
+    <img src="https://img.shields.io/badge/AcFun-观看教程-00A1D6?logo=acfun&logoColor=white&labelColor=FF3333" alt="FVP tutorial" />
+  </a>
 </p>
 
 ---
