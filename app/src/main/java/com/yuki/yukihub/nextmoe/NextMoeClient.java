@@ -117,7 +117,7 @@ public final class NextMoeClient {
                 JSONObject baseCover = w.optJSONObject("cover");
                 if (baseCover != null && !baseCover.optString("url", "").isEmpty()) {
                     coverMap.put(id, baseCover.optString("url", ""));
-                    sexualMap.put(id, sexualToLevel(baseCover.optString("sexual", "safe")));
+                    sexualMap.put(id, sexualForNsfwGate(baseCover.optString("sexual", "safe")));
                     continue;
                 }
                 JSONArray covers = w.optJSONArray("covers");
@@ -128,7 +128,7 @@ public final class NextMoeClient {
                         String u = cv.optString("url", "");
                         if (!u.isEmpty()) {
                             coverMap.put(id, u);
-                            sexualMap.put(id, sexualToLevel(cv.optString("sexual", "safe")));
+                            sexualMap.put(id, sexualForNsfwGate(cv.optString("sexual", "safe")));
                             break;
                         }
                     }
@@ -434,25 +434,39 @@ public final class NextMoeClient {
             }
         }
 
-        // covers[]：第一张可用封面。sexual 是封闭词表字符串，映射到 0~2 数值供 nsfw 检测
-        JSONArray covers = o.optJSONArray("covers");
-        if (covers != null) {
-            for (int i = 0; i < covers.length(); i++) {
-                JSONObject cv = covers.optJSONObject(i);
-                if (cv == null) continue;
-                String u = cv.optString("url", "");
-                if (u.isEmpty()) continue;
+        // 封面：优先取 cover 字段 —— NextMoe 由编辑 pin / 票数选出的主图。
+        // 不能取 covers[0]：covers[] 是「图库顺序」，不是选举结果，在 r18 作品上
+        // covers[0] 常常是 Bangumi 提供的打码替身（source=censored、sexual=safe），
+        // 直接取会得到一张糊图。OpenAPI Work.covers 原文：
+        // "in gallery order: not ranked by the election, so render cover, not covers[0],
+        //  as the work's portrait."
+        JSONObject cover = o.optJSONObject("cover");
+        if (cover != null) {
+            String u = cover.optString("url", "");
+            if (!u.isEmpty()) {
                 m.coverUrl = u;
-                m.coverSexual = sexualToLevel(cv.optString("sexual", "safe"));
-                break;
+                m.coverSexual = sexualForNsfwGate(cover.optString("sexual", "safe"));
             }
         }
         if (m.coverUrl.isEmpty()) {
-            // 身份内核自带单张 base cover
-            JSONObject cover = o.optJSONObject("cover");
-            if (cover != null) {
-                m.coverUrl = cover.optString("url", "");
-                m.coverSexual = sexualToLevel(cover.optString("sexual", "safe"));
+            // 兜底：cover 缺失时才看 covers[]。打码替身一律标 sexual=safe，
+            // 所以优先挑 sexual 非 safe 的行（真实封面），全 safe 时退回第一张。
+            // source 是开放词表且文档明确「Must not be used as a discriminant」，
+            // 因此这里只按 sexual 排序，不判 source。
+            JSONArray covers = o.optJSONArray("covers");
+            if (covers != null) {
+                JSONObject pick = null;
+                for (int i = 0; i < covers.length(); i++) {
+                    JSONObject cv = covers.optJSONObject(i);
+                    if (cv == null) continue;
+                    if (cv.optString("url", "").isEmpty()) continue;
+                    if (pick == null) pick = cv;
+                    if (sexualToLevel(cv.optString("sexual", "safe")) > 0) { pick = cv; break; }
+                }
+                if (pick != null) {
+                    m.coverUrl = pick.optString("url", "");
+                    m.coverSexual = sexualForNsfwGate(pick.optString("sexual", "safe"));
+                }
             }
         }
 
@@ -548,6 +562,22 @@ public final class NextMoeClient {
         if ("explicit".equals(sexual)) return 2;
         if ("suggestive".equals(sexual)) return 1;
         return 0;
+    }
+
+    /**
+     * 供「自动打 NSFW 标记」用的分级：只有 explicit 才算 R18。
+     * <p>
+     * 不能直接用 {@link #sexualToLevel} 的值填 coverSexual —— MetadataController 的判据是
+     * {@code coverSexual > 0.5}，而 suggestive 会算成 1，于是「封面只是有点暗示」的普通作品
+     * 也会被自动打上 NSFW。NextMoe 的 cover 是编辑 pin / 票数选出的<b>主图</b>，实测大量 r18
+     * 作品的主图就是商店封面（suggestive），把它当 R18 会误判（例如 サノバウィッチ 在 VNDB
+     * 与 Bangumi 都是正常展示的封面）。
+     * <p>
+     * suggestive 一律报 0，等于「不参与自动标记」，与改动前 NextMoe 的实际效果一致
+     * （改动前取到的是打码替身、恒为 safe）。这条只影响 NextMoe 源，其它源不动。
+     */
+    private static double sexualForNsfwGate(String sexual) {
+        return "explicit".equals(sexual) ? 2 : 0;
     }
 
     private static String cleanText(String s) {
