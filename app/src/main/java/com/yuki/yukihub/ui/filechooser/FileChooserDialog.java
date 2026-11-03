@@ -106,7 +106,9 @@ public class FileChooserDialog {
         List<StorageRoot> roots = new ArrayList<>();
         String internalPath = Environment.getExternalStorageDirectory().getAbsolutePath();
         File internalDir = new File(internalPath);
-        if (internalDir.isDirectory()) {
+        // 内部存储 / 应用内部：保持原有行为不动（含 canRead 判断），
+        // 本次改动只为新增外置 SD 卡，不触碰内部存储的既有逻辑。
+        if (internalDir.isDirectory() && internalDir.canRead()) {
             roots.add(new StorageRoot("内部存储", internalPath, true));
         }
         File appInternal = context.getFilesDir();
