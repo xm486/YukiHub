@@ -115,6 +115,11 @@ public class FileChooserDialog {
         }
 
         // 外置 SD 卡 / U 盘：直接浏览挂载点
+        // 注意：路径一律用 getAbsolutePath()，**不能用 getCanonicalPath() 当浏览路径**。
+        // SD 卡的挂载点常常是符号链接（如 /storage/9C33-6BBD -> /mnt/media_rw/9C33-6BBD），
+        // 而 /mnt/media_rw 是 root 专属、普通 App 无权进入。若把 canonical 结果当路径，
+        // 用户点进去会 listFiles()==null，被误判为「此目录受系统限制」而无法浏览。
+        // canonicalPath 只用来和内部存储做同一目录判定。
         String internalCanonical = null;
         try { internalCanonical = internalDir.getCanonicalPath(); } catch (Exception ignored) {}
         java.util.Set<String> seen = new java.util.HashSet<>();
@@ -128,13 +133,14 @@ public class FileChooserDialog {
                 String name = v.getName();
                 // emulated = 内部存储的挂载点；self = 应用自身沙箱视图；secure = 系统受限卷
                 if ("emulated".equals(name) || "self".equals(name) || "secure".equals(name)) continue;
-                String canonical;
-                try { canonical = v.getCanonicalPath(); } catch (Exception e) { continue; }
-                // 与内部存储指向同一目录时跳过，避免重复条目
-                if (internalCanonical != null && canonical.equals(internalCanonical)) continue;
-                if (!seen.add(canonical)) continue;
+                // 去重键用 canonical（能识别两个不同挂载点其实指向同一卷）；
+                // 浏览路径用 absolute（保留 /storage 视图，App 才有权限进入）。
+                String canonicalKey;
+                try { canonicalKey = v.getCanonicalPath(); } catch (Exception e) { canonicalKey = v.getAbsolutePath(); }
+                if (internalCanonical != null && canonicalKey.equals(internalCanonical)) continue;
+                if (!seen.add(canonicalKey)) continue;
                 // countChildren=false：SD 卡根可能条目很多，避免在主线程 listFiles 造成卡顿
-                roots.add(new StorageRoot("SD卡 (" + name + ")", canonical, false));
+                roots.add(new StorageRoot("SD卡 (" + name + ")", v.getAbsolutePath(), false));
             }
         }
         return roots;
@@ -341,9 +347,11 @@ public class FileChooserDialog {
         // （丢失子目录），所以优先引导用户走上面的内置浏览。
         entries.add(new FileEntry(RootType.SAF, "SD卡 / 其它存储 (系统授权访问)", null));
 
-        // Android/data
+        // Android/data：仅在「存在但当前读不到」时提示用户去授权。
+        // 用 canRead() 而不是 listFiles() 判断 —— 后者会把该目录整个列一遍，
+        // 在根列表这种主线程路径上没有必要，也避免额外 IO。
         File adDir = new File(Environment.getExternalStorageDirectory(), "Android/data");
-        if (adDir.isDirectory() && adDir.listFiles() == null) {
+        if (adDir.isDirectory() && !adDir.canRead()) {
             entries.add(new FileEntry(RootType.INTERNAL, "Android/data (需要所有文件访问权限)", adDir));
         }
 
@@ -352,13 +360,25 @@ public class FileChooserDialog {
     }
 
     // ==================== 导航 ====================
+    /**
+     * 轻量可读性判断：只做 isDirectory/canRead，不调用 listFiles()。
+     * <p>
+     * 不要用 {@code listFiles() != null} 判可读：那会把整个目录列一遍，
+     * 对 SD 卡根这类上千条目的目录在主线程会造成明显卡顿。真正的读取放到
+     * {@link #refreshList()} 的后台线程，读不到时再由它提示受系统限制。
+     */
     private boolean canReadDir(File dir) {
-        return dir.isDirectory() && dir.listFiles() != null;
+        return dir != null && dir.isDirectory() && dir.canRead();
     }
 
     private void navigateTo(File dir) {
         if (dir == null || !dir.isDirectory()) { toast("该路径不存在"); return; }
-        if (!dir.canRead() || dir.listFiles() == null) {
+        // 注意：这里不要在主线程调用 dir.listFiles() 做可读性探测。
+        // SD 卡根可能有上千条目，主线程列目录会明显卡顿甚至 ANR。
+        // 改为：先只做 isDirectory/canRead 这类轻量判断，真正的 listFiles 放到
+        // refreshList() 的后台线程里；若后台依然读不到（files == null），
+        // 再回到主线程提示「受系统限制」。
+        if (!dir.canRead()) {
             toast("此目录受系统限制");
             promptAllFilesAccess();
             return;
@@ -393,8 +413,9 @@ public class FileChooserDialog {
     private void refreshList() {
         if (currentDir == null) return;
         progressBar.setVisibility(View.VISIBLE);
+        final File dirSnapshot = currentDir;
         new Thread(() -> {
-            File[] files = currentDir.listFiles(f ->
+            File[] files = dirSnapshot.listFiles(f ->
                     showHidden || !f.getName().startsWith("."));
             List<FileEntry> entries = new ArrayList<>();
             entries.add(new FileEntry(RootType.UP, null, null));
@@ -410,9 +431,16 @@ public class FileChooserDialog {
                 for (File d : dirs) entries.add(new FileEntry(RootType.DIR, null, d));
                 for (File r : regs) entries.add(new FileEntry(RootType.FILE, null, r));
             }
+            final boolean readFailed = (files == null);
             ((android.app.Activity) context).runOnUiThread(() -> {
                 adapter.setData(entries);
                 progressBar.setVisibility(View.GONE);
+                // 后台读不到目录（无权限 / 卷已卸载）：给出明确提示，而不是静默空列表。
+                // 主线程不做 listFiles，避免大目录卡 UI，所以提示放在这里。
+                if (readFailed) {
+                    toast("此目录受系统限制，请授予「所有文件访问权限」");
+                    promptAllFilesAccess();
+                }
             });
         }).start();
     }
