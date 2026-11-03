@@ -116,35 +116,79 @@ public class FileChooserDialog {
             roots.add(new StorageRoot("应用内部", appInternal.getAbsolutePath(), true));
         }
 
-        // 外置 SD 卡 / U 盘：直接浏览挂载点
-        // 注意：路径一律用 getAbsolutePath()，**不能用 getCanonicalPath() 当浏览路径**。
-        // SD 卡的挂载点常常是符号链接（如 /storage/9C33-6BBD -> /mnt/media_rw/9C33-6BBD），
-        // 而 /mnt/media_rw 是 root 专属、普通 App 无权进入。若把 canonical 结果当路径，
-        // 用户点进去会 listFiles()==null，被误判为「此目录受系统限制」而无法浏览。
-        // canonicalPath 只用来和内部存储做同一目录判定。
+        // 外置 SD 卡 / U 盘：走 StorageManager 枚举存储卷，**不要遍历 /storage**。
+        //
+        // 教训（务必保留这段注释）：/storage 的权限是 drwx------（root only），
+        // 普通 App 对它 listFiles() 会直接返回 null。任何依赖 new File("/storage").listFiles()
+        // 的探测在真机上永远拿不到任何卷（仓库里旧的 hasExternalSdCard() 就是这么写的，
+        // 从未生效过）。
+        //
+        // StorageManager.getStorageVolumes() 是官方推荐做法：不需要任何权限即可枚举
+        // 卷列表，返回每个卷的文件路径（/storage/XXXX-XXXX 形式，App 可进入的视图）。
+        //
+        // 路径一律用 getAbsolutePath() / 卷返回的 path，**不要用 getCanonicalPath()**：
+        // SD 卡挂载点常是指向 /mnt/media_rw/... 的符号链接，那是 root 专属目录，
+        // 把 canonical 结果当浏览路径会导致用户点进去读不到内容。
         String internalCanonical = null;
         try { internalCanonical = internalDir.getCanonicalPath(); } catch (Exception ignored) {}
         java.util.Set<String> seen = new java.util.HashSet<>();
-        File storageDir = new File("/storage");
-        File[] volumes = storageDir.listFiles();
-        if (volumes != null) {
-            // 排序保证每次打开顺序一致
-            java.util.Arrays.sort(volumes, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
-            for (File v : volumes) {
-                if (v == null || !v.isDirectory()) continue;
-                String name = v.getName();
-                // emulated = 内部存储的挂载点；self = 应用自身沙箱视图；secure = 系统受限卷
-                if ("emulated".equals(name) || "self".equals(name) || "secure".equals(name)) continue;
-                // 去重键用 canonical（能识别两个不同挂载点其实指向同一卷）；
-                // 浏览路径用 absolute（保留 /storage 视图，App 才有权限进入）。
-                String canonicalKey;
-                try { canonicalKey = v.getCanonicalPath(); } catch (Exception e) { canonicalKey = v.getAbsolutePath(); }
-                if (internalCanonical != null && canonicalKey.equals(internalCanonical)) continue;
-                if (!seen.add(canonicalKey)) continue;
-                // countChildren=false：SD 卡根可能条目很多，避免在主线程 listFiles 造成卡顿
-                roots.add(new StorageRoot("SD卡 (" + name + ")", v.getAbsolutePath(), false));
+        try {
+            android.os.storage.StorageManager sm =
+                    (android.os.storage.StorageManager) context.getSystemService(Context.STORAGE_SERVICE);
+            if (sm != null) {
+                java.util.List<android.os.storage.StorageVolume> volumes = sm.getStorageVolumes();
+                if (volumes != null) {
+                    for (android.os.storage.StorageVolume sv : volumes) {
+                        if (sv == null) continue;
+                        try {
+                            // isRemovable()：U 盘 / SD 卡等可移除卷（API 24+）
+                            if (!sv.isRemovable()) continue;
+                        } catch (Throwable ignored) {
+                            // 个别 ROM 上 isRemovable 可能抛异常，保守跳过该卷
+                            continue;
+                        }
+                        String volPath = null;
+                        try {
+                            // getDirectory() 是 API 30+；低版本回退到反射/路径约定
+                            if (Build.VERSION.SDK_INT >= 30) {
+                                File d = sv.getDirectory();
+                                if (d != null) volPath = d.getAbsolutePath();
+                            }
+                        } catch (Throwable ignored) { }
+                        if (volPath == null) {
+                            // 老版本 / getDirectory 不可用：用 /storage/<uuid> 约定拼出来。
+                            // 注意这里只是拼一个「App 有权进入的 /storage 视图路径」，
+                            // 不去 listFiles() 探测 /storage 本身。
+                            String uuid = null;
+                            try { uuid = sv.getUuid(); } catch (Throwable ignored) { }
+                            if (uuid != null && !uuid.trim().isEmpty()) {
+                                volPath = "/storage/" + uuid.trim();
+                            }
+                        }
+                        if (volPath == null || volPath.trim().isEmpty()) continue;
+                        File volDir = new File(volPath);
+                        // 用 isDirectory() 判断存在性（这是 stat，不需要列目录权限），
+                        // 不用 listFiles()，避免又一次踩 //storage 不可列的坑。
+                        if (!volDir.isDirectory()) continue;
+                        String canonicalKey;
+                        try { canonicalKey = volDir.getCanonicalPath(); }
+                        catch (Exception e) { canonicalKey = volDir.getAbsolutePath(); }
+                        if (internalCanonical != null && canonicalKey.equals(internalCanonical)) continue;
+                        if (!seen.add(canonicalKey)) continue;
+
+                        String label = null;
+                        try { label = sv.getDescription(context); } catch (Throwable ignored) { }
+                        if (label == null || label.trim().isEmpty()) {
+                            try { label = sv.getUuid(); } catch (Throwable ignored) { }
+                        }
+                        if (label == null || label.trim().isEmpty()) {
+                            label = volDir.getName();
+                        }
+                        roots.add(new StorageRoot("SD卡 (" + label.trim() + ")", volDir.getAbsolutePath(), false));
+                    }
+                }
             }
-        }
+        } catch (Throwable ignored) { }
         return roots;
     }
 
