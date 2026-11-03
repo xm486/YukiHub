@@ -274,7 +274,14 @@ public class FileChooserDialog {
         Button btnConfirm = makeSmallButton(mode == Mode.DIRECTORY ? "选择此目录" : "确定");
         btnConfirm.setTextColor(C_ACCENT);
         btnConfirm.setOnClickListener(v -> {
-            if (mode != Mode.FILE && currentDir != null) onFileSelected(currentDir);
+            if (mode == Mode.FILE) return;
+            if (currentDir == null) {
+                // 还在「选择存储位置」根列表，没有进入任何目录。
+                // 原先这里是静默无反应，用户会以为按钮坏了；给出明确提示。
+                toast("请先进入一个目录，再选择");
+                return;
+            }
+            onFileSelected(currentDir);
         });
         if (mode == Mode.FILE) btnConfirm.setVisibility(View.GONE);
 
