@@ -258,6 +258,14 @@ private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private ObjectAnimator scanAnimator;
     private ImageView ivScanLoading;
     private SharedPreferences prefs;
+    /**
+     * 防叠加锁：通知权限解释弹窗正在显示时，阻止再次弹出。
+     * <p>
+     * requestPermissions() 是异步的，系统权限框覆盖 Activity 会触发 onPause→onResume，
+     * 而 onResume 里也会调 ensureNotificationPermission()。没有这把锁时，
+     * 「需要通知权限」和「通知已开启」两个弹窗会叠在一起，看起来像「给了权限还在弹」。
+     */
+    private boolean notifPermDialogShowing = false;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
     private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
@@ -349,6 +357,14 @@ private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
 private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
 private static final String KEY_SHARE_PLAYING = "share_playing_status";
 private static final String KEY_FRIEND_PLAY_NOTIFY = "friend_play_notify";
+    /**
+     * 通知权限「是否已向用户询问过」。
+     * <p>
+     * 置 true 的时机：用户在解释弹窗上点「继续」或「取消」（方案 A）。
+     * 置 true 之后 ensureNotificationPermission() 不再弹任何框，改为在账号设置页用
+     * 红字提示 + 点进系统设置，避免 onResume 每次回前台都弹一次。
+     */
+    private static final String KEY_NOTIF_PERM_ASKED = "notif_perm_asked";
 private static final String KEY_LAST_SYNC_AT = "last_sync_at";
 private static final String AUTH_STATUS_ONLINE = "online";
     private static final String BROWSER_UA = "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36";
@@ -3018,6 +3034,19 @@ private void showAccountSettingsDialog() {
     CheckBox friendNotifyCheck = krCheckBox("好友开始玩游戏时通知（后台保活）", friendNotify);
     friendNotifyCheck.setPadding(0, dp(8), 0, 0);
     root.addView(friendNotifyCheck);
+    // 通知不可用时（权限未授予 / 系统通知总开关关闭）给出醒目提示。
+    // 这里只做提示 + 跳转，不再弹窗，避免切页面反复打扰。
+    if (!notificationUsable()) {
+        TextView notifyWarn = new TextView(this);
+        notifyWarn.setText("⚠ 通知权限未开启，好友开玩时收不到提醒（点此去开启）");
+        notifyWarn.setTextColor(0xFFFF6B6B);
+        notifyWarn.setTextSize(11);
+        notifyWarn.setPadding(0, dp(4), 0, 0);
+        notifyWarn.setOnClickListener(v -> {
+            try { openAppNotificationSettings(); } catch (Throwable ignored) {}
+        });
+        root.addView(notifyWarn);
+    }
     TextView notifyHint = new TextView(this);
     notifyHint.setText("开启后会显示一条低调的常驻通知，用于保持在线并监听好友开玩。");
     notifyHint.setTextColor(getColorCompat(R.color.yh_text_muted));
@@ -3074,17 +3103,66 @@ private void ensureNotificationPermission() {
         try {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                     == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+            // ① 防叠加：已有弹窗在显示，直接返回，避免 onResume 反复触发叠出一堆
+            if (notifPermDialogShowing) return;
+            // ② 已询问过（点过「继续」或「取消」）就不再打扰。
+            //    之后只由账号设置页的红字提示引导，不再弹窗。
+            if (prefs != null && prefs.getBoolean(KEY_NOTIF_PERM_ASKED, false)) return;
             // 先弹解释弹窗，再请求权限（QQ 做法）
-            new AlertDialog.Builder(this)
+            notifPermDialogShowing = true;
+            AlertDialog dlg = new AlertDialog.Builder(this)
                     .setTitle("需要通知权限")
                     .setMessage("YukiHub 需要通知权限才能在你玩游戏时提醒你「好友开始玩什么游戏」。\n\n点击「允许」后，系统会弹出权限请求。")
                     .setPositiveButton("继续", (d, w) -> {
+                        // 方案 A：用户一表态就记账，之后永不再弹
+                        markNotifPermAsked();
+                        // 显式释放锁：Dialog.dismiss() 的 OnDismissListener 是异步投递的，
+                        // 若只依赖监听器，系统权限回调里的 showNotificationChannelGuide()
+                        // 可能因锁仍为 true 被 return 掉，导致用户看不到后续引导。
+                        notifPermDialogShowing = false;
                         d.dismiss();
                         requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 9910);
                     })
-                    .setNegativeButton("取消", null)
-                    .show();
+                    .setNegativeButton("取消", (d, w) -> {
+                        markNotifPermAsked();
+                        notifPermDialogShowing = false;
+                    })
+                    .setOnDismissListener(d -> notifPermDialogShowing = false)
+                    .create();
+            dlg.show();
+            styleAlertDialogDark(dlg);
+        } catch (Throwable ignored) {
+            notifPermDialogShowing = false;
+        }
+    }
+
+    /** 记录「通知权限已询问过」，之后不再弹解释框（方案 A：点继续或取消即记账）。 */
+    private void markNotifPermAsked() {
+        try {
+            if (prefs != null) prefs.edit().putBoolean(KEY_NOTIF_PERM_ASKED, true).apply();
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 通知是否真正可用：运行时权限 + 系统通知总开关都要开。
+     * <p>
+     * 只查 POST_NOTIFICATIONS 是不够的 —— 部分 ROM（MIUI / ColorOS / OriginOS）里
+     * 权限对话框点了「允许」，但通知总开关仍可能是关闭的，此时 App 以为权限 OK，
+     * 用户却收不到任何通知。用于账号设置页的提示与判定。
+     */
+    private boolean notificationUsable() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return false;
+            }
+            android.app.NotificationManager nm =
+                    (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            return nm != null && nm.areNotificationsEnabled();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     @Override
@@ -3105,8 +3183,10 @@ private void ensureNotificationPermission() {
 
     /** 通知权限被拒绝后，引导用户去系统设置手动开启 */
     private void showNotificationDeniedGuide() {
+        if (notifPermDialogShowing) return;
         try {
-            new AlertDialog.Builder(this)
+            notifPermDialogShowing = true;
+            AlertDialog dlg = new AlertDialog.Builder(this)
                     .setTitle("通知权限未开启")
                     .setMessage("你拒绝了通知权限，好友开玩时将无法收到提醒。\n\n你可以随时去系统设置手动开启。")
                     .setPositiveButton("去设置", (d, w) -> {
@@ -3114,14 +3194,20 @@ private void ensureNotificationPermission() {
                         openAppNotificationSettings();
                     })
                     .setNegativeButton("稍后", null)
-                    .show();
-        } catch (Throwable ignored) {}
+                    .setOnDismissListener(d -> notifPermDialogShowing = false)
+                    .create();
+            dlg.show();
+            styleAlertDialogDark(dlg);
+        } catch (Throwable ignored) {
+            notifPermDialogShowing = false;
+        }
     }
-
     /** 通知权限已授予后，引导用户确认通知通道设置（横幅/铃声/振动/锁屏） */
     private void showNotificationChannelGuide() {
+        if (notifPermDialogShowing) return;
         try {
-            new AlertDialog.Builder(this)
+            notifPermDialogShowing = true;
+            AlertDialog dlg = new AlertDialog.Builder(this)
                     .setTitle("通知已开启")
                     .setMessage("你可以进一步调整通知样式：是否弹出横幅、是否响铃、是否在锁屏显示。\n\n点击下方按钮进入通知通道设置。")
                     .setPositiveButton("去设置", (d, w) -> {
@@ -3129,8 +3215,13 @@ private void ensureNotificationPermission() {
                         openChannelSettings();
                     })
                     .setNegativeButton("保持默认", null)
-                    .show();
-        } catch (Throwable ignored) {}
+                    .setOnDismissListener(d -> notifPermDialogShowing = false)
+                    .create();
+            dlg.show();
+            styleAlertDialogDark(dlg);
+        } catch (Throwable ignored) {
+            notifPermDialogShowing = false;
+        }
     }
 
     /** 打开 App 通知设置页 */
