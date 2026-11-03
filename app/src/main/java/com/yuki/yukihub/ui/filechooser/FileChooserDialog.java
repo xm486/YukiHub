@@ -87,41 +87,69 @@ public class FileChooserDialog {
     public FileChooserDialog setOnSafRequestListener(OnSafRequestListener l) { this.safListener = l; return this; }
 
     // --- 存储根 ---
+    /**
+     * 探测可浏览的存储根：内部存储、应用内部、以及**所有外置 SD 卡**。
+     * <p>
+     * SD 卡这里直接列出 {@code /storage/<卷ID>} 让用户在内置浏览器里浏览，而不是
+     * 交给系统 DocumentsUI。原因：部分 ROM（实测 ColorOS 16 / Android 16）在
+     * {@code ACTION_OPEN_DOCUMENT_TREE} 里进入子目录后点确认，回传的 tree URI 仍是
+     * **卷根**（{@code .../tree/9C33-6BBD%3A}，"%3A" 后面没有子目录段），于是选中的
+     * {@code /galgame} 丢失，保存后只剩「SD卡」。COLOROS 13 上行为正常，属系统差异。
+     * <p>
+     * 直接走文件路径可完全绕开该问题：返回的 URI 是
+     * {@code file:///storage/9C33-6BBD/galgame}，子目录不会丢。
+     * <p>
+     * 需要「所有文件访问权限」（MANAGE_EXTERNAL_STORAGE，已在清单声明并有引导）。
+     * 若未授权，这里仍会列出条目，点击时由 {@link #navigateTo} 弹出授权引导。
+     */
     private List<StorageRoot> detectStorageRoots() {
         List<StorageRoot> roots = new ArrayList<>();
         String internalPath = Environment.getExternalStorageDirectory().getAbsolutePath();
         File internalDir = new File(internalPath);
-        if (internalDir.isDirectory() && internalDir.canRead()) {
-            roots.add(new StorageRoot("内部存储", internalPath));
+        if (internalDir.isDirectory()) {
+            roots.add(new StorageRoot("内部存储", internalPath, true));
         }
         File appInternal = context.getFilesDir();
         if (appInternal != null) {
-            roots.add(new StorageRoot("应用内部", appInternal.getAbsolutePath()));
+            roots.add(new StorageRoot("应用内部", appInternal.getAbsolutePath(), true));
+        }
+
+        // 外置 SD 卡 / U 盘：直接浏览挂载点
+        String internalCanonical = null;
+        try { internalCanonical = internalDir.getCanonicalPath(); } catch (Exception ignored) {}
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        File storageDir = new File("/storage");
+        File[] volumes = storageDir.listFiles();
+        if (volumes != null) {
+            // 排序保证每次打开顺序一致
+            java.util.Arrays.sort(volumes, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+            for (File v : volumes) {
+                if (v == null || !v.isDirectory()) continue;
+                String name = v.getName();
+                // emulated = 内部存储的挂载点；self = 应用自身沙箱视图；secure = 系统受限卷
+                if ("emulated".equals(name) || "self".equals(name) || "secure".equals(name)) continue;
+                String canonical;
+                try { canonical = v.getCanonicalPath(); } catch (Exception e) { continue; }
+                // 与内部存储指向同一目录时跳过，避免重复条目
+                if (internalCanonical != null && canonical.equals(internalCanonical)) continue;
+                if (!seen.add(canonical)) continue;
+                // countChildren=false：SD 卡根可能条目很多，避免在主线程 listFiles 造成卡顿
+                roots.add(new StorageRoot("SD卡 (" + name + ")", canonical, false));
+            }
         }
         return roots;
-    }
-
-    private boolean hasExternalSdCard() {
-        File storageDir = new File("/storage");
-        File[] children = storageDir.listFiles();
-        if (children == null) return false;
-        String internalPath = Environment.getExternalStorageDirectory().getAbsolutePath();
-        for (File f : children) {
-            String name = f.getName();
-            if (name.equals("emulated") || name.equals("self")) continue;
-            if (!f.isDirectory()) continue;
-            try {
-                if (f.getCanonicalPath().equals(new File(internalPath).getCanonicalPath())) continue;
-            } catch (Exception ignored) {}
-            return true;
-        }
-        return false;
     }
 
     private static class StorageRoot {
         final String label;
         final String path;
-        StorageRoot(String label, String path) { this.label = label; this.path = path; }
+        /** 是否统计子项数展示在副标题里（SD 卡根可能条目很多，置 false 避免主线程 IO 卡顿）。 */
+        final boolean countChildren;
+        StorageRoot(String label, String path, boolean countChildren) {
+            this.label = label;
+            this.path = path;
+            this.countChildren = countChildren;
+        }
     }
 
     // ==================== show ====================
@@ -302,10 +330,15 @@ public class FileChooserDialog {
 
         List<FileEntry> entries = new ArrayList<>();
         for (StorageRoot r : detectStorageRoots()) {
-            entries.add(new FileEntry(RootType.INTERNAL, r.label, new File(r.path)));
+            // SD 卡用 SDCARD 类型：条目仍是可浏览目录，但按需统计子项数（SD 卡根可能很大）
+            RootType t = r.countChildren ? RootType.INTERNAL : RootType.SDCARD;
+            entries.add(new FileEntry(t, r.label, new File(r.path), r.countChildren));
         }
 
-        // SD 卡 → 原生 SAF（始终可见）
+        // 兜底：系统 SAF（部分设备/ROM 的挂载点可能不通过 /storage 暴露，
+        // 或用户想用系统界面选可移动存储时仍可用）。
+        // 注意：ColorOS 16 等 ROM 在 SAF 里进入子目录后回传的 tree URI 可能是卷根
+        // （丢失子目录），所以优先引导用户走上面的内置浏览。
         entries.add(new FileEntry(RootType.SAF, "SD卡 / 其它存储 (系统授权访问)", null));
 
         // Android/data
@@ -422,7 +455,7 @@ public class FileChooserDialog {
     private int dp(float v) { return (int)(v * context.getResources().getDisplayMetrics().density); }
 
     // ==================== 数据类 ====================
-    enum RootType { UP, INTERNAL, SAF, DIR, FILE }
+    enum RootType { UP, INTERNAL, SDCARD, SAF, DIR, FILE }
 
     private class FileEntry {
         final RootType type;
@@ -435,6 +468,14 @@ public class FileChooserDialog {
         final String detail;
 
         FileEntry(RootType type, String label, File file) {
+            this(type, label, file, true);
+        }
+
+        /**
+         * @param countChildren 是否在副标题统计子项数。统计需要 {@code listFiles()}，
+         *                      在主线程执行；SD 卡等大目录可传 false 避免卡顿。
+         */
+        FileEntry(RootType type, String label, File file, boolean countChildren) {
             this.type = type;
             this.file = file;
             this.label = label;
@@ -446,9 +487,10 @@ public class FileChooserDialog {
                     this.isUp = false; this.isDirectory = true; this.isSafEntry = true;
                     this.name = label; this.detail = "跳转系统文件选择器"; break;
                 case INTERNAL:
+                case SDCARD:
                     this.isUp = false; this.isDirectory = true; this.isSafEntry = false;
                     this.name = label;
-                    this.detail = (file != null) ? childrenCount(file) : ""; break;
+                    this.detail = (file != null && countChildren) ? childrenCount(file) : ""; break;
                 case DIR:
                     this.isUp = false; this.isDirectory = true; this.isSafEntry = false;
                     this.name = file.getName(); this.detail = childrenCount(file); break;
@@ -506,6 +548,9 @@ public class FileChooserDialog {
                     iconRes = android.R.drawable.ic_menu_share; nameColor = 0xFF8AB4FF; break;
                 case INTERNAL:
                     iconRes = android.R.drawable.ic_menu_set_as; nameColor = C_ACCENT; break;
+                case SDCARD:
+                    // SD 卡：用存储类图标，并在颜色上区分，避免与内部存储混淆
+                    iconRes = android.R.drawable.ic_menu_save; nameColor = 0xFF8AB4FF; break;
                 case DIR:
                     iconRes = android.R.drawable.ic_menu_view; nameColor = C_TEXT; break;
                 default:
