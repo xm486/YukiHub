@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Gal工具箱</title>
   <!-- 引入CSS文件 -->
-  <link rel="stylesheet" href="css/index.css?v=20250930b">
+  <link rel="stylesheet" href="css/index.css?v=20251004">
 <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <style>
    .friend-link-entry{text-align:center;margin:.4rem 0 1rem}.friend-link-toggle{padding:.35rem .9rem;border:1px solid #d8d2ff;border-radius:999px;background:#fff;color:#6c5ce7;font-size:.85rem;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.08)}.friend-link-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:10001;padding:1rem}.friend-link-modal.active{display:flex!important}.friend-link-dialog{position:relative;width:min(86vw,320px);background:#fff;border-radius:14px;padding:1rem;box-shadow:0 8px 28px rgba(0,0,0,.22)}.friend-link-close{position:absolute;top:.45rem;right:.6rem;border:none;background:transparent;font-size:1.4rem;line-height:1;color:#999;cursor:pointer}.friend-link-modal-title{font-size:1rem;font-weight:600;color:#2d3436;margin-bottom:.8rem;padding-right:1.5rem}.friend-link-item{display:flex;align-items:center;gap:.6rem;padding:.65rem;border-radius:10px;color:#333;text-decoration:none;transition:background .2s ease}.friend-link-item:hover{background:#f4f1ff}.friend-link-icon{width:28px;height:28px;border-radius:7px;object-fit:cover;flex-shrink:0;border:1px solid #e0e0e0;background:#fff}
@@ -61,8 +61,13 @@ referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
   <div class="container">
    <!-- vndb查询板块 -->
    <div class="section">
- 	<div class="section-title">vndb游戏查询<button type="button" onclick="window.location.href='pan.html'" style="font-size: 14px;margin-left: 35px;margin-bottom:8px;border-radius: 5px;background:#CBA0E7;">网盘链接转换/解密加密</button></div>
+ 	<div class="section-title">游戏查询<button type="button" onclick="window.location.href='pan.html'" style="font-size: 14px;margin-left: 35px;margin-bottom:8px;border-radius: 5px;background:#CBA0E7;">网盘链接转换/解密加密</button></div>
 	<div class="vndb-tool">
+	 <!-- 数据源切换 -->
+	 <div class="source-tabs" role="tablist" aria-label="选择数据源">
+	  <button type="button" class="source-tab active" data-source="vndb" onclick="switchSource('vndb', this)">VNDB</button>
+	  <button type="button" class="source-tab" data-source="nextmoe" onclick="switchSource('nextmoe', this)">NextMoe</button>
+	 </div>
 	 <!-- 输入区域 -->
 	 <div class="input-area">
 	  <input type="text" id="gameInput" placeholder="输入游戏名称，查询vndb数据库...">
@@ -161,6 +166,68 @@ referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
 	 </div>
 	</div>
    </div>
+   <!-- 评分排行榜 -->
+   <div class="section">
+	<div class="section-title">Gal 评分排行榜</div>
+	<div class="ranking-entry">
+	 <button type="button" class="ranking-entry-btn" onclick="openRanking()">🏆 查看 Galgame 评分排行榜</button>
+	 <p class="ranking-entry-note">跨 VNDB / Bangumi / DLsite / 批评空间 / NextMoe / HowLongToBeat 的六源共识分<br>数据来源：NextMoe·未萌 开放 API（鲲 Galgame）</p>
+	</div>
+   </div>
+
+   <!-- 排行榜弹窗 -->
+   <div class="ranking-panel" id="rankingPanel" onclick="closeRanking(event)">
+	<div class="ranking-dialog" role="dialog" aria-modal="true" aria-label="Galgame 评分排行榜">
+	 <div class="ranking-head">
+	  <h3>Galgame 评分排行榜</h3>
+	  <button type="button" class="ranking-close" onclick="closeRanking()" aria-label="关闭">×</button>
+	 </div>
+	 <div class="ranking-presets" id="rankingPresets">
+	  <button type="button" class="rp-chip active" data-preset="best" onclick="pickPreset('best', this)">综合神作</button>
+	  <button type="button" class="rp-chip" data-preset="egs" onclick="pickPreset('egs', this)">批评空间</button>
+	  <button type="button" class="rp-chip" data-preset="bangumi" onclick="pickPreset('bangumi', this)">Bangumi</button>
+	  <button type="button" class="rp-chip" data-preset="vndb" onclick="pickPreset('vndb', this)">VNDB</button>
+	  <button type="button" class="rp-chip" data-preset="hltb" onclick="pickPreset('hltb', this)">时长口碑</button>
+	  <button type="button" class="rp-chip" data-preset="hidden" onclick="pickPreset('hidden', this)">冷门佳作</button>
+	  <button type="button" class="rp-chip" data-preset="divergence" onclick="pickPreset('divergence', this)">各站分歧</button>
+	  <button type="button" class="rp-chip" data-preset="landmine" onclick="pickPreset('landmine', this)">地雷榜</button>
+	 </div>
+	 <div class="ranking-toolbar">
+	  <button type="button" class="ranking-filter active" id="nsfwToggle" onclick="toggleNsfw(this)">含 R18</button>
+	  <button type="button" class="ranking-select year-btn" id="yearBtn" onclick="openYearPicker()">全部年份 ▾</button>
+	  <select class="ranking-select" id="votesSelect" onchange="changeMinVotes(this)">
+	   <option value="">票数不限</option>
+	   <option value="10">10 票以上</option>
+	   <option value="50">50 票以上</option>
+	   <option value="100">100 票以上</option>
+	   <option value="500">500 票以上</option>
+	   <option value="1000">1000 票以上</option>
+	  </select>
+	  <span class="ranking-unit" id="rankingUnit"></span>
+	 </div>
+	 <div class="ranking-list" id="rankingList"><div class="loading-wrapper"><span class="spin-loading"></span><span>正在加载排行榜...</span></div></div>
+	 <div class="ranking-more" id="rankingMore" style="display:none;">
+	  <button type="button" class="ranking-more-btn" id="rankingMoreBtn" onclick="loadMoreRanking()">加载更多</button>
+	 </div>
+	 <div class="year-picker" id="yearPicker">
+	  <div class="year-picker-head">
+	   <span class="yp-title">选择年份区间</span>
+	   <button type="button" class="yp-clear" onclick="clearYear()">清除</button>
+	  </div>
+	  <div class="yp-quick">
+	   <button type="button" class="yp-q" onclick="quickYear(1)">今年</button>
+	   <button type="button" class="yp-q" onclick="quickYear(3)">近 3 年</button>
+	   <button type="button" class="yp-q" onclick="quickYear(5)">近 5 年</button>
+	   <button type="button" class="yp-q" onclick="quickYear(10)">近 10 年</button>
+	   <button type="button" class="yp-q" onclick="quickYear(0)">全部</button>
+	  </div>
+	  <div class="yp-hint" id="ypHint">点一个年份，或点两个年份选区间</div>
+	  <div class="yp-grid" id="ypGrid"></div>
+	 </div>
+	 <div class="ranking-foot">数据来源：NextMoe·未萌 开放 API（鲲 Galgame）<br>共识分为偏差值：50 为平均水平，每 10 分一个标准差</div>
+	</div>
+   </div>
+
    <!-- 链接分享板块 -->
    <div class="section">
 	<div class="section-title">实用gal链接</div>
@@ -339,6 +406,6 @@ referrerPolicy="no-referrer-when-downgrade"></a></div></noscript>
 	 if(e.key === 'Escape') closeFriendLinks();
 	});
    </script>
-   <script src="js/index.js?v=20250930b"></script>
+   <script src="js/index.js?v=20251004"></script>
  </body>
 </html>

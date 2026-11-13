@@ -724,3 +724,567 @@
 	position: relative;
 	z-index: 1;
 }
+
+/* ===== 数据源切换 tab ===== */
+.source-tabs {
+	display: flex;
+	gap: 0.4rem;
+	margin-bottom: 1rem;
+	flex-wrap: wrap;
+}
+
+.source-tab {
+	padding: 0.45rem 0.9rem;
+	border: 1px solid #e0e0e0;
+	border-radius: 999px;
+	background: #fff;
+	color: #666;
+	font-size: 0.85rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.source-tab:hover {
+	border-color: #c9c0f5;
+	color: #6c5ce7;
+}
+
+.source-tab.active {
+	background: #6c5ce7;
+	border-color: #6c5ce7;
+	color: #fff;
+	box-shadow: 0 2px 6px rgba(108, 92, 231, 0.3);
+}
+
+/* 结果列表里的数据源小标签 */
+.source-badge {
+	display: inline-block;
+	padding: 0.1rem 0.45rem;
+	border-radius: 999px;
+	font-size: 0.7rem;
+	font-weight: 500;
+	margin-left: 0.5rem;
+	vertical-align: middle;
+	background: #f0e9ff;
+	color: #6c5ce7;
+}
+
+.source-badge.nextmoe {
+	background: #e6f7f1;
+	color: #12a97e;
+}
+
+.source-badge.ymgal {
+	background: #fff0e6;
+	color: #e08b3c;
+}
+
+/* 来源切换失败提示 */
+.retry-hint {
+	margin-top: 0.6rem;
+	padding: 0.6rem 0.8rem;
+	background: #fff8e6;
+	border-left: 3px solid #f0b429;
+	border-radius: 6px;
+	font-size: 0.82rem;
+	color: #8a6d1f;
+	line-height: 1.5;
+}
+
+/* ===== 排行榜入口 ===== */
+.ranking-entry {
+	text-align: center;
+	padding: 0.5rem 0 0.8rem;
+}
+
+.ranking-entry-btn {
+	padding: 0.7rem 1.4rem;
+	border: none;
+	border-radius: 10px;
+	background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+	color: #fff;
+	font-size: 0.95rem;
+	font-weight: 500;
+	cursor: pointer;
+	box-shadow: 0 3px 10px rgba(108, 92, 231, 0.32);
+	transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.ranking-entry-btn:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 5px 14px rgba(108, 92, 231, 0.42);
+}
+
+.ranking-entry-btn:active {
+	transform: scale(0.98);
+}
+
+.ranking-entry-note {
+	margin-top: 0.6rem;
+	font-size: 0.75rem;
+	color: #999;
+	line-height: 1.6;
+}
+
+/* ===== 排行榜弹窗 ===== */
+.ranking-panel {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.5);
+	display: none;
+	align-items: center;
+	justify-content: center;
+	z-index: 10002;
+	padding: 1rem;
+}
+
+.ranking-panel.active {
+	display: flex;
+}
+
+.ranking-dialog {
+	width: min(94vw, 560px);
+	max-height: 84vh;
+	background: #fff;
+	border-radius: 14px;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
+}
+
+.ranking-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.9rem 1rem;
+	border-bottom: 1px solid #eee;
+	flex-shrink: 0;
+}
+
+.ranking-head h3 {
+	font-size: 1rem;
+	font-weight: 600;
+	color: #2d3436;
+	margin: 0;
+}
+
+.ranking-close {
+	border: none;
+	background: transparent;
+	font-size: 1.5rem;
+	line-height: 1;
+	color: #999;
+	cursor: pointer;
+	padding: 0 0.2rem;
+}
+
+.ranking-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.7rem 1rem;
+	border-bottom: 1px solid #f2f2f2;
+	flex-shrink: 0;
+	flex-wrap: wrap;
+}
+
+.ranking-filter {
+	padding: 0.35rem 0.8rem;
+	border: 1px solid #e0e0e0;
+	border-radius: 999px;
+	background: #fff;
+	color: #666;
+	font-size: 0.8rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.ranking-filter.active {
+	background: #6c5ce7;
+	border-color: #6c5ce7;
+	color: #fff;
+}
+
+.ranking-unit {
+	font-size: 0.72rem;
+	color: #aaa;
+	margin-left: auto;
+}
+
+.ranking-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: 0.6rem 0.8rem;
+	min-height: 120px;
+}
+
+.ranking-list::-webkit-scrollbar {
+	width: 5px;
+}
+
+.ranking-list::-webkit-scrollbar-thumb {
+	background: #ddd;
+	border-radius: 3px;
+}
+
+/* 排行榜列表项 */
+.rank-item {
+	display: flex;
+	align-items: center;
+	gap: 0.7rem;
+	padding: 0.6rem 0.5rem;
+	border-radius: 8px;
+	text-decoration: none;
+	color: inherit;
+	transition: background 0.15s ease;
+}
+
+.rank-item:hover {
+	background: #f7f5ff;
+}
+
+.rank-no {
+	flex: 0 0 26px;
+	font-size: 0.9rem;
+	font-weight: 700;
+	color: #b2bec3;
+	text-align: center;
+}
+
+.rank-item:nth-child(1) .rank-no {
+	color: #e6a700;
+}
+
+.rank-item:nth-child(2) .rank-no {
+	color: #97a4ad;
+}
+
+.rank-item:nth-child(3) .rank-no {
+	color: #c98a44;
+}
+
+.rank-cover {
+	flex: 0 0 42px;
+	width: 42px;
+	height: 58px;
+	border-radius: 5px;
+	object-fit: cover;
+	background: #f0f0f0;
+	border: 1px solid #eee;
+}
+
+.rank-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.rank-name {
+	font-size: 0.88rem;
+	font-weight: 500;
+	color: #2d3436;
+	line-height: 1.35;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+}
+
+.rank-meta {
+	margin-top: 0.25rem;
+	font-size: 0.72rem;
+	color: #999;
+	line-height: 1.4;
+}
+
+.rank-score {
+	flex: 0 0 auto;
+	text-align: right;
+}
+
+.rank-score-val {
+	font-size: 1rem;
+	font-weight: 700;
+	color: #6c5ce7;
+}
+
+.rank-score-sub {
+	font-size: 0.68rem;
+	color: #bbb;
+	margin-top: 0.1rem;
+}
+
+.ranking-foot {
+	padding: 0.6rem 1rem;
+	border-top: 1px solid #eee;
+	font-size: 0.68rem;
+	color: #aaa;
+	line-height: 1.6;
+	text-align: center;
+	flex-shrink: 0;
+	background: #fafafa;
+}
+
+@media (max-width: 400px) {
+	.ranking-dialog {
+		width: 96vw;
+		max-height: 88vh;
+	}
+
+	.rank-cover {
+		flex: 0 0 36px;
+		width: 36px;
+		height: 50px;
+	}
+}
+
+/* ===== 排行榜预设 chip ===== */
+.ranking-presets {
+	display: flex;
+	gap: 0.35rem;
+	padding: 0.6rem 0.8rem 0.2rem;
+	flex-wrap: wrap;
+	flex-shrink: 0;
+}
+
+.rp-chip {
+	padding: 0.3rem 0.65rem;
+	border: 1px solid #ece9fb;
+	border-radius: 999px;
+	background: #faf9ff;
+	color: #6f6a86;
+	font-size: 0.74rem;
+	cursor: pointer;
+	transition: all 0.18s ease;
+	white-space: nowrap;
+}
+
+.rp-chip:hover {
+	border-color: #c9c0f5;
+	color: #6c5ce7;
+}
+
+.rp-chip.active {
+	background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+	border-color: transparent;
+	color: #fff;
+	box-shadow: 0 2px 7px rgba(108, 92, 231, 0.32);
+}
+
+/* 排行榜下拉筛选 */
+.ranking-select {
+	padding: 0.3rem 0.5rem;
+	border: 1px solid #e0e0e0;
+	border-radius: 7px;
+	background: #fff;
+	color: #555;
+	font-size: 0.75rem;
+	cursor: pointer;
+	max-width: 40%;
+}
+
+.ranking-select:focus {
+	outline: none;
+	border-color: #b9aff5;
+}
+
+/* 各站原分小字 */
+.rank-perf {
+	font-size: 0.66rem !important;
+	color: #b8b2cc !important;
+	margin-top: 0.15rem !important;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 加载更多 */
+.ranking-more {
+	padding: 0.5rem 1rem 0.7rem;
+	text-align: center;
+	flex-shrink: 0;
+	border-top: 1px solid #f2f2f2;
+}
+
+.ranking-more-btn {
+	width: 100%;
+	padding: 0.55rem;
+	border: 1px solid #ddd8f7;
+	border-radius: 9px;
+	background: #f8f6ff;
+	color: #6c5ce7;
+	font-size: 0.82rem;
+	cursor: pointer;
+	transition: background 0.18s ease;
+}
+
+.ranking-more-btn:hover {
+	background: #f0ecff;
+}
+
+.ranking-more-btn:disabled {
+	color: #bbb;
+	cursor: default;
+	background: #f7f7f7;
+	border-color: #eee;
+}
+
+/* ===== 年份区间选择器 ===== */
+.year-btn {
+	font-family: inherit;
+	line-height: 1.5;
+}
+
+.year-btn.active {
+	background: #f0ecff;
+	border-color: #b9aff5;
+	color: #6c5ce7;
+	font-weight: 500;
+}
+
+.year-picker {
+	display: none;
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 5;
+	background: #fff;
+	border-top: 1px solid #eee;
+	border-radius: 14px 14px 0 0;
+	box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.12);
+	padding: 0.7rem 0.9rem 0.9rem;
+	max-height: 62%;
+	flex-direction: column;
+}
+
+.year-picker.active {
+	display: flex;
+}
+
+.ranking-dialog {
+	position: relative;
+}
+
+.year-picker-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 0.5rem;
+	flex-shrink: 0;
+}
+
+.yp-title {
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: #2d3436;
+}
+
+.yp-clear {
+	border: none;
+	background: transparent;
+	color: #999;
+	font-size: 0.78rem;
+	cursor: pointer;
+	padding: 0.2rem 0.4rem;
+}
+
+.yp-clear:hover {
+	color: #6c5ce7;
+}
+
+.yp-quick {
+	display: flex;
+	gap: 0.35rem;
+	margin-bottom: 0.5rem;
+	flex-wrap: wrap;
+	flex-shrink: 0;
+}
+
+.yp-q {
+	padding: 0.25rem 0.6rem;
+	border: 1px solid #e6e6e6;
+	border-radius: 999px;
+	background: #fafafa;
+	color: #666;
+	font-size: 0.72rem;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.yp-q:hover {
+	border-color: #c9c0f5;
+	color: #6c5ce7;
+}
+
+.yp-hint {
+	font-size: 0.7rem;
+	color: #aaa;
+	margin-bottom: 0.45rem;
+	flex-shrink: 0;
+}
+
+.yp-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+	gap: 0.3rem;
+	overflow-y: auto;
+	padding-right: 0.2rem;
+	flex: 1;
+	min-height: 0;
+}
+
+.yp-grid::-webkit-scrollbar {
+	width: 4px;
+}
+
+.yp-grid::-webkit-scrollbar-thumb {
+	background: #ddd;
+	border-radius: 2px;
+}
+
+.yp-year {
+	padding: 0.4rem 0.2rem;
+	border: 1px solid #eee;
+	border-radius: 6px;
+	background: #fff;
+	color: #555;
+	font-size: 0.76rem;
+	cursor: pointer;
+	transition: all 0.13s ease;
+}
+
+.yp-year:hover {
+	border-color: #c9c0f5;
+	color: #6c5ce7;
+}
+
+/* 当前年份 */
+.yp-year.is-current {
+	font-weight: 600;
+	color: #6c5ce7;
+}
+
+/* 单选 */
+.yp-year.single {
+	background: #6c5ce7;
+	border-color: #6c5ce7;
+	color: #fff;
+	font-weight: 600;
+}
+
+/* 区间内 */
+.yp-year.range {
+	background: #f0ecff;
+	border-color: #ddd6fb;
+	color: #6c5ce7;
+}
+
+/* 区间两端 */
+.yp-year.edge {
+	background: #6c5ce7;
+	border-color: #6c5ce7;
+	color: #fff;
+	font-weight: 600;
+}
