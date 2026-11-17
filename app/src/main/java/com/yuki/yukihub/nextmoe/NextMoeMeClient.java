@@ -144,7 +144,12 @@ public final class NextMoeMeClient {
         if (sb.length() == 0) return out;
 
         // 匿名档即可读目录；带上令牌（若已登录）也只是换配额档位，不影响结果。
-        String url = API_BASE + "/catalog/works?nsfw=true&refs=" + URLEncoder.encode(sb.toString(), "UTF-8");
+        //
+        // ⚠️ include=refs 是必须的：默认响应**不含** refs 字段（已实测确认）。
+        // 少了它，31 个命中的作品一个都对应不回请求 key，会全部掉进「无法匹配」。
+        // 这也是最初 39 个游戏只匹配上 13 个的真正原因。
+        String url = API_BASE + "/catalog/works?nsfw=true&include=refs&refs="
+                + URLEncoder.encode(sb.toString(), "UTF-8");
         JSONObject resp = doGetJson(url);
 
         JSONArray items = resp.optJSONArray("items");
