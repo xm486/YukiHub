@@ -177,7 +177,87 @@ public final class NextMoeMeClient {
         return out;
     }
 
-    // ======================== 内部：HTTP ========================
+    // ======================== 第 2 轮：按标题搜索 ========================
+
+    /**
+     * 按标题搜索单个作品，用于 refs 反查失败时的兜底。
+     * <p>
+     * <b>只接受「归一化后完全相等」的命中</b>，不做模糊匹配。
+     * 原因：搜索是模糊的，「千恋万花」会同时返回「涙恋花」「片恋スターマイン」，
+     * 若取第一条，就会把用户的游玩时长写到完全不相干的作品上——那比不同步更糟。
+     * <p>
+     * 比对范围覆盖 display_name 与 localized 里的所有语言值，
+     * 这样「千恋万花」能命中 localized["zh-Hans"]="千恋＊万花"。
+     *
+     * @param title 本地游戏标题
+     * @return work_id；无精确命中返回 null
+     */
+    public static String searchWorkByExactTitle(String title) throws Exception {
+        String q = normalizeTitle(title);
+        if (q.isEmpty()) return null;
+
+        JSONObject root = doGetJson(API_BASE + "/catalog/search?object=work&nsfw=true&limit=10&q="
+                + URLEncoder.encode(title.trim(), "UTF-8"));
+        JSONArray items = root.optJSONArray("items");
+        if (items == null) return null;
+
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject it = items.optJSONObject(i);
+            if (it == null) continue;
+            // 容忍开放词表：只处理 work 命中
+            String target = it.optString("target_object", "work");
+            if (!"work".equals(target)) continue;
+
+            if (!titleMatches(q, it)) continue;
+            String id = it.optString("id", "");
+            if (!id.isEmpty()) return id;
+        }
+        return null;
+    }
+
+    /** 判断搜索结果的所有名称字段里，是否有与查询词归一化后完全相等的一个。 */
+    private static boolean titleMatches(String normalizedQuery, JSONObject work) {
+        // display_name
+        if (normalizedQuery.equals(normalizeTitle(work.optString("display_name", "")))) return true;
+        // latin
+        if (normalizedQuery.equals(normalizeTitle(work.optString("latin", "")))) return true;
+        // localized 各语言
+        JSONObject loc = work.optJSONObject("localized");
+        if (loc != null) {
+            java.util.Iterator<String> keys = loc.keys();
+            while (keys.hasNext()) {
+                JSONObject entry = loc.optJSONObject(keys.next());
+                if (entry == null) continue;
+                if (normalizedQuery.equals(normalizeTitle(entry.optString("value", "")))) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 标题归一化：用于「完全相同」比较。
+     * <p>
+     * 只抹掉排版差异，不做语义模糊：
+     * 去空白、去标点与符号、全角转半角、统一大小写。
+     * 这样「千恋万花」与「千恋＊万花」、「サクラノ詩」与「サクラノ诗」都能对上，
+     * 但「千恋万花」绝不会等于「泪恋花」。
+     */
+    static String normalizeTitle(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            // 全角 ASCII → 半角
+            if (c >= '\uFF01' && c <= '\uFF5E') c = (char) (c - 0xFEE0);
+            if (c == '\u3000') c = ' ';              // 全角空格
+            if (Character.isWhitespace(c)) continue;
+            if (Character.isLetterOrDigit(c)) {
+                sb.append(Character.toLowerCase(c));
+            }
+            // 其余（标点、＊、－、括注符号等）一律丢弃
+        }
+        return sb.toString();
+    }
 
     private static List<BatchItemResult> doBatchPost(String path, JSONObject body, int expected)
             throws Exception {

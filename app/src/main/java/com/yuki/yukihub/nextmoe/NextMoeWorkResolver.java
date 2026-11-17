@@ -18,16 +18,21 @@ import java.util.Set;
 /**
  * 把本地游戏解析成 NextMoe work_id。
  * <p>
- * 采用三级策略，逐级降级，全部失败就进「无法匹配」列表（由 UI 明确展示，绝不静默丢弃）：
+ * 采用四级策略，逐级降级，全部失败就进「无法匹配」列表（由 UI 明确展示，绝不静默丢弃）：
  * <ol>
  *   <li><b>已缓存</b>：{@code games.nextmoe_work_id} 非空，直接用（零请求）。</li>
  *   <li><b>NextMoe 源</b>：{@code metadata_cache} 里 source='nextmoe' 的 source_id 就是 work_id（零请求）。</li>
- *   <li><b>外部锚反查</b>：用 metadata_cache 里的 vndb / bangumi id 走
- *       {@code /catalog/works?refs=...&nsfw=true} 批量反查，每 100 个一次请求。</li>
+ *   <li><b>外部锚反查</b>：vndb / bangumi id 走 {@code /catalog/works?refs=...&nsfw=true}
+ *       批量反查，每 100 个一次请求。</li>
+ *   <li><b>标题精确搜索</b>：前三级都没命中的，用游戏标题走 {@code /catalog/search}。
+ *       只接受<b>归一化后完全相等</b>的命中（见 {@link NextMoeMeClient#normalizeTitle}），
+ *       因为搜索是模糊的——「千恋万花」会同时返回「涙恋花」，
+ *       取第一条就会把时长写到不相干的作品上，比不同步更糟。
+ *       这一级逐个请求，所以只处理前面失败的少量条目。</li>
  * </ol>
  * <p>
- * 刻意<b>不做</b>「按标题搜索兜底」：标题匹配错配率太高，把用户的游玩时长写到错误的作品上
- * 比不同步更糟。
+ * 第 4 级是必要的：只用 ymgal / hikarinagi 源刮削的游戏拿不到 NextMoe 认的 ref，
+ * 但它们的标题往往就是 NextMoe 的 localized 值，标题搜索能让它们对上。
  */
 public final class NextMoeWorkResolver {
 
@@ -170,8 +175,40 @@ public final class NextMoeWorkResolver {
         // 没有解析出来的，进 unmatched（由 UI 明确展示）
         Set<Long> matchedIds = new HashSet<>();
         for (Matched m : result.matched) matchedIds.add(m.game.id);
+        List<Game> stillUnmatched = new ArrayList<>();
         for (Game g : stillPending) {
-            if (!matchedIds.contains(g.id)) result.unmatched.add(g);
+            if (!matchedIds.contains(g.id)) stillUnmatched.add(g);
+        }
+
+        // ---- 第 4 级：按标题精确搜索兜底 ----
+        // 覆盖「只用了 ymgal / hikarinagi 源刮削」或「元数据 id 格式异常」的情况：
+        // 这些游戏拿不到可反查的 ref，但标题往往就是 NextMoe 的 localized 值。
+        // 只认归一化后完全相等的命中，避免搜索的模糊性把时长写到别的作品上。
+        // 逐个请求（搜索接口没有批量车道），所以放在最后一级，只处理前面全部失败的少量条目。
+        for (Game g : stillUnmatched) {
+            String title = g.title == null ? "" : g.title.trim();
+            if (title.isEmpty()) {
+                result.unmatched.add(g);
+                continue;
+            }
+            try {
+                String workId = NextMoeMeClient.searchWorkByExactTitle(title);
+                if (workId != null && !workId.isEmpty()) {
+                    result.matched.add(new Matched(g, workId, "title"));
+                    result.newlyResolved.put(g.id, workId);
+                } else {
+                    result.unmatched.add(g);
+                }
+            } catch (NextMoeMeClient.QuotaExceededException q) {
+                // 配额用尽：剩下的直接算未匹配，把原因往上抛
+                result.unmatched.add(g);
+                Log.w(TAG, "quota exceeded while title-searching", q);
+                throw q;
+            } catch (Throwable t) {
+                // 单个标题搜索失败不影响其它条目
+                Log.w(TAG, "title search failed for " + title, t);
+                result.unmatched.add(g);
+            }
         }
 
         if (progress != null) progress.onProgress(total, total);
