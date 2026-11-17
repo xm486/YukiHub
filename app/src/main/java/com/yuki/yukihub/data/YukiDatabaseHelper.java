@@ -14,8 +14,10 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      * 历史：15 = 聊天回复引用 + 未读锚点；16 = 曾短暂加过群聊等级列（已废弃，等级改为不入缓存）
      *      18 = 清理 metadata_cache 孤儿行（历史存量）+ 压缩数据库
      *      22 = 音乐厅：music_albums / music_tracks（只存本机 URI 引用，不复制文件、不入备份）
+     *      23 = NextMoe 游玩记录同步：games.nextmoe_work_id / nextmoe_synced_at / nextmoe_synced_sig
+     *           （三个字段都是「本机同步状态」，不参与云同步快照）
      */
-    public static final int DB_VERSION = 22;
+    public static final int DB_VERSION = 23;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -98,7 +100,11 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 // v21：这两列原先只写在 onUpgrade 里，全新安装走 onCreate 时漏建，
                 // 导致 INSERT 报 "table games has no column named logo_path" 而全部失败。
                 "logo_path TEXT," +
-                "bg_path TEXT" +
+                "bg_path TEXT," +
+                // v23：NextMoe 游玩记录同步的本机状态（不参与云同步快照）
+                "nextmoe_work_id TEXT DEFAULT ''," +
+                "nextmoe_synced_at INTEGER DEFAULT 0," +
+                "nextmoe_synced_sig TEXT DEFAULT ''" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -223,6 +229,16 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
             // 只存本机 URI 引用（SAF 持久化授权），不复制文件本体，也不参与备份与云同步。
             // ⚠️ 与 v21 的教训一致：这里和 onCreate 必须成对写，否则「全新安装」的库会缺表。
             createMusicTables(db);
+        }
+        if (oldVersion < 23) {
+            // v23：NextMoe 游玩记录同步的本机状态。
+            // ⚠️ 与 v21 的教训一致：这三列在 onCreate 的建表语句里也必须存在，
+            //    否则全新安装的库缺列，INSERT 会报 "no such column" 而整体失败。
+            // 三列都不参与云同步快照：它们描述的是「本机匹配到哪个作品、本机何时推过」，
+            // 跨设备无意义，且会让快照在多端之间互相冲突。
+            safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_work_id TEXT DEFAULT ''");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_synced_at INTEGER DEFAULT 0");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_synced_sig TEXT DEFAULT ''");
         }
     }
 

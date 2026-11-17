@@ -36,6 +36,20 @@ public class Game {
     /** 自定义背景图（M10）：设置后大屏背景优先用它，而不是封面 */
     public String bgPath;
 
+    // ==================== NextMoe 游玩记录同步（v23） ====================
+    // 以下三个字段都是**本机状态**，描述「本机匹配到哪个作品、本机何时推过」，
+    // 跨设备无意义，因此都不参与云同步快照（exportGamesJson 不导出）。
+    /**
+     * 匹配成功的 NextMoe work_id（十进制字符串）。
+     * 为空表示尚未匹配。缓存下来避免每次同步都重新反查。
+     * 注意：NextMoe id 是 int64 字符串，Java 侧一律用 String，不要转 long。
+     */
+    public String nextmoeWorkId = "";
+    /** 上次成功推送到 NextMoe 的时间戳，0 表示从未成功。 */
+    public long nextmoeSyncedAt = 0;
+    /** 上次成功推送的内容签名（如 "doing:210"），用于跳过未变动的游戏。 */
+    public String nextmoeSyncedSig = "";
+
     public Game() {
         engine = EngineType.UNKNOWN;
         createdAt = System.currentTimeMillis();

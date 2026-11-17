@@ -2438,6 +2438,22 @@ private void showProfileDialog() {
     syncLp.setMargins(dp(8), 0, 0, 0);
     accountRow.addView(syncBtn, syncLp);
     root.addView(accountRow);
+    // NextMoe 游玩记录同步：独立入口，刻意与上面的「云同步」分开。
+    // 两者语义完全不同：云同步是本项目服务器上的全量快照（双向），
+    // 这里只把游玩时长与状态单向推给第三方 NextMoe，且失败不影响任何本地数据。
+    Button nextMoeSyncBtn = krButton(nextMoeSyncButtonLabel());
+    nextMoeSyncBtn.setTextColor(primaryTextColor());
+    nextMoeSyncBtn.setOnClickListener(v -> openNextMoeSync());
+    LinearLayout.LayoutParams nMoeLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+    nMoeLp.setMargins(0, dp(8), 0, 0);
+    root.addView(nextMoeSyncBtn, nMoeLp);
+    TextView nextMoeSyncHint = new TextView(this);
+    nextMoeSyncHint.setText(nextMoeSyncStatusText());
+    nextMoeSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+    nextMoeSyncHint.setTextSize(10);
+    nextMoeSyncHint.setPadding(0, dp(4), 0, 0);
+    root.addView(nextMoeSyncHint);
 
     LinearLayout kunRow = new LinearLayout(this);
     kunRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3098,7 +3114,36 @@ private void showAccountSettingsDialog() {
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> confirmLogout(dialog));
 }
 
-private void ensureNotificationPermission() {
+// ==================== NextMoe 游玩记录同步 ====================
+
+    /** 首页按钮文案：未绑定时提示去绑定，已绑定时是正常动作。 */
+    private String nextMoeSyncButtonLabel() {
+        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
+            return "绑定 NextMoe 账号";
+        }
+        return "同步游玩记录到 NextMoe";
+    }
+
+    /** 按钮下方的状态小字。 */
+    private String nextMoeSyncStatusText() {
+        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
+            return "绑定后可把游玩时长与状态同步到 NextMoe（未萌）";
+        }
+        long last = prefs == null ? 0 : prefs.getLong("nextmoe_sync_at", 0);
+        if (last <= 0) return "上次同步：从未";
+        return "上次同步：" + TimeFormatUtil.date(last);
+    }
+
+    private void openNextMoeSync() {
+        try {
+            com.yuki.yukihub.nextmoe.NextMoeSyncDialog.start(this);
+        } catch (Throwable t) {
+            Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void ensureNotificationPermission() {
         if (android.os.Build.VERSION.SDK_INT < 33) return;
         try {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)

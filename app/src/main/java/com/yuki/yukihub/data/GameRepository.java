@@ -886,6 +886,48 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
         }
     }
 
+    // ==================== NextMoe 游玩记录同步（v23） ====================
+    // 这三个字段刻意不放进 toValues()：toValues 覆盖 insert 与所有 update 路径，
+    // 一旦放进去，任何普通编辑（改标题、改状态）都会顺带用内存里的快照覆盖同步状态，
+    // 容易在多线程/多入口下互相踩。改为独立的窄接口，只动这三列。
+
+    /** 只写入匹配到的 work_id（不改同步时间与签名）。 */
+    public void updateNextMoeWorkId(long gameId, String workId) {
+        ContentValues v = new ContentValues();
+        v.put("nextmoe_work_id", workId == null ? "" : workId);
+        helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
+    }
+
+    /** 一次写入「推送成功」的完整状态：work_id + 时间 + 签名。 */
+    public void updateNextMoeSyncState(long gameId, String workId, long syncedAt, String sig) {
+        ContentValues v = new ContentValues();
+        v.put("nextmoe_work_id", workId == null ? "" : workId);
+        v.put("nextmoe_synced_at", syncedAt);
+        v.put("nextmoe_synced_sig", sig == null ? "" : sig);
+        helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
+    }
+
+    /**
+     * 批量写入匹配结果（只更新 work_id）。
+     * 匹配阶段可能有上百个游戏一次性命中，逐条 update 会开上百次事务，这里包一层。
+     */
+    public void updateNextMoeWorkIds(java.util.Map<Long, String> workIdByGameId) {
+        if (workIdByGameId == null || workIdByGameId.isEmpty()) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (java.util.Map.Entry<Long, String> e : workIdByGameId.entrySet()) {
+                if (e.getKey() == null) continue;
+                ContentValues v = new ContentValues();
+                v.put("nextmoe_work_id", e.getValue() == null ? "" : e.getValue());
+                db.update("games", v, "id=?", new String[]{String.valueOf(e.getKey())});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     public void insertSamplesIfEmpty() {
         // Production build should not auto-create placeholder games.
     }
@@ -965,6 +1007,13 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.trailerPath = getStringOrNull(c, "trailer_path");
         g.logoPath = getStringOrNull(c, "logo_path");
         g.bgPath = getStringOrNull(c, "bg_path");
+        // v23：NextMoe 同步状态。只读不写——写入走 updateNextMoeSyncState()，
+        // 避免所有 update/insert 路径无意中覆盖这三个本机字段。
+        String nmWorkId = getStringOrNull(c, "nextmoe_work_id");
+        g.nextmoeWorkId = nmWorkId == null ? "" : nmWorkId;
+        g.nextmoeSyncedAt = getLongOrDefault(c, "nextmoe_synced_at", 0L);
+        String nmSig = getStringOrNull(c, "nextmoe_synced_sig");
+        g.nextmoeSyncedSig = nmSig == null ? "" : nmSig;
         return g;
     }
 
