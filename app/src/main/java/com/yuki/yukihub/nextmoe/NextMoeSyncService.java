@@ -43,13 +43,76 @@ public final class NextMoeSyncService {
         /** 本次新解析出的映射，执行成功后回写缓存。 */
         public final java.util.Map<Long, String> newlyResolved = new java.util.LinkedHashMap<>();
 
-        /** 实际会发出去的条数（去掉「与上次完全相同」的）。 */
+        /**
+         * 本次真正会推送的条目（有变化的），按变化大小降序。
+         * 单独列出来是为了让用户一眼看清「这次会改动什么」，
+         * 而不是从几十条里自己找——第一次全量同步之后，绝大多数条目都是无变化的。
+         */
+        public final List<ChangeItem> changed = new ArrayList<>();
+        /** 与上次完全相同、将被跳过的条目。 */
+        public final List<NextMoeWorkResolver.Matched> skipped = new ArrayList<>();
+
+        /** 兼容旧调用：实际会发出去的条数（去掉「与上次完全相同」的）。 */
         public int changesCount = 0;
         /** 因未变动而跳过的条数。 */
         public int skippedCount = 0;
 
         public boolean isEmpty() {
             return items.isEmpty();
+        }
+    }
+
+    /**
+     * 一条待推送的变化明细。
+     * <p>
+     * 保存「上次同步时的签名」与「当前签名」，UI 据此把
+     * {@code doing:120} 这种机器串翻译成「在玩 · 2 小时」并标出改了哪一项。
+     */
+    public static class ChangeItem {
+        public final NextMoeWorkResolver.Matched matched;
+        /** 上次成功同步时的签名，空串表示从没同步过。 */
+        public final String oldSig;
+        /** 当前签名。 */
+        public final String newSig;
+        /** true 表示这款游戏是第一次同步（没有旧签名）。 */
+        public final boolean firstTime;
+
+        public ChangeItem(NextMoeWorkResolver.Matched matched, String oldSig, String newSig, boolean firstTime) {
+            this.matched = matched;
+            this.oldSig = oldSig == null ? "" : oldSig;
+            this.newSig = newSig == null ? "" : newSig;
+            this.firstTime = firstTime;
+        }
+
+        /** 状态是否变了（含首次同步）。 */
+        public boolean stateChanged() {
+            return firstTime || !statePart(oldSig).equals(statePart(newSig));
+        }
+
+        /** 时长是否变了（含首次同步）。 */
+        public boolean timeChanged() {
+            return firstTime || !timePart(oldSig).equals(timePart(newSig));
+        }
+
+        private static String statePart(String sig) {
+            int i = sig.indexOf(':');
+            return i < 0 ? "" : sig.substring(0, i);
+        }
+
+        private static String timePart(String sig) {
+            int i = sig.indexOf(':');
+            return i < 0 ? "" : sig.substring(i + 1);
+        }
+
+        public String oldState() { return statePart(oldSig); }
+        public String newState() { return statePart(newSig); }
+
+        public int oldMinutes() {
+            try { return Integer.parseInt(timePart(oldSig)); } catch (Throwable t) { return 0; }
+        }
+
+        public int newMinutes() {
+            try { return Integer.parseInt(timePart(newSig)); } catch (Throwable t) { return 0; }
         }
     }
 
@@ -144,13 +207,32 @@ public final class NextMoeSyncService {
         p.unmatched.addAll(resolved.unmatched);
         p.newlyResolved.putAll(resolved.newlyResolved);
 
-        // 统计「会真正发出的」与「未变动跳过的」
+        // 分类：有变化的 / 与上次相同的
+        // 「首次同步」= 从没记录过 syncedAt，即使签名恰好与空串不同也必然是变化。
         for (NextMoeWorkResolver.Matched m : p.items) {
             String sig = signatureOf(m.game);
-            boolean unchanged = sig.equals(m.game.nextmoeSyncedSig) && m.game.nextmoeSyncedAt > 0;
-            if (unchanged) p.skippedCount++;
-            else p.changesCount++;
+            boolean firstTime = m.game.nextmoeSyncedAt <= 0;
+            boolean unchanged = !firstTime && sig.equals(m.game.nextmoeSyncedSig);
+            if (unchanged) {
+                p.skipped.add(m);
+            } else {
+                p.changed.add(new ChangeItem(m, m.game.nextmoeSyncedSig, sig, firstTime));
+            }
         }
+
+        // 排序：变化越大的排越前（首次同步优先，其次按时长增量降序）。
+        // 这样用户最先看到的就是「最值得注意的那几条」，而不是被一堆零碎淹没。
+        java.util.Collections.sort(p.changed, (a, b) -> {
+            if (a.firstTime != b.firstTime) return a.firstTime ? -1 : 1;
+            int da = Math.abs(a.newMinutes() - a.oldMinutes());
+            int db = Math.abs(b.newMinutes() - b.oldMinutes());
+            if (da != db) return db - da;
+            return 0;   // 稳定排序，保持原始顺序
+        });
+
+        p.changesCount = p.changed.size();
+        p.skippedCount = p.skipped.size();
+
         Log.i(TAG, "prepare: matched=" + p.items.size() + " unmatched=" + p.unmatched.size()
                 + " changes=" + p.changesCount + " skipped=" + p.skippedCount);
         return p;

@@ -19,6 +19,9 @@ import android.widget.Toast;
 import com.yuki.yukihub.model.Game;
 import com.yuki.yukihub.util.AppExecutors;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * NextMoe 游玩记录同步的界面流程。
  * <p>
@@ -179,13 +182,39 @@ public final class NextMoeSyncDialog {
         summary.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(summary);
 
-        // ---- 可同步分组 ----
-        if (!preview.items.isEmpty()) {
-            root.addView(sectionHeader(activity,
-                    "可同步（" + preview.items.size() + "）"));
+        // ---- 本次有更新（最重要的分组，放最前面）----
+        // 首次全量同步之后，绝大多数条目都是「没变化」的；
+        // 把它们和真正要改动的混在一起列，用户根本看不出这次会动什么。
+        List<NextMoeSyncService.ChangeItem> changed = preview.changed;
+        if (changed.isEmpty() && !preview.items.isEmpty()) {
+            // 兜底：Preview 被别处构造时可能没填 changed，退化成「全部视为变化」
+            changed = new ArrayList<>();
             for (NextMoeWorkResolver.Matched m : preview.items) {
-                root.addView(row(activity, m.game.title, describeGame(m.game)));
+                changed.add(new NextMoeSyncService.ChangeItem(m,
+                        m.game.nextmoeSyncedSig, NextMoeSyncService.signatureOf(m.game),
+                        m.game.nextmoeSyncedAt <= 0));
             }
+        }
+
+        if (!changed.isEmpty()) {
+            root.addView(sectionHeader(activity, "本次有更新（" + changed.size() + "）"));
+            for (NextMoeSyncService.ChangeItem c : changed) {
+                root.addView(row(activity, c.matched.game.title, describeChange(c)));
+            }
+        }
+
+        // ---- 与上次相同，将跳过（折叠，避免长列表淹没重点）----
+        if (!preview.skipped.isEmpty()) {
+            root.addView(collapsibleSection(activity,
+                    "与上次相同，将跳过（" + preview.skipped.size() + "）",
+                    () -> {
+                        LinearLayout box = new LinearLayout(activity);
+                        box.setOrientation(LinearLayout.VERTICAL);
+                        for (NextMoeWorkResolver.Matched m : preview.skipped) {
+                            box.addView(row(activity, m.game.title, describeGame(m.game)));
+                        }
+                        return box;
+                    }));
         }
 
         // ---- 无法匹配分组（绝不隐藏）----
@@ -222,13 +251,17 @@ public final class NextMoeSyncDialog {
 
     private static String buildSummary(NextMoeSyncService.Preview p) {
         StringBuilder sb = new StringBuilder();
-        if (p.items.isEmpty()) {
+        if (p.changesCount == 0 && p.skippedCount == 0) {
             sb.append("没有可同步的游戏");
-        } else {
-            sb.append("将同步 ").append(p.items.size()).append(" 个游戏");
+            return sb.toString();
         }
+        if (p.changesCount == 0) {
+            sb.append("全部 ").append(p.skippedCount).append(" 个游戏都与上次相同，无需同步");
+            return sb.toString();
+        }
+        sb.append("本次将更新 ").append(p.changesCount).append(" 个游戏");
         if (p.skippedCount > 0) {
-            sb.append("\n其中 ").append(p.skippedCount).append(" 个与上次相同，会跳过");
+            sb.append("\n另有 ").append(p.skippedCount).append(" 个与上次相同，会跳过");
         }
         return sb.toString();
     }
@@ -326,6 +359,46 @@ public final class NextMoeSyncDialog {
         return sb.toString();
     }
 
+    /**
+     * 一条「变化明细」的右栏文案。
+     * <p>
+     * 只标出真正变了的那一项，避免「状态也写了、时长也写了」让人误以为两项都改了：
+     * <ul>
+     *   <li>首次同步 → 「新增 · 在玩 · 6 小时」</li>
+     *   <li>只涨时长 → 「+12 分钟」</li>
+     *   <li>只改状态 → 「在玩 → 玩过」</li>
+     *   <li>两者都改 → 「在玩 → 玩过 · +12 分钟」</li>
+     * </ul>
+     */
+    private static String describeChange(NextMoeSyncService.ChangeItem c) {
+        boolean sc = c.stateChanged();
+        boolean tc = c.timeChanged();
+        StringBuilder sb = new StringBuilder();
+
+        if (c.firstTime) {
+            sb.append("新增");
+            if (sc && !c.newState().isEmpty()) sb.append(" · ").append(stateLabel(c.newState()));
+            if (tc && c.newMinutes() > 0) sb.append(" · ").append(minutesText(c.newMinutes() * 60_000L));
+            return sb.toString();
+        }
+
+        if (sc) {
+            String from = c.oldState().isEmpty() ? "—" : stateLabel(c.oldState());
+            String to = c.newState().isEmpty() ? "—" : stateLabel(c.newState());
+            sb.append(from).append(" → ").append(to);
+        }
+        if (tc) {
+            if (sb.length() > 0) sb.append(" · ");
+            int delta = c.newMinutes() - c.oldMinutes();
+            if (delta >= 0) {
+                sb.append("+").append(minutesText(delta * 60_000L));
+            } else {
+                sb.append("-").append(minutesText(-delta * 60_000L));
+            }
+        }
+        return sb.length() == 0 ? "有更新" : sb.toString();
+    }
+
     private static String minutesText(long ms) {
         long min = ms / 60_000L;
         if (min <= 0) return "无时长";
@@ -363,6 +436,37 @@ public final class NextMoeSyncDialog {
         tv.setPadding(0, dp(c, 10), 0, dp(c, 2));
         tv.setTextColor(0xFF90CAF9);
         return tv;
+    }
+
+    /**
+     * 可折叠的分组标题。
+     * <p>
+     * 「与上次相同」这类几百条的分组默认折叠，点标题才展开，
+     * 否则长列表会把「本次有更新」那几条挤出可视区——那正是用户唯一关心的部分。
+     */
+    private static View collapsibleSection(Context c, String header, java.util.concurrent.Callable<View> builder) {
+        LinearLayout box = new LinearLayout(c);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        TextView title = sectionHeader(c, header + "  ▸");
+        box.addView(title);
+
+        final View[] body = new View[1];
+        title.setOnClickListener(v -> {
+            if (body[0] == null) {
+                try {
+                    body[0] = builder.call();
+                } catch (Throwable t) {
+                    body[0] = bodyText(c, "（展开失败）");
+                }
+                box.addView(body[0]);
+                title.setText(header + "  ▾");
+            } else {
+                body[0].setVisibility(body[0].getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                title.setText(header + (body[0].getVisibility() == View.VISIBLE ? "  ▾" : "  ▸"));
+            }
+        });
+        return box;
     }
 
     /** 一行：左边游戏名（可截断），右边说明。 */
