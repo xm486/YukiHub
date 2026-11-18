@@ -247,13 +247,13 @@ public final class BangumiSyncService {
         List<Game> unmatched = new ArrayList<>();
         Map<Long, String> newlyResolved = new LinkedHashMap<>();
         if (!needTitleSearch.isEmpty()) {
-            // 只在前两级确实有漏网时才去读原名，且只读这几个游戏的
-            Map<Long, List<String>> originalTitles = repo.getOriginalTitles(needTitleSearch);
+            // 只在这几个游戏确实要搜时才去解析元数据，避免全表 JSON 解析
+            Map<Long, List<String>> searchTitles = repo.getSearchTitles(needTitleSearch);
 
             int done = matched.size();
             int total = all.size();
             for (Game g : needTitleSearch) {
-                List<String> candidates = buildSearchCandidates(g, originalTitles.get(g.id));
+                List<String> candidates = buildSearchCandidates(g, searchTitles.get(g.id));
                 if (candidates.isEmpty()) {
                     unmatched.add(g);
                 } else {
@@ -337,23 +337,37 @@ public final class BangumiSyncService {
     }
 
     /**
-     * 构建标题搜索的候选词，按命中率排序。
+     * 构建标题搜索的候选词。
+     *
+     * <h3>只用「已匹配源刮下来的正式标题」，绝不用本地游戏名</h3>
+     * {@code games.title} 是用户自己起的名字，实测里有：
+     * <pre>
+     *   【Tyranor模拟器】保健室的老师与沉迷吹泡泡的助手
+     *   命运石之门(斯坦因之门)[简][KFC特创组]
+     * </pre>
+     * 带汉化组/模拟器标记，拿去搜既不准也不干净。
      * <p>
-     * 顺序：原文原名 → 罗马字 → 本地标题（兜底）。
-     * Bangumi 的条目名多为日文原名或中文译名，
-     * 本地标题常常是汉化组起的名字，命中率最低，所以放最后。
+     * 正确来源是 {@code metadata_cache}：从 VNDB / NextMoe / Bangumi 等源
+     * 刮下来的正式条目名，含 {@code chineseTitle} / {@code originalTitle}
+     * / {@code romanTitle}。
+     * <p>
+     * 顺序：<b>中文译名优先</b> → 原名 → 罗马字。
+     * Bangumi 的条目名主要收录中文/日文名，中文译名命中率最高。
+     *
+     * @param titles 来自 {@code GameRepository.getSearchTitles}
      */
-    static List<String> buildSearchCandidates(Game g, List<String> originals) {
+    static List<String> buildSearchCandidates(Game g, List<String> titles) {
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
-        if (originals != null) {
-            for (String s : originals) {
+        if (titles != null) {
+            for (String s : titles) {
                 if (s == null) continue;
                 String v = s.trim();
                 if (v.isEmpty() || "null".equalsIgnoreCase(v)) continue;
                 seen.add(v);
             }
         }
-        if (g != null && g.title != null) {
+        // 兜底：元数据什么都没刮到时，才退回本地标题（此时它可能是唯一线索）
+        if (seen.isEmpty() && g != null && g.title != null) {
             String t = g.title.trim();
             if (!t.isEmpty()) seen.add(t);
         }

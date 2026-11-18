@@ -1143,26 +1143,43 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
     }
 
     /**
-     * 读出「game_id → 各源提供的标题」映射，供 Hikarinagi 标题搜索使用。
+     * 读出「game_id → 标题列表」，<b>原名优先</b>（供 VNDB 使用）。
      * <p>
-     * 这里要把元数据里<b>所有</b>可用标题都取出来，因为它们分别适合不同场景：
-     * <ul>
-     *   <li>{@code chineseTitle} —— 各源给的中文译名，<b>与 Hikarinagi 返回的 title
-     *       同语言</b>，是搜索命中的主力；</li>
-     *   <li>{@code originalTitle} —— 日文原名，Hikarinagi 也收录原名，可命中；</li>
-     *   <li>{@code romanTitle} —— 罗马字，兜底。</li>
-     * </ul>
-     * 顺序上中文译名优先、原名次之、罗马字最后——这是由 Hikarinagi
-     * 「title 有译名时优先返回译名」的特性决定的，与 VNDB/Bangumi 相反。
+     * 与 {@link #getSearchTitles} 的区别只在于字段顺序：
+     * VNDB 是日语为核心的库，条目名以日文原名为主，所以原名/罗马字在前、
+     * 中文译名垫底；而 Hikarinagi / Bangumi 的条目名以中文为主，故那边反过来。
+     * <p>
+     * 共同点是<b>都不使用 games.title</b>——那是用户自己起的名字，
+     * 常带「【Tyranor模拟器】」「[简][KFC特创组]」这类标记，搜不准。
+     */
+    public java.util.Map<Long, java.util.List<String>> getSearchTitlesOriginalFirst(
+            java.util.List<Game> games) {
+        return getSearchTitlesInternal(games,
+                new String[]{"originalTitle", "romanTitle", "chineseTitle"});
+    }
+
+    /**
+     * 读出「game_id → 各源提供的标题」映射，供 Hikarinagi / Bangumi 标题搜索使用。
+     * <p>
+     * 顺序 <b>中文译名 → 原名 → 罗马字</b>：这两个站的条目名以中文为主，
+     * 用中文译名去搜命中率最高。
      * <p>
      * <b>刻意不使用 games.title</b>：那是用户自己起的名字，可能带
      * 「【Tyranor模拟器】」这类噪声前缀，也不一定是正式译名。
-     * 元数据里刮下来的 chineseTitle 才是干净的作品名。
      *
      * @param games 只需要这些游戏的标题；传 null 表示全部（不建议）
      */
     public java.util.Map<Long, java.util.List<String>> getSearchTitles(
             java.util.List<Game> games) {
+        return getSearchTitlesInternal(games,
+                new String[]{"chineseTitle", "originalTitle", "romanTitle"});
+    }
+
+    /**
+     * 按给定字段顺序读出标题，多遍扫描保证跨源的同级字段不会被插队。
+     */
+    private java.util.Map<Long, java.util.List<String>> getSearchTitlesInternal(
+            java.util.List<Game> games, String[] fields) {
         java.util.Map<Long, java.util.List<String>> out = new java.util.LinkedHashMap<>();
         if (games == null || games.isEmpty()) return out;
 
@@ -1172,12 +1189,10 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
         }
         if (want.isEmpty()) return out;
 
-        // 按优先级分三遍扫描，保证 chineseTitle 全部排在 originalTitle 前面，
-        // 再排 romanTitle。若一遍扫描同时 add，多源挂载时顺序会乱，
+        // 按优先级分多遍扫描：若一遍扫描同时 add，多源挂载时顺序会乱，
         // 而顺序直接决定搜索命中率（第一个候选就命中 = 省一次请求）。
         Cursor c = null;
         try {
-            String[] fields = {"chineseTitle", "originalTitle", "romanTitle"};
             for (String field : fields) {
                 c = helper.getReadableDatabase().query(
                         "metadata_cache", new String[]{"game_id", "json"},
@@ -1214,77 +1229,6 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
             if (c != null) c.close();
         }
         return out;
-    }
-
-    /**
-     * 读出「game_id → 原名/罗马字」映射，供 VNDB 标题搜索优先使用。
-     * <p>
-     * VNDB 是日语为核心的数据库，用中文译名搜命中率很低。
-     * 本地 metadata_cache 的 json 里存了 originalTitle / romanTitle
-     * （不管用哪个源刮削都会写），用它们去搜才对。
-     * 实测：「西园家的秘密」用中文名搜 0 候选，用原名「西園家のかくしゴト」命中 v66872。
-     * <p>
-     * 这里要解析 json 字段，成本不低，所以只给「确实需要标题搜索的那几个游戏」调用：
-     * 多数情况下（第二次同步起）全部走缓存，根本不会走到这里。
-     *
-     * @param games 只需要这些游戏的原名；传 null 表示全部（不建议）
-     */
-    public java.util.Map<Long, java.util.List<String>> getOriginalTitles(
-            java.util.List<Game> games) {
-        java.util.Map<Long, java.util.List<String>> out = new java.util.LinkedHashMap<>();
-        if (games == null || games.isEmpty()) return out;
-
-        java.util.Set<Long> want = new java.util.HashSet<>();
-        for (Game g : games) {
-            if (g != null) want.add(g.id);
-        }
-        if (want.isEmpty()) return out;
-
-        Cursor c = null;
-        try {
-            // 两遍扫描，保证「日文原名」一定排在「罗马字」前面。
-            // 若一遍扫描直接 add(original) + add(roman)，
-            // 同一游戏挂多个源时，某个源的 romanTitle 可能抢在
-            // 另一个源的 originalTitle 之前被加入，顺序就乱了。
-            // 顺序直接影响搜索成功率（原名命中率远高于罗马字），所以必须保证。
-            for (int pass = 0; pass < 2; pass++) {
-                String field = (pass == 0) ? "originalTitle" : "romanTitle";
-                c = helper.getReadableDatabase().query(
-                        "metadata_cache", new String[]{"game_id", "json"},
-                        null, null, null, null, null);
-                while (c.moveToNext()) {
-                    long gameId = c.getLong(0);
-                    if (!want.contains(gameId)) continue;   // 只解析需要的
-                    String json = c.isNull(1) ? "" : c.getString(1);
-                    if (json == null || json.trim().isEmpty()) continue;
-                    java.util.List<String> names = out.get(gameId);
-                    if (names == null) {
-                        names = new java.util.ArrayList<>();
-                        out.put(gameId, names);
-                    }
-                    try {
-                        org.json.JSONObject o = new org.json.JSONObject(json);
-                        addIfUseful(names, o.optString(field, ""));
-                    } catch (Throwable ignored) {
-                        // 单条 JSON 坏了不影响其它
-                    }
-                }
-                c.close();
-                c = null;
-            }
-        } catch (Throwable t) {
-            Log.w("GameRepository", "getOriginalTitles failed", t);
-        } finally {
-            if (c != null) c.close();
-        }
-        return out;
-    }
-
-    private static void addIfUseful(java.util.List<String> list, String s) {
-        if (s == null) return;
-        String v = s.trim();
-        if (v.isEmpty() || "null".equalsIgnoreCase(v)) return;
-        if (!list.contains(v)) list.add(v);
     }
 
     public void insertSamplesIfEmpty() {

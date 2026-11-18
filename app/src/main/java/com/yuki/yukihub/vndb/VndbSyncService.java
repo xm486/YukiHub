@@ -212,21 +212,21 @@ public final class VndbSyncService {
             needTitleSearch.add(g);
         }
 
-        // 第3级：标题搜索。候选词按「原名 > 罗马字 > 本地标题」排序，
-        // 因为 VNDB 是日语为核心的库，用中文译名搜命中率很低。
+        // 第3级：标题搜索。候选词只用元数据里的正式标题（原名优先），
+        // 不用 games.title——那常带「[简][KFC特创组]」这类标记，搜不准。
         List<Game> unmatched = new ArrayList<>();
         Map<Long, String> newlyResolved = new LinkedHashMap<>();
         if (!needTitleSearch.isEmpty()) {
-            // 只在前两级确实有漏网时才去读原名，且只读这几个游戏的。
-            // （getOriginalTitles 要解析 metadata_cache 的 json 字段，
-            //  全表扫一遍是白费功夫——多数情况下走向缓存，一个都不用搜。）
-            Map<Long, java.util.List<String>> originalTitles =
-                    repo.getOriginalTitles(needTitleSearch);
+            // 只在前两级确实有漏网时才去读标题，且只读这几个游戏的。
+            // （要解析 metadata_cache 的 json 字段，全表扫一遍是白费功夫——
+            //  多数情况下走向缓存，一个都不用搜。）
+            Map<Long, java.util.List<String>> searchTitles =
+                    repo.getSearchTitlesOriginalFirst(needTitleSearch);
 
             int done = matched.size();
             int total = all.size();
             for (Game g : needTitleSearch) {
-                List<String> candidates = buildSearchCandidates(g, originalTitles.get(g.id));
+                List<String> candidates = buildSearchCandidates(g, searchTitles.get(g.id));
                 if (candidates.isEmpty()) {
                     unmatched.add(g);
                 } else {
@@ -319,32 +319,38 @@ public final class VndbSyncService {
     }
 
     /**
-     * 构建标题搜索的候选词，<b>按命中率排序</b>。
+     * 构建标题搜索的候选词。
+     *
+     * <h3>顺序：原名 → 罗马字 → 中文译名</h3>
+     * VNDB 是<b>日语为核心</b>的数据库，条目名以日文原名为主，
+     * 所以原名优先、罗马字次之。中文译名在它库里通常不存在，
+     * 放最后只作兜底（早期实测：用中文名搜「西园家的秘密」得到 0 候选，
+     * 用原名「西園家のかくしゴト」才能命中 v66872）。
      * <p>
-     * 顺序很重要：VNDB 是日语为核心的数据库。
-     * 「西园家的秘密」这类中文译名在其库里根本不存在，搜了也是 0 候选；
-     * 而本地元数据的 originalTitle 通常是日文原名，几乎一定能命中。
-     * <p>
-     * 顺序：原文原名 → 罗马字 → 本地标题（兜底）。
-     * 去重后返回，避免同一个词搜两次。
+     * <b>刻意不使用 games.title</b>：那是用户自己起的名字，实测里有
+     * 「【Tyranor模拟器】保健室的老师…」「命运石之门(斯坦因之门)[简][KFC特创组]」
+     * 这类带汉化组/模拟器标记的脏名字，拿去搜会把结果带偏。
+     * 元数据里刮下来的才是正式作品名。
+     *
+     * @param titles 来自 {@code GameRepository.getSearchTitlesOriginalFirst}
      */
-    static List<String> buildSearchCandidates(Game g, List<String> originals) {
+    static List<String> buildSearchCandidates(Game g, List<String> titles) {
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
-        if (originals != null) {
-            for (String s : originals) {
+        if (titles != null) {
+            for (String s : titles) {
                 if (s == null) continue;
                 String v = s.trim();
                 if (v.isEmpty() || "null".equalsIgnoreCase(v)) continue;
                 seen.add(v);
             }
         }
-        if (g != null && g.title != null) {
+        // 兜底：元数据什么都没刮到时，才退回本地标题（此时它可能是唯一线索）
+        if (seen.isEmpty() && g != null && g.title != null) {
             String t = g.title.trim();
             if (!t.isEmpty()) seen.add(t);
         }
         return new ArrayList<>(seen);
     }
-
     // ======================== 阶段 2：执行推送 ========================
 
     /**
