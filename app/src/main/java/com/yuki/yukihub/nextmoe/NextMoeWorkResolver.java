@@ -237,10 +237,13 @@ public final class NextMoeWorkResolver {
      * <p>
      * {@code games.title} 是用户自己起的名字，常带「【Tyranor模拟器】」
      * 「[简][KFC特创组]」这类标记；而 {@code searchWorkByExactTitle} 要求
-     * 归一化后完全相等，带标记的名字永远匹配不上。
+     * 归一化后<b>完全相等</b>，带标记的名字永远匹配不上。
      * <p>
-     * 顺序：中文译名 > 原名 > 罗马字（NextMoe 的 localized 以中文为主）。
-     * 元数据什么都有没时才退回本地标题——那时它是唯一线索。
+     * 顺序：中文译名 > 原名 > 罗马字。
+     * NextMoe 的 {@code localized} 以中文为主，但并非每条都填了中文，
+     * 所以中文没命中时还要试原名——这也是要逐个候选词试而不是只发一次的原因。
+     * <p>
+     * 元数据完全没有时才退回本地标题——那时它是唯一线索。
      */
     static List<String> buildTitleCandidates(Game g, List<String> mdTitles) {
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
