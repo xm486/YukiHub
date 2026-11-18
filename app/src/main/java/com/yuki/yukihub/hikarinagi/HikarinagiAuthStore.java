@@ -42,11 +42,26 @@ public final class HikarinagiAuthStore {
 
     // ======================== 读写凭据 ========================
 
+    /**
+     * 保存令牌。
+     * <p>
+     * <b>关键</b>：刷新响应不一定会带新的 refresh_token —— 只有真正轮换时才下发。
+     * 若此时把空串写进去，就会把<b>旧的、仍然有效的</b> refresh token 抹掉，
+     * 下一次刷新必然失败，用户被迫重新授权。
+     * <p>
+     * 所以这里只在「新值非空」时才覆盖 refresh_token；为空则保留旧值
+     * （旧值未被服务端作废，仍可用）。这与 NextMoe 的处理一致。
+     */
     public static void saveTokens(Context c, HikarinagiSyncClient.Tokens t) {
         if (t == null || t.accessToken.trim().isEmpty()) return;
+
+        String oldRefresh = getRefreshToken(c);
+        String newRefresh = t.refreshToken == null ? "" : t.refreshToken.trim();
+        String keepRefresh = newRefresh.isEmpty() ? oldRefresh : newRefresh;
+
         prefs(c).edit()
                 .putString(KEY_ACCESS, t.accessToken)
-                .putString(KEY_REFRESH, t.refreshToken == null ? "" : t.refreshToken)
+                .putString(KEY_REFRESH, keepRefresh)
                 .putLong(KEY_EXPIRES_AT, t.expiresAt)
                 .apply();
     }
@@ -119,12 +134,24 @@ public final class HikarinagiAuthStore {
         return getExpiresAt(c) - 60_000L <= System.currentTimeMillis();
     }
 
-    /** 清空凭据（用户主动「退出授权」时用）。 */
-    public static void clear(Context c) {
+    /**
+     * 只清凭据（令牌与过期时间），保留 account_label / last_sync_at。
+     * <p>
+     * 用于「refresh token 被服务端判定失效」这种场景：此时令牌确实不能用了，
+     * 但账号名与同步历史仍然有效，重新授权后还能立刻显示出来。
+     */
+    private static void clearCredentials(Context c) {
         prefs(c).edit()
                 .remove(KEY_ACCESS)
                 .remove(KEY_REFRESH)
                 .remove(KEY_EXPIRES_AT)
+                .apply();
+    }
+
+    /** 清空凭据与展示信息（用户主动「重新授权」时用）。 */
+    public static void clear(Context c) {
+        clearCredentials(c);
+        prefs(c).edit()
                 .remove(KEY_ACCOUNT)
                 .apply();
     }
@@ -196,7 +223,10 @@ public final class HikarinagiAuthStore {
                         || "unauthorized_client".equals(code);
                 if (invalid) {
                     Log.w(TAG, "refresh token 已被服务端判定失效，清除本地凭据");
-                    clear(c);
+                    // 只清凭据，保留 account_label / last_sync_at：
+                    // 前者用于重新授权后立刻显示账号名，后者是同步历史，
+                    // 与「这张令牌还能不能用」无关，没必要一起抹掉。
+                    clearCredentials(c);
                 } else {
                     // 其它错误（含未知码）一律保守保留：多留一次的代价只是下轮再试，
                     // 误清除的代价是用户必须重新授权。
