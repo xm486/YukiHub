@@ -23,6 +23,8 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      *           大部分游戏不是用 VNDB 源刮的（实测 39 个里只有 32 个），
      *           所以加了「标题搜索」作为第二级匹配。搜索要发网络请求、费配额，
      *           因此把匹配到的 vNNN 缓存下来，之后每次同步零搜索。
+     *      26 = Bangumi 游玩状态同步：games.bangumi_subject_id / bangumi_synced_at /
+     *           bangumi_synced_sig（同上，都是本机同步状态，不参与云同步快照）
      */
     public static final int DB_VERSION = 26;
 
