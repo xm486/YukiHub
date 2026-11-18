@@ -132,15 +132,6 @@ public final class VndbSyncService {
         public int changesCount = 0;
         public int skippedCount = 0;
 
-        /**
-         * 读远端列表是否失败过。
-         * <p>
-         * 为 true 时「远端现状未知」，此时不能把条目当成「远端没有」，
-         * 也不能断言「与上次相同」。UI 必须把这个提示显示出来，
-         * 否则用户会看到一堆“加入”，误以为缓存没生效。
-         */
-        public boolean remoteReadFailed = false;
-
         public boolean isEmpty() {
             return items.isEmpty();
         }
@@ -270,50 +261,35 @@ public final class VndbSyncService {
         p.unmatched.addAll(unmatched);
         p.newlyResolved.putAll(newlyResolved);
 
-        // 3) 读回远端现状，用于「跳过无变化」与展示「A → B」
-        List<String> vnIds = new ArrayList<>();
-        for (Matched m : matched) vnIds.add(m.vnId);
-        Map<String, java.util.Set<Integer>> remote;
-        boolean remoteReadFailed = false;
-        try {
-            remote = VndbClient.fetchStates(token, auth.userId, vnIds);
-        } catch (Throwable t) {
-            // 读失败不阻断（写入是幂等的，多写几条不会写错数据），
-            // 但必须把「读取失败」这件事显式告诉 UI。
-            // 否则所有条目都会被当成「远端不存在」而显示“加入”，
-            // 看起来像“缓存没生效、每次全量同步”——这个 bug 就是因此藏了很久。
-            Log.w(TAG, "fetchStates failed, treat all as changed", t);
-            remote = new LinkedHashMap<>();
-            remoteReadFailed = true;
-        }
-
+        // 3) 判断哪些需要写。
+        //
+        // 纯本地签名判定，不发任何读请求。
+        // 理由：VNDB 是逐条 PATCH，36 个游戏 = 36 次请求；
+        // 若再额外读一次远端列表，等于每次同步都多花一个来回，
+        // 库大的用户会觉得明显变慢。而写入本身是幂等的：
+        // 重复把某条设成同一状态，结果完全一样，代价只是一次请求。
+        //
+        // 代价：不知道远端是否被别处改过（比如用户在 VNDB 网页手改了）。
+        // 这种场景下本地签名不变就不会回写，与 NextMoe 的行为一致。
         for (Matched m : matched) {
             int target = toVndbLabel(m.game.playStatus);
-            java.util.Set<Integer> cur = remote.get(m.vnId);
-            int remoteLabel = currentStateLabel(cur);
-            boolean absent = (cur == null) || cur.isEmpty();
-
-            // 关键：只有「确实查过远端、而且远端没有这条」才算首次加入。
-            // 若远端压根没读成功，absent 不代表“远端没有”，
-            // 此时一律按「状态可能已变」处理（宁可多写一次幂等写），
-            // 但 UI 会明确提示读取失败，不会伪装成 36 条新增。
-            boolean firstTime = absent && !remoteReadFailed;
+            if (target < 0) {
+                // 本地状态无法映射到 VNDB（脏数据/未知值），不上报
+                continue;
+            }
 
             String sig = String.valueOf(target);
-            boolean unchanged = !remoteReadFailed
-                    && !absent
-                    && sig.equals(m.game.vndbSyncedSig)
-                    && m.game.vndbSyncedAt > 0
-                    && remoteLabel == target;
+            boolean syncedBefore = m.game.vndbSyncedAt > 0;
+            boolean firstTime = !syncedBefore;
+            boolean unchanged = syncedBefore && sig.equals(m.game.vndbSyncedSig);
 
             if (unchanged) {
                 p.skipped.add(m);
             } else {
-                p.changed.add(new ChangeItem(m, target, remoteLabel, firstTime));
+                // remoteLabel 传 -1：我们不再读远端，不知道它当前是什么。
+                p.changed.add(new ChangeItem(m, target, -1, firstTime));
             }
         }
-
-        p.remoteReadFailed = remoteReadFailed;
 
         // 排序：远端还没有的排最前（信息量最大）
         java.util.Collections.sort(p.changed, (a, b) -> {
@@ -367,19 +343,6 @@ public final class VndbSyncService {
             if (!t.isEmpty()) seen.add(t);
         }
         return new ArrayList<>(seen);
-    }
-
-    /** 从远端 label 集合里挑出「状态类」的那一个（互斥，最多一个）。 */
-    private static int currentStateLabel(java.util.Set<Integer> labels) {
-        if (labels == null || labels.isEmpty()) return -1;
-        int best = -1;
-        for (int id : labels) {
-            // 跳过 Blacklist 与虚拟的 Voted：它们不是「游玩状态」
-            if (id == VndbClient.LABEL_BLACKLIST || id == VndbClient.LABEL_VOTED) continue;
-            if (id < VndbClient.LABEL_PLAYING || id > VndbClient.LABEL_WISHLIST) continue;
-            if (best < 0 || id < best) best = id;
-        }
-        return best;
     }
 
     // ======================== 阶段 2：执行推送 ========================

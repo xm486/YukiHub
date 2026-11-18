@@ -13,9 +13,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * VNDB Kana API 客户端（只做「游玩状态同步」需要的部分）。
@@ -120,89 +118,6 @@ public final class VndbClient {
         String name = o.optString("username", "");
         if (id.isEmpty()) throw new NotAuthorizedException("VNDB 未返回用户 id");
         return new AuthInfo(id, name, perms);
-    }
-
-    // ======================== 读：已有列表 ========================
-
-    /**
-     * 读回用户列表里这些 VN 当前的状态 label。
-     * <p>
-     * 用途只有一个：<b>判断是否已经是我们想要的状态</b>，从而跳过无变化的条目。
-     * 不用于计算差集之外的目的，也不需要理解用户的自定义 label。
-     *
-     * @param userId  /authinfo 拿到的 uNNN
-     * @param vnIds   形如 v123
-     * @return vnId → 该 VN 当前拥有的 label id 集合（只含我们关心的状态 label）
-     */
-    public static Map<String, java.util.Set<Integer>> fetchStates(String token, String userId,
-                                                                  List<String> vnIds) throws Exception {
-        Map<String, java.util.Set<Integer>> out = new LinkedHashMap<>();
-        if (vnIds == null || vnIds.isEmpty()) return out;
-
-        // POST /ulist 一次最多 100 个（用 filters 的 or 组合），分片请求。
-        for (int start = 0; start < vnIds.size(); start += 100) {
-            int end = Math.min(start + 100, vnIds.size());
-            List<String> chunk = vnIds.subList(start, end);
-
-            JSONObject body = new JSONObject();
-            body.put("user", userId);
-            body.put("fields", "id,labels{id,label}");
-            body.put("filters", buildIdOrFilter(chunk));
-            body.put("results", 100);
-
-            JSONObject resp = request("POST", "/ulist", body, token);
-            JSONArray results = resp.optJSONArray("results");
-            if (results == null) continue;
-            for (int i = 0; i < results.length(); i++) {
-                JSONObject row = results.optJSONObject(i);
-                if (row == null) continue;
-                String id = row.optString("id", "");
-                if (id.isEmpty()) continue;
-                java.util.Set<Integer> set = new java.util.LinkedHashSet<>();
-                JSONArray labels = row.optJSONArray("labels");
-                if (labels != null) {
-                    for (int j = 0; j < labels.length(); j++) {
-                        JSONObject lb = labels.optJSONObject(j);
-                        if (lb == null) continue;
-                        set.add(lb.optInt("id", 0));
-                    }
-                }
-                out.put(id, set);
-            }
-        }
-        return out;
-    }
-
-    /**
-     * 拼 VNDB 的 filters 表达式。
-     * <p>
-     * <b>形状必须是一层数组，不能多包一层。</b>
-     * 正确：{@code ["or", ["id","=","v1"], ["id","=","v2"]]}
-     * 正确：{@code ["id","=","v1"]}
-     * 错误：{@code [["or", ["id","=","v1"]]]}  ← VNDB 回 400 "Invalid query"
-     * <p>
-     * 之前多包了一层，导致每次 fetchStates 都 400，
-     * 而 400 被当成「没有结果」，于是所有条目被误判成「远端不存在」，
-     * 表现为「第二次同步仍然全量显示」。这是真实缺陷，已修正。
-     */
-    private static JSONArray buildIdOrFilter(List<String> vnIds) throws Exception {
-        JSONArray filters = new JSONArray();
-        if (vnIds.size() == 1) {
-            // 只有一条：直接给单条件
-            filters.put("id");
-            filters.put("=");
-            filters.put(vnIds.get(0));
-            return filters;
-        }
-        filters.put("or");
-        for (String id : vnIds) {
-            JSONArray one = new JSONArray();
-            one.put("id");
-            one.put("=");
-            one.put(id);
-            filters.put(one);
-        }
-        return filters;
     }
 
     // ======================== 读：按标题搜索 ========================
