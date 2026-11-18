@@ -314,7 +314,9 @@ public final class HikarinagiSyncClient {
         if (accessToken == null || accessToken.trim().isEmpty()) {
             throw new NotAuthorizedException("尚未授权 Hikarinagi");
         }
-        JSONObject o = request("GET", "/user/me", null, accessToken);
+        JSONObject resp = request("GET", "/user/me", null, accessToken);
+        // 必须解统一信封：真实响应是 {"success":true,"data":{"id":..,"name":..,"nickname":..}}
+        JSONObject o = unwrap(resp);
 
         // 文档里的用户名是 name，昵称是 nickname（nullable）。
         String userName = o.optString("name", "");
@@ -322,9 +324,9 @@ public final class HikarinagiSyncClient {
         String nickname = o.optString("nickname", "");
         if (nickname == null || "null".equalsIgnoreCase(nickname.trim())) nickname = "";
 
-        // 两个都空才认为响应异常（注意：不能拿 id/uid 判断，接口没有这两个字段）
+        // 两个都空才认为响应异常
         if (userName.trim().isEmpty() && nickname.trim().isEmpty()) {
-            Log.w(TAG, "user/me 响应缺少 name/nickname：" + preview(o.toString()));
+            Log.w(TAG, "user/me 响应缺少 name/nickname：" + preview(resp.toString()));
             throw new NotAuthorizedException("Hikarinagi 未返回用户信息，授权可能已失效");
         }
         return new AuthInfo(userName.trim(), nickname.trim());
@@ -385,9 +387,16 @@ public final class HikarinagiSyncClient {
         body.put("items", arr);
 
         JSONObject resp = request("POST", "/user/me/rates/galgames/batch", body, accessToken);
+        // 解统一信封：{"success":true,"data":[{ok:..},..]}
+        // data 在这里是<b>数组</b>，不能用 unwrap()（那个只取对象）
         JSONArray data = resp.optJSONArray("data");
         if (data == null) {
-            // 有的实现把数组放在别处；找不到就按「全部成功」处理会掩盖失败，故明确报错
+            // 兼容：个别实现可能把数组放在 data 对象里的 items
+            JSONObject inner = resp.optJSONObject("data");
+            if (inner != null) data = inner.optJSONArray("items");
+        }
+        if (data == null) {
+            // 找不到就按「全部成功」处理会掩盖失败，故明确报错
             throw new Exception("Hikarinagi 批量写入响应缺少 data 数组：" + preview(resp.toString()));
         }
 
@@ -471,7 +480,10 @@ public final class HikarinagiSyncClient {
     private static JSONArray doSearch(String token, String query) throws Exception {
         String qs = "?q=" + url(query) + "&types=galgame&page=1&page_size=10";
         JSONObject resp = request("GET", "/search" + qs, null, token);
-        JSONArray items = resp.optJSONArray("items");
+        // 解统一信封：{"success":true,"data":{"items":[...],"meta":{...}}}
+        // 文档：「分页信息位于 data.meta，与 items 同级，而非信封顶层」
+        JSONObject data = unwrap(resp);
+        JSONArray items = data == null ? null : data.optJSONArray("items");
         if (items == null) {
             Log.w(TAG, "search 「" + query + "」 无 items 字段");
             return null;
@@ -746,6 +758,39 @@ public final class HikarinagiSyncClient {
             os.write(data);
             os.flush();
         } catch (Throwable ignored) { }
+    }
+
+    // ======================== 统一响应信封 ========================
+
+    /**
+     * 拆开 Hikarinagi 的统一响应信封，取出 {@code data}。
+     *
+     * <h3>文档原文（接入指南 · 响应约定）</h3>
+     * 「所有响应均使用统一信封，业务数据位于 data 字段。
+     * 端点参考中的响应示例展示的即为该字段的内容。」
+     * <pre>
+     * 成功：{ "success": true, "data": { … }, "request_id": "req-x", "timestamp": "..." }
+     * 分页：分页信息位于 data.meta，与 items 同级，而非信封顶层。
+     * </pre>
+     *
+     * <h3>为什么必须拆</h3>
+     * 我最初照着各端点页的「响应示例」写解析，但那些示例展示的是
+     * <b>{@code data} 里面的内容</b>，不含外面这层信封。
+     * 于是 {@code resp.optString("name")} 之类全部取到空值，
+     * 表现为「授权明明成功，却报授权可能已失效」。
+     * 真实响应长这样：
+     * <pre>
+     * {"success":true,"data":{"id":44423,"name":"xm486","nickname":"永雏小夜",...}}
+     * </pre>
+     *
+     * @return 内层 data 对象；没有信封（例如 204 或异常情况）时原样返回入参
+     */
+    static JSONObject unwrap(JSONObject resp) {
+        if (resp == null) return null;
+        Object inner = resp.optJSONObject("data");
+        if (inner != null) return (JSONObject) inner;
+        // 没有 data 字段就原样返回，保持向下兼容
+        return resp;
     }
 
     // ======================== HTTP ========================
