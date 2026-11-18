@@ -68,7 +68,97 @@ public class HikarinagiOAuthCallbackActivity extends AppCompatActivity {
         status.setBackgroundColor(0xFF0B1020);
         setContentView(status);
 
-        handleCallback(getIntent() == null ? null : getIntent().getData());
+        Uri data = getIntent() == null ? null : getIntent().getData();
+
+        // 「游玩状态同步」与「快捷登录」共用同一个回调地址
+        // （Hikarinagi 控制台里一个 client 只能登记一个 redirect_uri），
+        // 所以先问同步流程「这个 state 是你的吗」。
+        // 是 → 走同步授权，绝不碰 YukiHub 登录态；
+        // 否 → 原样交给下面的快捷登录逻辑，行为与改动前完全一致。
+        if (handleSyncCallback(data)) return;
+
+        handleCallback(data);
+    }
+
+    /**
+     * 处理「游玩状态同步」发起的授权回调。
+     *
+     * @return true 表示这次回调属于同步流程、已由本方法接管；
+     *         false 表示与同步流程无关，交还给快捷登录逻辑
+     */
+    private boolean handleSyncCallback(Uri uri) {
+        if (uri == null) return false;
+
+        String state = uri.getQueryParameter("state");
+        String verifier = com.yuki.yukihub.hikarinagi.HikarinagiAuthStore
+                .takePendingVerifier(this, state);
+        // state 对不上 / 没发起过 / 已过期 → 不是同步流程的回调
+        if (verifier == null || verifier.trim().isEmpty()) return false;
+
+        String error = uri.getQueryParameter("error");
+        if (error != null && !error.trim().isEmpty()) {
+            String desc = uri.getQueryParameter("error_description");
+            com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.clearPending(this);
+            finishSyncAuth("Hikarinagi 同步授权失败：" + error
+                    + (desc == null || desc.trim().isEmpty() ? "" : "（" + desc + "）"));
+            return true;
+        }
+
+        String code = uri.getQueryParameter("code");
+        if (code == null || code.trim().isEmpty()) {
+            com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.clearPending(this);
+            finishSyncAuth("Hikarinagi 同步授权缺少授权码");
+            return true;
+        }
+
+        status.setText("正在完成 Hikarinagi 同步授权…");
+        new Thread(() -> {
+            try {
+                com.yuki.yukihub.hikarinagi.HikarinagiSyncClient.Tokens tokens =
+                        com.yuki.yukihub.hikarinagi.HikarinagiSyncClient
+                                .exchangeCode(code.trim(), verifier.trim(), "");
+                com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.saveTokens(this, tokens);
+                com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.clearPending(this);
+
+                // 顺手取一下账号名（失败不影响授权结果，只是显示用）
+                String name = "";
+                try {
+                    name = com.yuki.yukihub.hikarinagi.HikarinagiSyncClient
+                            .authInfo(tokens.accessToken).displayName();
+                    com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.setAccountLabel(this, name);
+                } catch (Throwable ignored) { }
+
+                final String n = name;
+                runOnUiThread(() -> finishSyncAuth(n.isEmpty()
+                        ? "Hikarinagi 同步授权成功"
+                        : "Hikarinagi 同步授权成功：" + n));
+            } catch (Throwable t) {
+                com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.clearPending(this);
+                String m = t.getMessage();
+                runOnUiThread(() -> finishSyncAuth("Hikarinagi 同步授权失败："
+                        + (m == null || m.trim().isEmpty() ? "请稍后重试" : m)));
+            }
+        }).start();
+        return true;
+    }
+
+    /**
+     * 同步授权流程结束：提示 + 回首页。
+     * <p>
+     * 刻意<b>不</b>调用 {@link #openProfile(String)}——那会跳到「我的」页面，
+     * 而同步是首页一个独立入口，用户预期是回到首页再点一次同步。
+     */
+    private void finishSyncAuth(String message) {
+        if (!isFinishing()) {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            if (status != null) {
+                status.setText(message + "\n\n请返回 YukiHub 继续同步。");
+            }
+        }
+        Intent i = new Intent(this, MainActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(i);
+        finish();
     }
 
     private void handleCallback(Uri uri) {

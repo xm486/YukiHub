@@ -25,8 +25,11 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      *           因此把匹配到的 vNNN 缓存下来，之后每次同步零搜索。
      *      26 = Bangumi 游玩状态同步：games.bangumi_subject_id / bangumi_synced_at /
      *           bangumi_synced_sig（同上，都是本机同步状态，不参与云同步快照）
+     *      27 = Hikarinagi 游玩状态同步：games.hikarinagi_galgame_id /
+     *           hikarinagi_synced_at / hikarinagi_synced_sig
+     *           （本机同步状态，不参与云同步快照。签名含时长，形如 "GOING:126"）
      */
-    public static final int DB_VERSION = 26;
+    public static final int DB_VERSION = 27;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -120,7 +123,11 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 // v26：Bangumi 游玩状态同步的本机状态与匹配缓存（不参与云同步快照）
                 "bangumi_subject_id TEXT DEFAULT ''," +
                 "bangumi_synced_at INTEGER DEFAULT 0," +
-                "bangumi_synced_sig TEXT DEFAULT ''" +
+                "bangumi_synced_sig TEXT DEFAULT ''," +
+                // v27：Hikarinagi 游玩状态同步的本机状态与匹配缓存（不参与云同步快照）
+                "hikarinagi_galgame_id INTEGER DEFAULT 0," +
+                "hikarinagi_synced_at INTEGER DEFAULT 0," +
+                "hikarinagi_synced_sig TEXT DEFAULT ''" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -280,6 +287,12 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_work_id TEXT DEFAULT ''");
             safeAlter(db, "ALTER TABLE games ADD COLUMN bangumi_subject_id TEXT DEFAULT ''");
             safeAlter(db, "ALTER TABLE games ADD COLUMN bangumi_synced_at INTEGER DEFAULT 0");
             safeAlter(db, "ALTER TABLE games ADD COLUMN bangumi_synced_sig TEXT DEFAULT ''");
+        }
+        if (oldVersion < 27) {
+            // v27：Hikarinagi 游玩状态同步（本机同步状态 + 匹配缓存，不参与云同步快照）
+            safeAlter(db, "ALTER TABLE games ADD COLUMN hikarinagi_galgame_id INTEGER DEFAULT 0");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN hikarinagi_synced_at INTEGER DEFAULT 0");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN hikarinagi_synced_sig TEXT DEFAULT ''");
         }
     }
 

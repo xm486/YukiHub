@@ -1069,6 +1069,79 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
         }
     }
 
+    // ==================== Hikarinagi 状态同步（v27） ====================
+
+    /**
+     * 读出「game_id → Hikarinagi galgame_id」映射
+     * （来自 metadata_cache 里 source='hikarinagi' 的 source_id）。
+     * <p>
+     * 只接受正整数：Hikarinagi 的 galgame id 是数字（如 7691）。
+     * 脏数据宁可当成「没匹配到」，也不要把状态写到别的条目上。
+     */
+    public java.util.Map<Long, Long> getHikarinagiSourceIds() {
+        java.util.Map<Long, Long> out = new java.util.LinkedHashMap<>();
+        Cursor c = null;
+        try {
+            c = helper.getReadableDatabase().query(
+                    "metadata_cache",
+                    new String[]{"game_id", "source_id"},
+                    "source=?",
+                    new String[]{"hikarinagi"},
+                    null, null, null);
+            while (c.moveToNext()) {
+                long gameId = c.getLong(0);
+                String sid = c.isNull(1) ? "" : c.getString(1);
+                if (sid == null) continue;
+                sid = sid.trim();
+                if (sid.isEmpty()) continue;
+                boolean digits = true;
+                for (int i = 0; i < sid.length(); i++) {
+                    if (!Character.isDigit(sid.charAt(i))) { digits = false; break; }
+                }
+                if (!digits || sid.length() > 12) continue;
+                long id;
+                try {
+                    id = Long.parseLong(sid);
+                } catch (Throwable t) {
+                    continue;
+                }
+                if (id <= 0L) continue;
+                out.put(gameId, id);
+            }
+        } catch (Throwable t) {
+            Log.w("GameRepository", "getHikarinagiSourceIds failed", t);
+        } finally {
+            if (c != null) c.close();
+        }
+        return out;
+    }
+
+    /** 写回 Hikarinagi 同步状态（时间 + 签名）。只动这两个字段。 */
+    public void updateHikarinagiSyncState(long gameId, long syncedAt, String sig) {
+        ContentValues v = new ContentValues();
+        v.put("hikarinagi_synced_at", syncedAt);
+        v.put("hikarinagi_synced_sig", sig == null ? "" : sig);
+        helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
+    }
+
+    /** 批量写回 Hikarinagi 匹配结果（galgame_id），供下次同步免搜索。 */
+    public void updateHikarinagiGalgameIds(java.util.Map<Long, Long> idByGameId) {
+        if (idByGameId == null || idByGameId.isEmpty()) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (java.util.Map.Entry<Long, Long> e : idByGameId.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                ContentValues v = new ContentValues();
+                v.put("hikarinagi_galgame_id", e.getValue());
+                db.update("games", v, "id=?", new String[]{String.valueOf(e.getKey())});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     /**
      * 读出「game_id → 原名/罗马字」映射，供 VNDB 标题搜索优先使用。
      * <p>
@@ -1240,6 +1313,12 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.bangumiSyncedSig = bgSig == null ? "" : bgSig;
         String bgId = getStringOrNull(c, "bangumi_subject_id");
         g.bangumiSubjectId = bgId == null ? "" : bgId;
+
+        // ---------- v27：Hikarinagi 状态同步 ----------
+        g.hikarinagiSyncedAt = getLongOrDefault(c, "hikarinagi_synced_at", 0L);
+        String hkSig = getStringOrNull(c, "hikarinagi_synced_sig");
+        g.hikarinagiSyncedSig = hkSig == null ? "" : hkSig;
+        g.hikarinagiGalgameId = getLongOrDefault(c, "hikarinagi_galgame_id", 0L);
         return g;
     }
 

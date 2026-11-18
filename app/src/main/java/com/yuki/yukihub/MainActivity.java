@@ -2489,6 +2489,22 @@ TextView vndbSyncHint = new TextView(this);
     bangumiSyncHint.setPadding(0, dp(4), 0, 0);
     root.addView(bangumiSyncHint);
 
+    // Hikarinagi 游玩状态同步：与 NextMoe / VNDB / Bangumi 并列的第四个独立入口。
+    // 唯一能同时写「状态 + 时长」的一个，且用批量接口（库大也只有 1 次写请求）。
+    Button hikarinagiSyncBtn = krButton("同步到 Hikarinagi");
+    hikarinagiSyncBtn.setTextColor(primaryTextColor());
+    hikarinagiSyncBtn.setOnClickListener(v -> openHikarinagiSync());
+    LinearLayout.LayoutParams hkgLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+    hkgLp.setMargins(0, dp(8), 0, 0);
+    root.addView(hikarinagiSyncBtn, hkgLp);
+    TextView hikarinagiSyncHint = new TextView(this);
+    hikarinagiSyncHint.setText(hikarinagiSyncStatusText());
+    hikarinagiSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+    hikarinagiSyncHint.setTextSize(10);
+    hikarinagiSyncHint.setPadding(0, dp(4), 0, 0);
+    root.addView(hikarinagiSyncHint);
+
     LinearLayout kunRow = new LinearLayout(this);
     kunRow.setOrientation(LinearLayout.HORIZONTAL);
     kunRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -3220,6 +3236,34 @@ private void showAccountSettingsDialog() {
     private void openBangumiSync() {
         try {
             com.yuki.yukihub.bangumi.BangumiSyncDialog.start(this);
+        } catch (Throwable t) {
+            Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ==================== Hikarinagi 游玩状态同步 ====================
+    // 与 NextMoe / VNDB / Bangumi 并列的第四个独立入口。
+    // 与另外三个不同的是：它同时写「状态」和「通关耗时」，并且用批量接口，
+    // 所以库再大也只有 1 次写请求。
+    // 授权走独立 OAuth（token 存在 hikarinagi_sync 这个 prefs），
+    // 不影响「Hikarinagi 快捷登录」的登录态。
+
+    /** 按钮下方的状态小字。 */
+    private String hikarinagiSyncStatusText() {
+        if (!com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this)) {
+            return "授权后可同步游玩状态与时长";
+        }
+        String name = com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.getAccountLabel(this);
+        String who = (name == null || name.trim().isEmpty()) ? "" : "（" + name.trim() + "）";
+        long last = com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.lastSyncAt(this);
+        if (last <= 0) return "已授权" + who + " · 上次同步：从未";
+        return "已授权" + who + " · 上次同步：" + TimeFormatUtil.date(last);
+    }
+
+    private void openHikarinagiSync() {
+        try {
+            com.yuki.yukihub.hikarinagi.HikarinagiSyncDialog.start(this);
         } catch (Throwable t) {
             Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
                     Toast.LENGTH_LONG).show();

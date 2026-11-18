@@ -84,6 +84,26 @@ public class Game {
      */
     public String bangumiSubjectId = "";
 
+    // ==================== Hikarinagi 状态同步（v27） ====================
+    // 同样是**本机状态**，不参与云同步快照，也不进 toValues()。
+    /** 上次成功推送到 Hikarinagi 的时间戳，0 表示从未成功。 */
+    public long hikarinagiSyncedAt = 0;
+    /**
+     * 上次成功推送的内容签名，形如 "GOING:126"（状态:分钟）。
+     * <p>
+     * 与 Bangumi / VNDB 只记状态的签名不同，这里把<b>时长</b>也纳入签名，
+     * 因为 Hikarinagi 支持写 {@code time_to_finish_minutes}，
+     * 时长变化同样需要推送。
+     */
+    public String hikarinagiSyncedSig = "";
+    /**
+     * 匹配到的 Hikarinagi galgame id（纯数字，如 7691），0 表示尚未匹配。
+     * <p>
+     * 本机数据里带 hikarinagi 锚点的游戏极少（实测 39 个里只有 2 个），
+     * 所以这一列绝大多数情况由「标题搜索」填上并缓存，之后免搜索。
+     */
+    public long hikarinagiGalgameId = 0;
+
     public Game() {
         engine = EngineType.UNKNOWN;
         createdAt = System.currentTimeMillis();
