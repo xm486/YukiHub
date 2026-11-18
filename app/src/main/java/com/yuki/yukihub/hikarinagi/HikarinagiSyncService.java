@@ -190,6 +190,17 @@ public final class HikarinagiSyncService {
         void onResolveProgress(int done, int total);
     }
 
+    /**
+     * 令牌刷新失败，但<b>凭据仍在、可以重试</b>。
+     * <p>
+     * 与 {@link HikarinagiSyncClient.NotAuthorizedException} 的区别：
+     * 那个表示「授权真的没了，必须重新授权」，这个表示「这次没刷成，
+     * 排查网络后重试即可」。UI 据此给不同按钮（重试 vs 重新授权）。
+     */
+    public static class TokenRefreshFailedException extends Exception {
+        public TokenRefreshFailedException(String message) { super(message); }
+    }
+
     // ======================== 阶段 1：只读匹配 ========================
 
     /**
@@ -199,6 +210,14 @@ public final class HikarinagiSyncService {
         // 校验令牌并取账号名。用主线程之外的线程调用。
         String token = HikarinagiAuthStore.ensureAccessToken(context);
         if (token == null || token.trim().isEmpty()) {
+            // 令牌拿不到要区分两种情况，提示完全不同：
+            //   能自救（有 refresh token）→ 多半是网络问题，让用户重试，别重新授权
+            //   不能自救（没 refresh token）→ 只能重新授权
+            if (HikarinagiAuthStore.canRecover(context)) {
+                throw new TokenRefreshFailedException(
+                        "刷新登录状态失败，可能是网络问题。你的 Hikarinagi 授权仍然保留，"
+                                + "请检查网络后重试，不需要重新授权。");
+            }
             throw new HikarinagiSyncClient.NotAuthorizedException("Hikarinagi 授权已失效，请重新授权");
         }
 
@@ -369,6 +388,12 @@ public final class HikarinagiSyncService {
 
         String token = HikarinagiAuthStore.ensureAccessToken(context);
         if (token == null || token.trim().isEmpty()) {
+            // 与 prepare 一致：能自救就说「重试」，自救不了才说「重新授权」
+            if (HikarinagiAuthStore.canRecover(context)) {
+                throw new TokenRefreshFailedException(
+                        "刷新登录状态失败，可能是网络问题。你的 Hikarinagi 授权仍然保留，"
+                                + "请检查网络后重试，不需要重新授权。");
+            }
             throw new HikarinagiSyncClient.NotAuthorizedException("Hikarinagi 授权已失效，请重新授权");
         }
 

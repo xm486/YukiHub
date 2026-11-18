@@ -85,6 +85,40 @@ public final class HikarinagiAuthStore {
         return t != null && !t.trim().isEmpty();
     }
 
+    /**
+     * 凭据是否<b>还能自己恢复</b>（纯本地判断，不发请求）。
+     * <p>
+     * 与 {@link #isConnected} 的区别很重要：
+     * <ul>
+     *   <li>access token 仍有效 → 能恢复；</li>
+     *   <li>access token 过期但<b>还有 refresh token</b> → 能刷新恢复；</li>
+     *   <li>access token 过期且<b>没有 refresh token</b> → 永远恢复不了，
+     *       只能让用户重新授权。</li>
+     * </ul>
+     * 用途是区分「网络抖动导致这次没刷成」与「授权真的作废了」：
+     * 前者应该提示「检查网络后重试」，后者才该把人赶回去重新授权。
+     * <p>
+     * 之前只看 access token 是否非空，导致 access token 过期且 refresh token
+     * 没拿到时（比如 offline_access 没生效），UI 仍显示「已授权」，
+     * 用户点同步才报错，还得自己猜是怎么回事。
+     */
+    public static boolean canRecover(Context c) {
+        String access = getAccessToken(c);
+        if (access == null || access.trim().isEmpty()) return false;
+        // access token 还没过期 → 直接用，能恢复
+        if (getExpiresAt(c) - 60_000L > System.currentTimeMillis()) return true;
+        // 已过期：有待刷新的 refresh token 才能自救
+        String refresh = getRefreshToken(c);
+        return refresh != null && !refresh.trim().isEmpty();
+    }
+
+    /** access token 是否已过期（纯本地判断）。 */
+    public static boolean isAccessExpired(Context c) {
+        String access = getAccessToken(c);
+        if (access == null || access.trim().isEmpty()) return true;
+        return getExpiresAt(c) - 60_000L <= System.currentTimeMillis();
+    }
+
     /** 清空凭据（用户主动「退出授权」时用）。 */
     public static void clear(Context c) {
         prefs(c).edit()

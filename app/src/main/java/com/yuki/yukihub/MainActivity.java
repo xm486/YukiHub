@@ -3254,6 +3254,11 @@ private void showAccountSettingsDialog() {
         if (!com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this)) {
             return "授权后可同步游玩状态与时长";
         }
+        // 已存令牌但无法自救（access 过期且没有 refresh token）→ 直说要重新授权，
+        // 别让用户点了才在弹窗里发现
+        if (!com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.canRecover(this)) {
+            return "授权已过期，请重新授权";
+        }
         String name = com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.getAccountLabel(this);
         String who = (name == null || name.trim().isEmpty()) ? "" : "（" + name.trim() + "）";
         long last = com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.lastSyncAt(this);

@@ -148,6 +148,18 @@ public final class HikarinagiSyncDialog {
                     if (!alive(activity)) return;
                     showPreview(activity, preview);
                 });
+            } catch (HikarinagiSyncService.TokenRefreshFailedException e) {
+                // 凭据还在，只是这次没刷成（多半网络问题）→ 给「重试」，劝用户别重新授权
+                UI.post(() -> {
+                    safeDismiss(pd);
+                    if (!alive(activity)) return;
+                    new AlertDialog.Builder(activity)
+                            .setTitle("暂时无法连接")
+                            .setMessage(e.getMessage())
+                            .setPositiveButton("重试", (d, w) -> runPrepare(activity))
+                            .setNegativeButton("取消", null)
+                            .show();
+                });
             } catch (HikarinagiSyncClient.NotAuthorizedException e) {
                 safeDismiss(pd);
                 handleAuthError(activity, e.getMessage());
@@ -347,6 +359,8 @@ public final class HikarinagiSyncDialog {
         String msg;
         if (t instanceof HikarinagiSyncClient.RateLimitedException) {
             msg = "Hikarinagi 请求过于频繁，请过几分钟再试。";
+        } else if (t instanceof HikarinagiSyncService.TokenRefreshFailedException) {
+            msg = safeStr(t.getMessage());
         } else if (t instanceof HikarinagiSyncClient.NotAuthorizedException) {
             msg = "Hikarinagi 授权失效：" + safeStr(t.getMessage());
         } else {
