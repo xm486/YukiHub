@@ -34,7 +34,7 @@ import java.util.Map;
  * <pre>
  *   第1级  cache     games.hikarinagi_galgame_id（上次搜索命中的结果，永久复用）
  *   第2级  metadata  metadata_cache 里 source='hikarinagi' 的 source_id（纯数字）
- *   第3级  title     原名 > 罗马字 > 本地标题，精确相等优先、包含须唯一
+ *   第3级  title     用各源刮下来的正式标题搜：中文译名 > 原名 > 罗马字
  * </pre>
  * 第 3 级命中后把 id 写回 {@code games.hikarinagi_galgame_id}，之后每次走第 1 级零搜索。
  * <p>
@@ -269,17 +269,17 @@ public final class HikarinagiSyncService {
             needTitleSearch.add(g);
         }
 
-        // 第3级：标题搜索。候选词按「原名 > 罗马字 > 本地标题」排序。
+        // 第3级：标题搜索。候选词来自各源刮下来的正式标题（中文译名优先）
         List<Game> unmatched = new ArrayList<>();
         Map<Long, Long> newlyResolved = new LinkedHashMap<>();
         if (!needTitleSearch.isEmpty()) {
-            // 只在这几个游戏确实要搜时才去解析原名，避免全表 JSON 解析
-            Map<Long, List<String>> originalTitles = repo.getOriginalTitles(needTitleSearch);
+            // 只在这几个游戏确实要搜时才去解析元数据，避免全表 JSON 解析
+            Map<Long, List<String>> searchTitles = repo.getSearchTitles(needTitleSearch);
 
             int done = matched.size();
             int total = all.size();
             for (Game g : needTitleSearch) {
-                List<String> candidates = buildSearchCandidates(g, originalTitles.get(g.id));
+                List<String> candidates = buildSearchCandidates(g, searchTitles.get(g.id));
                 if (candidates.isEmpty()) {
                     unmatched.add(g);
                 } else {
@@ -347,75 +347,39 @@ public final class HikarinagiSyncService {
     }
 
     /**
-     * 构建标题搜索的候选词，按命中率排序。
+     * 构建标题搜索的候选词。
      *
-     * <h3>为什么中文标题要排在前面</h3>
-     * 搜索返回的 {@code title} 是「有译名时优先返回译名」，即<b>中文译名</b>。
-     * 实测：用日文原名「保健室のセンセーとシャボン玉中毒の助手」去搜，
-     * 返回第 1 条是「保健室的老师与沉迷吹泡泡的助手」——同一作品，但因为
-     * 中日文不同，做字符串比对匹配不上；而用本地中文标题「保健室的老师与沉迷吹泡泡的助手」
-     * 去搜就能<b>精确相等</b>，一次命中。
+     * <h3>只用「已匹配源刮下来的正式标题」，绝不用本地游戏名</h3>
+     * {@code games.title} 是用户自己起的名字，可能带「【Tyranor模拟器】」这类
+     * 噪声前缀，也可能根本不是正式译名。拿它去搜既不准也不干净。
      * <p>
-     * 所以顺序改为：<b>本地标题（中文）优先</b> → 原名 → 罗马字。
-     * 这与 VNDB / Bangumi 那边的策略相反，因为那两个源的条目名是原名，
-     * 而 Hikarinagi 返回的是译名。这是数据源特性决定的，不能照抄。
+     * 正确来源是 {@code metadata_cache}：那是从 VNDB / NextMoe / Bangumi 等源
+     * 刮下来的正式条目名，每个源都会给 {@code chineseTitle}（中文译名）、
+     * {@code originalTitle}（原名）、{@code romanTitle}（罗马字）。
      * <p>
-     * 另外会剔除「模拟器前缀」等噪声（如「【Tyranor模拟器】」），
-     * 那种前缀只存在于本地标题里，会显著拉低命中率。
+     * 顺序：<b>中文译名优先</b> → 原名 → 罗马字。
+     * 因为 Hikarinagi 的搜索返回 {@code title} 是「有译名时优先返回译名」，
+     * 用中文译名去搜才能与返回值精确相等，一次命中。
+     * （这点与 VNDB/Bangumi 相反，那两个源的条目名是原名。）
+     *
+     * @param titles 来自 {@code GameRepository.getSearchTitles}，已按上述顺序排好
      */
-    static List<String> buildSearchCandidates(Game g, List<String> originals) {
+    static List<String> buildSearchCandidates(Game g, List<String> titles) {
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
-
-        // 1) 本地标题（通常是中文译名，与 Hikarinagi 返回的 title 同语言，命中率最高）
-        if (g != null && g.title != null) {
-            String t = stripNoisePrefix(g.title.trim());
-            if (!t.isEmpty()) seen.add(t);
-        }
-        // 2) 原名 → 罗马字（originals 里已按此顺序）
-        if (originals != null) {
-            for (String s : originals) {
+        if (titles != null) {
+            for (String s : titles) {
                 if (s == null) continue;
-                String v = stripNoisePrefix(s.trim());
+                String v = s.trim();
                 if (v.isEmpty() || "null".equalsIgnoreCase(v)) continue;
                 seen.add(v);
             }
         }
-        return new ArrayList<>(seen);
-    }
-
-    /**
-     * 去掉本地标题里的噪声前缀/后缀，例如：
-     * 「【Tyranor模拟器】保健室的老师与沉迷吹泡泡的助手」→「保健室的老师与沉迷吹泡泡的助手」。
-     * <p>
-     * 这类前缀是用户自己加在游戏名前的模拟器标记，Hikarinagi 不会有，
-     * 带着它去搜会把结果带偏。
-     */
-    static String stripNoisePrefix(String s) {
-        if (s == null) return "";
-        String out = s;
-        // 循环剥掉开头的 【...】/[...] 块
-        while (true) {
-            String t = out.trim();
-            if (t.isEmpty()) return "";
-            char c0 = t.charAt(0);
-            if (c0 == '【' || c0 == '[' || c0 == '〔' || c0 == '(' || c0 == '（') {
-                int end = -1;
-                for (int i = 1; i < t.length(); i++) {
-                    char ch = t.charAt(i);
-                    if (ch == '】' || ch == ']' || ch == '〕' || ch == ')' || ch == '）') {
-                        end = i;
-                        break;
-                    }
-                }
-                if (end > 0 && end < t.length() - 1) {
-                    out = t.substring(end + 1);
-                    continue;
-                }
-            }
-            out = t;
-            break;
+        // 兜底：元数据什么都没刮到时，才退回本地标题（此时它可能是唯一线索）
+        if (seen.isEmpty() && g != null && g.title != null) {
+            String t = g.title.trim();
+            if (!t.isEmpty()) seen.add(t);
         }
-        return out.trim();
+        return new ArrayList<>(seen);
     }
 
     // ======================== 阶段 2：执行推送 ========================

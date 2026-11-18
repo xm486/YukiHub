@@ -1143,6 +1143,80 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
     }
 
     /**
+     * 读出「game_id → 各源提供的标题」映射，供 Hikarinagi 标题搜索使用。
+     * <p>
+     * 这里要把元数据里<b>所有</b>可用标题都取出来，因为它们分别适合不同场景：
+     * <ul>
+     *   <li>{@code chineseTitle} —— 各源给的中文译名，<b>与 Hikarinagi 返回的 title
+     *       同语言</b>，是搜索命中的主力；</li>
+     *   <li>{@code originalTitle} —— 日文原名，Hikarinagi 也收录原名，可命中；</li>
+     *   <li>{@code romanTitle} —— 罗马字，兜底。</li>
+     * </ul>
+     * 顺序上中文译名优先、原名次之、罗马字最后——这是由 Hikarinagi
+     * 「title 有译名时优先返回译名」的特性决定的，与 VNDB/Bangumi 相反。
+     * <p>
+     * <b>刻意不使用 games.title</b>：那是用户自己起的名字，可能带
+     * 「【Tyranor模拟器】」这类噪声前缀，也不一定是正式译名。
+     * 元数据里刮下来的 chineseTitle 才是干净的作品名。
+     *
+     * @param games 只需要这些游戏的标题；传 null 表示全部（不建议）
+     */
+    public java.util.Map<Long, java.util.List<String>> getSearchTitles(
+            java.util.List<Game> games) {
+        java.util.Map<Long, java.util.List<String>> out = new java.util.LinkedHashMap<>();
+        if (games == null || games.isEmpty()) return out;
+
+        java.util.Set<Long> want = new java.util.HashSet<>();
+        for (Game g : games) {
+            if (g != null) want.add(g.id);
+        }
+        if (want.isEmpty()) return out;
+
+        // 按优先级分三遍扫描，保证 chineseTitle 全部排在 originalTitle 前面，
+        // 再排 romanTitle。若一遍扫描同时 add，多源挂载时顺序会乱，
+        // 而顺序直接决定搜索命中率（第一个候选就命中 = 省一次请求）。
+        Cursor c = null;
+        try {
+            String[] fields = {"chineseTitle", "originalTitle", "romanTitle"};
+            for (String field : fields) {
+                c = helper.getReadableDatabase().query(
+                        "metadata_cache", new String[]{"game_id", "json"},
+                        null, null, null, null, null);
+                while (c.moveToNext()) {
+                    long gameId = c.getLong(0);
+                    if (!want.contains(gameId)) continue;
+                    String json = c.isNull(1) ? "" : c.getString(1);
+                    if (json == null || json.trim().isEmpty()) continue;
+                    java.util.List<String> names = out.get(gameId);
+                    if (names == null) {
+                        names = new java.util.ArrayList<>();
+                        out.put(gameId, names);
+                    }
+                    try {
+                        org.json.JSONObject o = new org.json.JSONObject(json);
+                        String v = o.optString(field, "");
+                        if (v != null) {
+                            v = v.trim();
+                            if (!v.isEmpty() && !"null".equalsIgnoreCase(v) && !names.contains(v)) {
+                                names.add(v);
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                        // 单条 JSON 坏了不影响其它
+                    }
+                }
+                c.close();
+                c = null;
+            }
+        } catch (Throwable t) {
+            Log.w("GameRepository", "getSearchTitles failed", t);
+        } finally {
+            if (c != null) c.close();
+        }
+        return out;
+    }
+
+    /**
      * 读出「game_id → 原名/罗马字」映射，供 VNDB 标题搜索优先使用。
      * <p>
      * VNDB 是日语为核心的数据库，用中文译名搜命中率很低。
