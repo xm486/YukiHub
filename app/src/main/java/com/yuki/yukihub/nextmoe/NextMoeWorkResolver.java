@@ -24,11 +24,12 @@ import java.util.Set;
  *   <li><b>NextMoe 源</b>：{@code metadata_cache} 里 source='nextmoe' 的 source_id 就是 work_id（零请求）。</li>
  *   <li><b>外部锚反查</b>：vndb / bangumi id 走 {@code /catalog/works?refs=...&nsfw=true}
  *       批量反查，每 100 个一次请求。</li>
- *   <li><b>标题精确搜索</b>：前三级都没命中的，用游戏标题走 {@code /catalog/search}。
+ *   <li><b>标题精确搜索</b>：前三级都没命中的，用<b>元数据里的正式标题</b>
+ *       （中文译名 > 原名 > 罗马字，不是 games.title）走 {@code /catalog/search}。
  *       只接受<b>归一化后完全相等</b>的命中（见 {@link NextMoeMeClient#normalizeTitle}），
  *       因为搜索是模糊的——「千恋万花」会同时返回「涙恋花」，
  *       取第一条就会把时长写到不相干的作品上，比不同步更糟。
- *       这一级逐个请求，所以只处理前面失败的少量条目。</li>
+ *       这一级逐个候选词试、命中即停，所以只处理前面失败的少量条目。</li>
  * </ol>
  * <p>
  * 第 4 级是必要的：只用 ymgal / hikarinagi 源刮削的游戏拿不到 NextMoe 认的 ref，
@@ -183,22 +184,36 @@ public final class NextMoeWorkResolver {
         // ---- 第 4 级：按标题精确搜索兜底 ----
         // 覆盖「只用了 ymgal / hikarinagi 源刮削」或「元数据 id 格式异常」的情况：
         // 这些游戏拿不到可反查的 ref，但标题往往就是 NextMoe 的 localized 值。
-        // 只认归一化后完全相等的命中，避免搜索的模糊性把时长写到别的作品上。
-        // 逐个请求（搜索接口没有批量车道），所以放在最后一级，只处理前面全部失败的少量条目。
+        //
+        // 候选词只用元数据里的正式标题（中文译名优先），<b>不用 games.title</b>：
+        // 那是用户自己起的名字，实测有
+        // 「【Tyranor模拟器】保健室的老师…」「命运石之门(斯坦因之门)[简][KFC特创组]」。
+        // 而 searchWorkByExactTitle 只接受归一化后<b>完全相等</b>，
+        // 带这类标记的名字永远匹配不上，等于这一级白跑。
+        //
+        // 逐个候选词试，第一个命中就停；逐个请求（搜索接口没有批量车道），
+        // 所以放在最后一级，只处理前面全部失败的少量条目。
+        Map<Long, java.util.List<String>> mdTitles =
+                new com.yuki.yukihub.data.GameRepository(context).getSearchTitles(stillUnmatched);
+
         for (Game g : stillUnmatched) {
-            String title = g.title == null ? "" : g.title.trim();
-            if (title.isEmpty()) {
+            List<String> candidates = buildTitleCandidates(g, mdTitles.get(g.id));
+            if (candidates.isEmpty()) {
                 result.unmatched.add(g);
                 continue;
             }
+            boolean hit = false;
             try {
-                String workId = NextMoeMeClient.searchWorkByExactTitle(title);
-                if (workId != null && !workId.isEmpty()) {
-                    result.matched.add(new Matched(g, workId, "title"));
-                    result.newlyResolved.put(g.id, workId);
-                } else {
-                    result.unmatched.add(g);
+                for (String cand : candidates) {
+                    String workId = NextMoeMeClient.searchWorkByExactTitle(cand);
+                    if (workId != null && !workId.isEmpty()) {
+                        result.matched.add(new Matched(g, workId, "title"));
+                        result.newlyResolved.put(g.id, workId);
+                        hit = true;
+                        break;
+                    }
                 }
+                if (!hit) result.unmatched.add(g);
             } catch (NextMoeMeClient.QuotaExceededException q) {
                 // 配额用尽：剩下的直接算未匹配，把原因往上抛
                 result.unmatched.add(g);
@@ -206,7 +221,7 @@ public final class NextMoeWorkResolver {
                 throw q;
             } catch (Throwable t) {
                 // 单个标题搜索失败不影响其它条目
-                Log.w(TAG, "title search failed for " + title, t);
+                Log.w(TAG, "title search failed for " + candidates.get(0), t);
                 result.unmatched.add(g);
             }
         }
@@ -216,6 +231,33 @@ public final class NextMoeWorkResolver {
     }
 
     // ======================== 工具 ========================
+
+    /**
+     * 构建标题搜索的候选词，<b>只用元数据里的正式标题</b>。
+     * <p>
+     * {@code games.title} 是用户自己起的名字，常带「【Tyranor模拟器】」
+     * 「[简][KFC特创组]」这类标记；而 {@code searchWorkByExactTitle} 要求
+     * 归一化后完全相等，带标记的名字永远匹配不上。
+     * <p>
+     * 顺序：中文译名 > 原名 > 罗马字（NextMoe 的 localized 以中文为主）。
+     * 元数据什么都有没时才退回本地标题——那时它是唯一线索。
+     */
+    static List<String> buildTitleCandidates(Game g, List<String> mdTitles) {
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+        if (mdTitles != null) {
+            for (String s : mdTitles) {
+                if (s == null) continue;
+                String v = s.trim();
+                if (v.isEmpty() || "null".equalsIgnoreCase(v)) continue;
+                seen.add(v);
+            }
+        }
+        if (seen.isEmpty() && g != null && g.title != null) {
+            String t = g.title.trim();
+            if (!t.isEmpty()) seen.add(t);
+        }
+        return new ArrayList<>(seen);
+    }
 
     /** 读 metadata_cache 里某源的 source_id，只取给定 gameId 集合。 */
     private static Map<Long, String> readCachedSourceIds(Context context, Set<Long> gameIds, String source) {
