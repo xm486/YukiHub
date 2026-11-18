@@ -348,25 +348,74 @@ public final class HikarinagiSyncService {
 
     /**
      * 构建标题搜索的候选词，按命中率排序。
+     *
+     * <h3>为什么中文标题要排在前面</h3>
+     * 搜索返回的 {@code title} 是「有译名时优先返回译名」，即<b>中文译名</b>。
+     * 实测：用日文原名「保健室のセンセーとシャボン玉中毒の助手」去搜，
+     * 返回第 1 条是「保健室的老师与沉迷吹泡泡的助手」——同一作品，但因为
+     * 中日文不同，做字符串比对匹配不上；而用本地中文标题「保健室的老师与沉迷吹泡泡的助手」
+     * 去搜就能<b>精确相等</b>，一次命中。
      * <p>
-     * 顺序：原文原名 → 罗马字 → 本地标题（兜底）。
-     * Hikarinagi 的条目名多为日文原名，本地标题常是汉化组起的名字，命中率最低。
+     * 所以顺序改为：<b>本地标题（中文）优先</b> → 原名 → 罗马字。
+     * 这与 VNDB / Bangumi 那边的策略相反，因为那两个源的条目名是原名，
+     * 而 Hikarinagi 返回的是译名。这是数据源特性决定的，不能照抄。
+     * <p>
+     * 另外会剔除「模拟器前缀」等噪声（如「【Tyranor模拟器】」），
+     * 那种前缀只存在于本地标题里，会显著拉低命中率。
      */
     static List<String> buildSearchCandidates(Game g, List<String> originals) {
         java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+
+        // 1) 本地标题（通常是中文译名，与 Hikarinagi 返回的 title 同语言，命中率最高）
+        if (g != null && g.title != null) {
+            String t = stripNoisePrefix(g.title.trim());
+            if (!t.isEmpty()) seen.add(t);
+        }
+        // 2) 原名 → 罗马字（originals 里已按此顺序）
         if (originals != null) {
             for (String s : originals) {
                 if (s == null) continue;
-                String v = s.trim();
+                String v = stripNoisePrefix(s.trim());
                 if (v.isEmpty() || "null".equalsIgnoreCase(v)) continue;
                 seen.add(v);
             }
         }
-        if (g != null && g.title != null) {
-            String t = g.title.trim();
-            if (!t.isEmpty()) seen.add(t);
-        }
         return new ArrayList<>(seen);
+    }
+
+    /**
+     * 去掉本地标题里的噪声前缀/后缀，例如：
+     * 「【Tyranor模拟器】保健室的老师与沉迷吹泡泡的助手」→「保健室的老师与沉迷吹泡泡的助手」。
+     * <p>
+     * 这类前缀是用户自己加在游戏名前的模拟器标记，Hikarinagi 不会有，
+     * 带着它去搜会把结果带偏。
+     */
+    static String stripNoisePrefix(String s) {
+        if (s == null) return "";
+        String out = s;
+        // 循环剥掉开头的 【...】/[...] 块
+        while (true) {
+            String t = out.trim();
+            if (t.isEmpty()) return "";
+            char c0 = t.charAt(0);
+            if (c0 == '【' || c0 == '[' || c0 == '〔' || c0 == '(' || c0 == '（') {
+                int end = -1;
+                for (int i = 1; i < t.length(); i++) {
+                    char ch = t.charAt(i);
+                    if (ch == '】' || ch == ']' || ch == '〕' || ch == ')' || ch == '）') {
+                        end = i;
+                        break;
+                    }
+                }
+                if (end > 0 && end < t.length() - 1) {
+                    out = t.substring(end + 1);
+                    continue;
+                }
+            }
+            out = t;
+            break;
+        }
+        return out.trim();
     }
 
     // ======================== 阶段 2：执行推送 ========================

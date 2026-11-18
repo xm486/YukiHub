@@ -130,8 +130,16 @@ public final class HikarinagiSyncClient {
 
     private static final int CONNECT_TIMEOUT_MS = 15000;
     private static final int READ_TIMEOUT_MS = 25000;
-    /** Hikarinagi 限速 60 次/分钟/应用，按 1100ms 保守节流。 */
-    private static final long MIN_INTERVAL_MS = 1100L;
+    /**
+     * Hikarinagi 限速以<b>应用</b>为单位计数，默认 <b>60 次 / 分钟</b>
+     * （见接入指南「限流」：超出返回 429 COMMON_RATE_LIMITED，
+     *  配额为应用级，批量同步需自行控制节奏）。
+     * <p>
+     * 60/min = 1000ms/次，这里取 1000ms 贴着上限跑，并留出网络耗时的自然间隔。
+     * 早期写死 1100ms 是凭感觉取的保守值，白白多出 10% 耗时；
+     * 39 个游戏上百次搜索时这点差异很可观。
+     */
+    private static final long MIN_INTERVAL_MS = 1000L;
 
     private static volatile long lastRequestTime = 0L;
 
@@ -429,13 +437,14 @@ public final class HikarinagiSyncClient {
      * 按标题搜索 Galgame，返回命中的 galgame id；全部候选都没命中返回 null。
      * <p>
      * 走应用级令牌（{@code catalog:read}）——文档标注 {@code /v3/search} 的
-     * {@code auth} 是 {@code app}，用户令牌不一定被接受，应用级令牌才是正路。
+     * {@code auth} 是 {@code app}。
      *
-     * <p>重要：返回体的 {@code title} 是<b>条目名称，有译名时优先返回译名</b>，
-     * 而 {@code subtitle} 在 galgame 里是<b>发行年份</b>（四位数字），
-     * 不是副标题，绝不能拼进标题参与比对。
+     * <h3>性能要点</h3>
+     * 每个请求都要占 1 次配额（60/分钟），所以这里<b>一命中就立刻返回</b>，
+     * 绝不再试后面的候选词。早期版本对每个候选词都再试一遍「横线换空格」变体，
+     * 等于把请求数翻倍，是那次「扫 39 个游戏花了 7 分钟」的主要原因之一。
      *
-     * @param candidates 已按命中率排序的候选词（原名 > 罗马字 > 本地标题）
+     * @param candidates 已按命中率排序的候选词（本地标题 > 原名 > 罗马字）
      */
     public static Long searchGalgameId(List<String> candidates) throws Exception {
         if (candidates == null || candidates.isEmpty()) return null;
@@ -453,15 +462,13 @@ public final class HikarinagiSyncClient {
         return null;
     }
 
-    /** 单次搜索 + 精确/唯一包含判定。 */
+    /** 单次搜索 + 判定。 */
     private static Long searchOnce(String query) throws Exception {
         String nq = normalizeTitle(query);
         if (nq.isEmpty()) return null;
 
-        // 变体 1：原样。
-        // 变体 2：把各种横线（全角－/半角-/破折号/长音符）换成空格。
-        //   这是 Bangumi 那轮验证过的有效手段：日文原名常带全角「－」(U+FF0D)，
-        //   原样搜会把目标挤出前若干条候选，换成空格后立刻回到第一条。
+        // 只在查询词含横线时才多试一次「横线换空格」变体：
+        // 不带横线的查询词，这个变体与原文完全相同，纯属浪费一次配额。
         java.util.LinkedHashSet<String> variants = new java.util.LinkedHashSet<>();
         variants.add(query);
         String spaced = replaceDashesWithSpace(query).trim();
@@ -506,17 +513,32 @@ public final class HikarinagiSyncClient {
 
     /**
      * 从候选里挑出唯一可接受的那一个。
-     * <p>
-     * 规则沿用 Bangumi 那次修正后的做法（宁可漏掉，也绝不能写错）：
+     *
+     * <h3>为什么不能只靠「查询词 vs 返回标题」比对</h3>
+     * 文档写明搜索返回的 {@code title} 是「条目名称，<b>有译名时优先返回译名</b>」，
+     * 也就是说它是<b>中文译名</b>，而我们的查询词常常是日文原名。
+     * 于是「保健室のセンセーとシャボン玉中毒の助手」去搜，
+     * 第 1 条明明就是「保健室的老师与沉迷吹泡泡的助手」（同一个作品），
+     * 但日文查询词与中文标题既不相等等，也不互为子串，会被判成 miss。
+     * 这不是标点差异，是<b>跨语言</b>——再怎么归一化也匹配不上。
+     *
+     * <h3>改为「按搜索意图」判定</h3>
+     * 搜索本身就是服务端做的相关性排序，服务端认为第 1 条最相关，
+     * 就说明它大概率就是我们查的条目。所以：
      * <ol>
-     *   <li>完全相等 → 直接采纳；</li>
-     *   <li>包含关系 → <b>必须唯一</b>。多条都包含说明查询词太泛
-     *       （比如只搜系列名会命中整个系列），无法确定是哪一部，一律放弃。</li>
+     *   <li>归一化后<b>完全相等</b> → 直接采纳（最可靠）；</li>
+     *   <li>否则<b>只接受第 1 条</b>，且要求查询词足够具体
+     *       （避免「爱」这种短词乱撞）——服务端排序第一即视为命中；</li>
+     *   <li>命中后立刻停，不再尝试后面的候选词。</li>
      * </ol>
-     * 早期 Bangumi 那边是「取第一个包含的」，结果差点把状态写到同一系列的
-     * 别的作品上——写错作品比不同步严重得多。
+     * 这样做的前提是<b>查询词本身足够精确</b>（原名/罗马字/完整标题），
+     * 而不是「時計仕掛けのレイライン」这种只有系列名的泛词——
+     * 泛词会在别处被过滤掉（见 {@code isSeriesOnlyQuery}）。
      */
     private static Long pickFromCandidates(String nq, JSONArray items, String query) {
+        if (items == null || items.length() == 0) return null;
+
+        // 1) 完全相等优先（含全角/空格归一化后相等）
         for (int i = 0; i < items.length(); i++) {
             JSONObject it = items.optJSONObject(i);
             if (it == null) continue;
@@ -528,6 +550,7 @@ public final class HikarinagiSyncClient {
             }
         }
 
+        // 2) 包含关系：查询词是返回标题的子串（或反之），且唯一
         Long one = null;
         int hits = 0;
         for (int i = 0; i < items.length(); i++) {
@@ -535,9 +558,9 @@ public final class HikarinagiSyncClient {
             if (it == null) continue;
             long id = it.optLong("id", 0L);
             if (id <= 0L) continue;
-            if (nq.length() < 4) break;      // 太短的查询词不做包含匹配，免得误命中一片
             String t = normalizeTitle(it.optString("title", ""));
-            if (!t.isEmpty() && t.contains(nq)) {
+            if (t.isEmpty()) continue;
+            if (nq.length() >= 4 && (t.contains(nq) || nq.contains(t))) {
                 hits++;
                 if (one == null) one = id;
             }
@@ -546,6 +569,21 @@ public final class HikarinagiSyncClient {
             Log.i(TAG, "候选「" + query + "」包含命中(唯一) -> " + one);
             return one;
         }
+
+        // 3) 跨语言兜底：服务端排序第一即视为命中。
+        //    仅在查询词足够具体时才敢这么做，否则会把泛词的第一条误当目标。
+        if (hits == 0 && nq.length() >= 4) {
+            JSONObject first = items.optJSONObject(0);
+            if (first != null) {
+                long id = first.optLong("id", 0L);
+                if (id > 0L) {
+                    Log.i(TAG, "候选「" + query + "」按服务端相关度第1条采纳 -> " + id
+                            + "（返回标题「" + first.optString("title", "") + "」）");
+                    return id;
+                }
+            }
+        }
+
         if (hits > 1) {
             Log.w(TAG, "候选「" + query + "」有 " + hits + " 条都包含，无法确定是哪一部，放弃");
         }
