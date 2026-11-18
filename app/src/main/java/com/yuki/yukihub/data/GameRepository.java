@@ -928,10 +928,60 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
         }
     }
 
+    // ==================== VNDB 状态同步（v24） ====================
+    // 和上面 NextMoe 的做法一致：这两个字段刻意不进 toValues()，
+    // 避免普通编辑（改标题/改状态）顺带覆盖同步状态。
+    // 只存一个窄接口，一次写入「推送成功」的时间 + 签名。
+
+    /** 一次写入 VNDB 推送成功的状态：时间 + 签名（VNDB label id）。 */
+    public void updateVndbSyncState(long gameId, long syncedAt, String sig) {
+        ContentValues v = new ContentValues();
+        v.put("vndb_synced_at", syncedAt);
+        v.put("vndb_synced_sig", sig == null ? "" : sig);
+        helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
+    }
+
+    /**
+     * 读出「game_id → VNDB 的 VN id」映射（来自 metadata_cache 里 source='vndb' 的 source_id）。
+     * <p>
+     * VNDB 的 source_id 天然就是 {@code vNNN} 格式，直接就是 VNDB 的 VN id，
+     * 所以这里不需要任何反查或搜索——这也是 VNDB 同步比 NextMoe 简单的主要原因。
+     * <p>
+     * 只返回 source_id 以 "v" 开头的行：历史上存在过把 Bangumi id 误写进 vndb 源的情况，
+     * 那种脏数据拿去 PATCH 会 404，不如提前过滤掉。
+     */
+    public java.util.Map<Long, String> getVndbSourceIds() {
+        java.util.Map<Long, String> out = new java.util.LinkedHashMap<>();
+        Cursor c = null;
+        try {
+            c = helper.getReadableDatabase().query(
+                    "metadata_cache",
+                    new String[]{"game_id", "source_id"},
+                    "source=?",
+                    new String[]{"vndb"},
+                    null, null, null);
+            while (c.moveToNext()) {
+                long gameId = c.getLong(0);
+                String sid = c.isNull(1) ? "" : c.getString(1);
+                if (sid == null) continue;
+                sid = sid.trim();
+                if (sid.isEmpty()) continue;
+                // 只接受 vNNN 形式
+                if (!sid.startsWith("v") && !sid.startsWith("V")) continue;
+                if (sid.length() < 2) continue;
+                out.put(gameId, "v" + sid.substring(1));
+            }
+        } catch (Throwable t) {
+            Log.w("GameRepository", "getVndbSourceIds failed", t);
+        } finally {
+            if (c != null) c.close();
+        }
+        return out;
+    }
+
     public void insertSamplesIfEmpty() {
         // Production build should not auto-create placeholder games.
     }
-
     public int deleteSampleGames() {
         SQLiteDatabase db = helper.getWritableDatabase();
         int removed = db.delete("games", "root_uri LIKE ?", new String[]{"sample://%"});
@@ -1014,6 +1064,12 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.nextmoeSyncedAt = getLongOrDefault(c, "nextmoe_synced_at", 0L);
         String nmSig = getStringOrNull(c, "nextmoe_synced_sig");
         g.nextmoeSyncedSig = nmSig == null ? "" : nmSig;
+
+        // v24：VNDB 同步状态。同样只读不写，写入走 updateVndbSyncState()，
+        // 避免 toValues() 覆盖路径把同步状态一起写坏。
+        g.vndbSyncedAt = getLongOrDefault(c, "vndb_synced_at", 0L);
+        String vdSig = getStringOrNull(c, "vndb_synced_sig");
+        g.vndbSyncedSig = vdSig == null ? "" : vdSig;
         return g;
     }
 

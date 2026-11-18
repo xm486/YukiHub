@@ -50,6 +50,15 @@ public class Game {
     /** 上次成功推送的内容签名（如 "doing:210"），用于跳过未变动的游戏。 */
     public String nextmoeSyncedSig = "";
 
+    // ==================== VNDB 状态同步（v24） ====================
+    // 同样是**本机状态**，不参与云同步快照。
+    // 刻意不存 vndb 的 VN id：metadata_cache 里 source='vndb' 的 source_id
+    // 本来就是 vNNN 格式，读取时直接取用，多存一份只会造成两份数据不一致。
+    /** 上次成功推送到 VNDB 的时间戳，0 表示从未成功。 */
+    public long vndbSyncedAt = 0;
+    /** 上次成功推送的状态签名（VNDB label id，如 "2"），用于跳过未变动的游戏。 */
+    public String vndbSyncedSig = "";
+
     public Game() {
         engine = EngineType.UNKNOWN;
         createdAt = System.currentTimeMillis();

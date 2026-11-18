@@ -16,8 +16,11 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      *      22 = 音乐厅：music_albums / music_tracks（只存本机 URI 引用，不复制文件、不入备份）
      *      23 = NextMoe 游玩记录同步：games.nextmoe_work_id / nextmoe_synced_at / nextmoe_synced_sig
      *           （三个字段都是「本机同步状态」，不参与云同步快照）
+     *      24 = VNDB 游玩状态同步：games.vndb_synced_at / vndb_synced_sig
+     *           （不需要 vndb_work_id：metadata_cache 里 source='vndb' 的 source_id
+     *            本就是 vNNN 格式，直接就是 VNDB 的 VN id，无需额外映射）
      */
-    public static final int DB_VERSION = 23;
+    public static final int DB_VERSION = 24;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -104,7 +107,9 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 // v23：NextMoe 游玩记录同步的本机状态（不参与云同步快照）
                 "nextmoe_work_id TEXT DEFAULT ''," +
                 "nextmoe_synced_at INTEGER DEFAULT 0," +
-                "nextmoe_synced_sig TEXT DEFAULT ''" +
+                "nextmoe_synced_sig TEXT DEFAULT ''," +
+                "vndb_synced_at INTEGER DEFAULT 0," +
+                "vndb_synced_sig TEXT DEFAULT ''" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -236,9 +241,17 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN gaishi_local_game_id TEXT");
             //    否则全新安装的库缺列，INSERT 会报 "no such column" 而整体失败。
             // 三列都不参与云同步快照：它们描述的是「本机匹配到哪个作品、本机何时推过」，
             // 跨设备无意义，且会让快照在多端之间互相冲突。
-            safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_work_id TEXT DEFAULT ''");
+safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_work_id TEXT DEFAULT ''");
             safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_synced_at INTEGER DEFAULT 0");
             safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_synced_sig TEXT DEFAULT ''");
+        }
+        if (oldVersion < 24) {
+            // v24：VNDB 状态同步的两列。同样两处都要写（onCreate 建表语句见上）。
+            // 只有两个字段：VN id 直接复用 metadata_cache 里 source='vndb' 的 source_id，
+            // 不需要再存一份 vndb_work_id。
+            // 同样不参与云同步快照（纯本机同步状态）。
+            safeAlter(db, "ALTER TABLE games ADD COLUMN vndb_synced_at INTEGER DEFAULT 0");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN vndb_synced_sig TEXT DEFAULT ''");
         }
     }
 

@@ -2455,6 +2455,23 @@ private void showProfileDialog() {
     nextMoeSyncHint.setPadding(0, dp(4), 0, 0);
     root.addView(nextMoeSyncHint);
 
+    // VNDB 游玩状态同步：与上面的 NextMoe 入口并列。
+    // 两者都是「单向推送到第三方」，但机制完全不同（VNDB 用手动 API token，
+    // 且只同步状态、不同步时长），所以各自独立一个按钮，互不影响。
+    Button vndbSyncBtn = krButton("同步到 VNDB");
+    vndbSyncBtn.setTextColor(primaryTextColor());
+    vndbSyncBtn.setOnClickListener(v -> openVndbSync());
+    LinearLayout.LayoutParams vndbLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+    vndbLp.setMargins(0, dp(8), 0, 0);
+    root.addView(vndbSyncBtn, vndbLp);
+    TextView vndbSyncHint = new TextView(this);
+    vndbSyncHint.setText(vndbSyncStatusText());
+    vndbSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+    vndbSyncHint.setTextSize(10);
+    vndbSyncHint.setPadding(0, dp(4), 0, 0);
+    root.addView(vndbSyncHint);
+
     LinearLayout kunRow = new LinearLayout(this);
     kunRow.setOrientation(LinearLayout.HORIZONTAL);
     kunRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -3137,6 +3154,30 @@ private void showAccountSettingsDialog() {
     private void openNextMoeSync() {
         try {
             com.yuki.yukihub.nextmoe.NextMoeSyncDialog.start(this);
+        } catch (Throwable t) {
+            Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ==================== VNDB 游玩状态同步 ====================
+    // 与 NextMoe 并列的独立入口。VNDB 只同步「状态」（想玩/在玩/玩过/搁置/弃坑），
+    // 不同步时长：Kana API 没有写入时长的端点，官方入口只认网页登录 cookie，
+    // 走那条路等于内置自动化脚本，稳定性和合规性都不合适，故刻意不做。
+
+    /** 按钮下方的状态小字。 */
+    private String vndbSyncStatusText() {
+        if (!com.yuki.yukihub.vndb.VndbSyncService.isConnected(this)) {
+            return "填 VNDB API token 后可同步游玩状态（时长 VNDB 不支持 API 写入）";
+        }
+        long last = com.yuki.yukihub.vndb.VndbSyncService.lastSyncAt(this);
+        if (last <= 0) return "上次同步：从未";
+        return "上次同步：" + TimeFormatUtil.date(last);
+    }
+
+    private void openVndbSync() {
+        try {
+            com.yuki.yukihub.vndb.VndbSyncDialog.start(this);
         } catch (Throwable t) {
             Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
                     Toast.LENGTH_LONG).show();
