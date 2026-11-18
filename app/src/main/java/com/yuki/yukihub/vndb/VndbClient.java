@@ -198,6 +198,83 @@ public final class VndbClient {
         return filters;
     }
 
+    // ======================== 读：按标题搜索 ========================
+
+    /**
+     * 按标题搜索 VN，用于「不是用 VNDB 源刮削」的游戏。
+     * <p>
+     * <b>只接受归一化后完全相等的命中</b>，不做模糊匹配。
+     * VNDB 的 search 是模糊的（搜 "Senren" 会带回一堆 Senren 系），
+     * 取第一条会把状态写到别的作品上，比不同步更糟。
+     * <p>
+     * 比对范围覆盖 title / alttitle / titles[] 里的 title 与 latin，
+     * 这样中文名能命中 VNDB 的 zh-Hans 条目（实测：「千恋万花」→ v19073）。
+     *
+     * @param title 本地游戏标题
+     * @return VN id（vNNN）；无精确命中返回 null
+     */
+    public static String searchVnByExactTitle(String token, String title) throws Exception {
+        String nq = normalizeTitle(title);
+        if (nq.isEmpty()) return null;
+
+        JSONObject body = new JSONObject();
+        JSONArray filters = new JSONArray();
+        filters.put("search");
+        filters.put("=");
+        filters.put(title == null ? "" : title.trim());
+        body.put("filters", filters);
+        body.put("fields", "id,title,alttitle,titles{lang,title,latin}");
+        body.put("results", 10);
+
+        JSONObject resp = request("POST", "/vn", body, token);
+        JSONArray results = resp.optJSONArray("results");
+        if (results == null) return null;
+
+        for (int i = 0; i < results.length(); i++) {
+            JSONObject it = results.optJSONObject(i);
+            if (it == null) continue;
+            if (!titleMatches(nq, it)) continue;
+            String id = it.optString("id", "");
+            if (!id.isEmpty()) return id;
+        }
+        return null;
+    }
+
+    /** 判断搜索结果的所有名称字段里，是否有与查询词归一化后完全相等的一个。 */
+    private static boolean titleMatches(String normalizedQuery, JSONObject vn) {
+        if (normalizedQuery.equals(normalizeTitle(vn.optString("title", "")))) return true;
+        if (normalizedQuery.equals(normalizeTitle(vn.optString("alttitle", "")))) return true;
+        JSONArray titles = vn.optJSONArray("titles");
+        if (titles != null) {
+            for (int i = 0; i < titles.length(); i++) {
+                JSONObject t = titles.optJSONObject(i);
+                if (t == null) continue;
+                if (normalizedQuery.equals(normalizeTitle(t.optString("title", "")))) return true;
+                if (normalizedQuery.equals(normalizeTitle(t.optString("latin", "")))) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 标题归一化：只抹排版差异，不做语义模糊。
+     * 去空白、去标点与符号、全角转半角、统一小写。
+     * 这样「千恋万花」与「千恋＊万花」能对上，但「千恋万花」绝不会等于「泪恋花」。
+     */
+    static String normalizeTitle(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= '\uFF01' && c <= '\uFF5E') c = (char) (c - 0xFEE0);  // 全角→半角
+            if (c == '\u3000') c = ' ';
+            if (Character.isWhitespace(c)) continue;
+            if (Character.isLetterOrDigit(c)) sb.append(Character.toLowerCase(c));
+            // 其余（标点、＊、－、括号等）一律丢弃
+        }
+        return sb.toString();
+    }
+
     // ======================== 写：单个 VN 的状态 ========================
 
     /**

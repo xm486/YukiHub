@@ -150,7 +150,7 @@ public final class VndbSyncDialog {
 
     private static void runPrepare(Activity activity, String token) {
         ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在读取 VNDB 列表…");
+        pd.setMessage("正在匹配作品…");
         pd.setCancelable(false);
         pd.show();
 
@@ -247,11 +247,12 @@ public final class VndbSyncDialog {
         if (!preview.unmatched.isEmpty()) {
             root.addView(sectionHeader(activity, "无法匹配（" + preview.unmatched.size() + "）"));
             for (Game g : preview.unmatched) {
-                root.addView(row(activity, "⚠ " + safeTitle(g), "没有 VNDB 编号"));
+                root.addView(row(activity, "⚠ " + safeTitle(g), "VNDB 上没找到"));
             }
             TextView warn = bodyText(activity,
-                    "没有 VNDB 编号说明这款游戏不是用 VNDB 源刮削的。\n"
-                            + "可用 VNDB 源重新刮削后再同步。本地数据不受影响。");
+                    "已尝试用标题在 VNDB 搜索，仍未找到完全匹配的作品。\n"
+                            + "可能是 VNDB 未收录，或标题与 VNDB 的官方译名差异较大。\n"
+                            + "本地数据不受影响。");
             warn.setTextColor(0xFFFFB74D);
             warn.setPadding(0, dp(activity, 8), 0, 0);
             root.addView(warn);

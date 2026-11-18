@@ -19,8 +19,12 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      *      24 = VNDB 游玩状态同步：games.vndb_synced_at / vndb_synced_sig
      *           （不需要 vndb_work_id：metadata_cache 里 source='vndb' 的 source_id
      *            本就是 vNNN 格式，直接就是 VNDB 的 VN id，无需额外映射）
+     *      25 = VNDB 匹配结果缓存：games.vndb_vn_id
+     *           大部分游戏不是用 VNDB 源刮的（实测 39 个里只有 32 个），
+     *           所以加了「标题搜索」作为第二级匹配。搜索要发网络请求、费配额，
+     *           因此把匹配到的 vNNN 缓存下来，之后每次同步零搜索。
      */
-    public static final int DB_VERSION = 24;
+    public static final int DB_VERSION = 25;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -109,7 +113,8 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 "nextmoe_synced_at INTEGER DEFAULT 0," +
                 "nextmoe_synced_sig TEXT DEFAULT ''," +
                 "vndb_synced_at INTEGER DEFAULT 0," +
-                "vndb_synced_sig TEXT DEFAULT ''" +
+                "vndb_synced_sig TEXT DEFAULT ''," +
+                "vndb_vn_id TEXT DEFAULT ''" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -252,6 +257,13 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_work_id TEXT DEFAULT ''");
             // 同样不参与云同步快照（纯本机同步状态）。
             safeAlter(db, "ALTER TABLE games ADD COLUMN vndb_synced_at INTEGER DEFAULT 0");
             safeAlter(db, "ALTER TABLE games ADD COLUMN vndb_synced_sig TEXT DEFAULT ''");
+        }
+        if (oldVersion < 25) {
+            // v25：VNDB 匹配结果缓存。大部分游戏不是用 VNDB 源刮的，
+            // 「标题搜索」是第二级匹配，要发网络请求且费配额，所以把结果缓存下来。
+            // 同样 onUpgrade 与 onCreate 两处都要写。
+            // 同样不参与云同步快照（纯本机匹配缓存）。
+            safeAlter(db, "ALTER TABLE games ADD COLUMN vndb_vn_id TEXT DEFAULT ''");
         }
     }
 

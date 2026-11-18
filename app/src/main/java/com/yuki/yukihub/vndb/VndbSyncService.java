@@ -90,10 +90,13 @@ public final class VndbSyncService {
         public final Game game;
         /** VNDB 的 VN id，形如 v123。 */
         public final String vnId;
+        /** 匹配来源：cache / metadata / title，仅用于日志与排错展示。 */
+        public final String source;
 
-        public Matched(Game game, String vnId) {
+        public Matched(Game game, String vnId, String source) {
             this.game = game;
             this.vnId = vnId;
+            this.source = source;
         }
     }
 
@@ -118,6 +121,8 @@ public final class VndbSyncService {
     public static class Preview {
         public final List<Matched> items = new ArrayList<>();
         public final List<Game> unmatched = new ArrayList<>();
+        /** 本次标题搜索新解析出的映射，预览确认后回写缓存（下次零搜索）。 */
+        public final Map<Long, String> newlyResolved = new LinkedHashMap<>();
         public final List<ChangeItem> changed = new ArrayList<>();
         public final List<Matched> skipped = new ArrayList<>();
 
@@ -173,12 +178,17 @@ public final class VndbSyncService {
                             + "请到 vndb.org/u/tokens 重新生成，并勾选「listwrite」。");
         }
 
-        // 2) 找出本地有 VNDB 锚点的游戏
-        Map<Long, String> vnIdByGameId = repo.getVndbSourceIds();
+        // 2) 三级匹配
+        //   第1级 cache：games.vndb_vn_id（上次标题搜索命中的结果，零请求）
+        //   第2级 metadata：metadata_cache 里 source='vndb' 的 source_id（vNNN，零请求）
+        //   第3级 title：标题搜索（要发请求、费配额，只有前两级都没命中才走）
+        // 实测（39 个游戏的真实备份）：第2级只能覆盖 32 个，
+        // 剩下 7 个里有 4 个能被标题搜索救回来 —— 所以第3级是必要的，不是锦上添花。
+        Map<Long, String> metadataVnIds = repo.getVndbSourceIds();
 
         List<Game> all = repo.getAll();
         List<Matched> matched = new ArrayList<>();
-        List<Game> unmatched = new ArrayList<>();
+        List<Game> needTitleSearch = new ArrayList<>();
 
         for (Game g : all) {
             if (g == null) continue;
@@ -186,19 +196,63 @@ public final class VndbSyncService {
             // 状态未知（空值/脏值）的跳过：既不上报，也不进「无法匹配」，避免噪音
             if (label < 0) continue;
 
-            String vnId = vnIdByGameId.get(g.id);
-            if (vnId == null || vnId.trim().isEmpty()) {
-                unmatched.add(g);
+            // 第1级：缓存的标题搜索成果
+            String cached = g.vndbVnId == null ? "" : g.vndbVnId.trim();
+            if (!cached.isEmpty() && looksLikeVnId(cached)) {
+                matched.add(new Matched(g, cached, "cache"));
                 continue;
             }
-            matched.add(new Matched(g, vnId.trim()));
+            // 第2级：metadata_cache 的 vndb 锚点
+            String fromMeta = metadataVnIds.get(g.id);
+            if (fromMeta != null && !fromMeta.trim().isEmpty()) {
+                matched.add(new Matched(g, fromMeta.trim(), "metadata"));
+                continue;
+            }
+            // 前两级都没命中 → 待标题搜索
+            needTitleSearch.add(g);
         }
-        if (progress != null) progress.onResolveProgress(all.size(), all.size());
+
+        // 第3级：标题搜索（逐个，串行；已有 250ms 节流）
+        List<Game> unmatched = new ArrayList<>();
+        Map<Long, String> newlyResolved = new LinkedHashMap<>();
+        if (!needTitleSearch.isEmpty()) {
+            int done = matched.size();
+            int total = all.size();
+            for (Game g : needTitleSearch) {
+                String title = g.title == null ? "" : g.title.trim();
+                if (title.isEmpty()) {
+                    unmatched.add(g);
+                } else {
+                    try {
+                        String vnId = VndbClient.searchVnByExactTitle(token, title);
+                        if (vnId == null || vnId.isEmpty()) {
+                            unmatched.add(g);
+                        } else {
+                            matched.add(new Matched(g, vnId, "title"));
+                            newlyResolved.put(g.id, vnId);
+                        }
+                    } catch (VndbClient.NotAuthorizedException | VndbClient.RateLimitedException e) {
+                        // 整体性错误：token 失效或限流，继续搜只会全失败
+                        unmatched.add(g);
+                        throw e;
+                    } catch (Throwable t) {
+                        // 单个搜索失败不影响其它条目
+                        Log.w(TAG, "title search failed: " + title, t);
+                        unmatched.add(g);
+                    }
+                }
+                done++;
+                if (progress != null) progress.onResolveProgress(done, total);
+            }
+        } else {
+            if (progress != null) progress.onResolveProgress(all.size(), all.size());
+        }
 
         Preview p = new Preview();
         p.username = auth.username;
         p.items.addAll(matched);
         p.unmatched.addAll(unmatched);
+        p.newlyResolved.putAll(newlyResolved);
 
         // 3) 读回远端现状，用于「跳过无变化」与展示「A → B」
         List<String> vnIds = new ArrayList<>();
@@ -245,6 +299,19 @@ public final class VndbSyncService {
         Log.i(TAG, "prepare: matched=" + matched.size() + " unmatched=" + unmatched.size()
                 + " changes=" + p.changesCount + " skipped=" + p.skippedCount);
         return p;
+    }
+
+    /**
+     * 粗略校验 {vNNN} 形式。缓存里的值来自我们自己写入，但要防脏数据
+     * （例如手动改库、或早期版本写错）导致 PATCH 一个非法 id。
+     */
+    private static boolean looksLikeVnId(String s) {
+        if (s == null || s.length() < 2) return false;
+        if (s.charAt(0) != 'v' && s.charAt(0) != 'V') return false;
+        for (int i = 1; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
     }
 
     /** 从远端 label 集合里挑出「状态类」的那一个（互斥，最多一个）。 */
@@ -310,6 +377,13 @@ public final class VndbSyncService {
             } catch (Throwable t) {
                 Log.w(TAG, "write last sync time failed", t);
             }
+        }
+
+        // 回写「标题搜索」新解析出的映射：即使推送失败，匹配结果本身是有价值的
+        // （下次同步就不必再搜，省请求也省配额）。
+        if (preview.newlyResolved != null && !preview.newlyResolved.isEmpty()) {
+            repo.updateVndbVnIds(preview.newlyResolved);
+            Log.i(TAG, "cached " + preview.newlyResolved.size() + " title-resolved vn ids");
         }
 
         Log.i(TAG, "execute done: ok=" + result.ok + " fail=" + result.fail

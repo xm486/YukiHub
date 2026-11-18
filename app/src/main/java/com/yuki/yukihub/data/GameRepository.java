@@ -941,6 +941,31 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
         helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
     }
 
+    /** 缓存「标题搜索」匹配到的 VN id，之后同步就不必再搜。 */
+    public void updateVndbVnId(long gameId, String vnId) {
+        ContentValues v = new ContentValues();
+        v.put("vndb_vn_id", vnId == null ? "" : vnId);
+        helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
+    }
+
+    /** 批量缓存匹配结果（标题搜索可能一次命中十几个，逐条 update 会开多次事务）。 */
+    public void updateVndbVnIds(java.util.Map<Long, String> vnIdByGameId) {
+        if (vnIdByGameId == null || vnIdByGameId.isEmpty()) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (java.util.Map.Entry<Long, String> e : vnIdByGameId.entrySet()) {
+                if (e.getKey() == null) continue;
+                ContentValues v = new ContentValues();
+                v.put("vndb_vn_id", e.getValue() == null ? "" : e.getValue());
+                db.update("games", v, "id=?", new String[]{String.valueOf(e.getKey())});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     /**
      * 读出「game_id → VNDB 的 VN id」映射（来自 metadata_cache 里 source='vndb' 的 source_id）。
      * <p>
@@ -1070,6 +1095,8 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.vndbSyncedAt = getLongOrDefault(c, "vndb_synced_at", 0L);
         String vdSig = getStringOrNull(c, "vndb_synced_sig");
         g.vndbSyncedSig = vdSig == null ? "" : vdSig;
+        String vdVn = getStringOrNull(c, "vndb_vn_id");
+        g.vndbVnId = vdVn == null ? "" : vdVn;
         return g;
     }
 

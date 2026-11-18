@@ -59,6 +59,14 @@ public class Game {
     /** 上次成功推送的状态签名（VNDB label id，如 "2"），用于跳过未变动的游戏。 */
     public String vndbSyncedSig = "";
 
+    /**
+     * 匹配到的 VNDB VN id（如 "v123"），空表示尚未匹配。
+     * <p>
+     * 三级匹配的第 1 级直接取 metadata_cache 的 vNNN；第 2 级靠标题搜索拿到 id 后
+     * 写回这里，之后每次同步就不必再搜（搜索要发请求、费配额）。
+     */
+    public String vndbVnId = "";
+
     public Game() {
         engine = EngineType.UNKNOWN;
         createdAt = System.currentTimeMillis();
