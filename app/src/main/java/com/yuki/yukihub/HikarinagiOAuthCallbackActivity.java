@@ -68,8 +68,7 @@ public class HikarinagiOAuthCallbackActivity extends AppCompatActivity {
         status.setBackgroundColor(0xFF0B1020);
         setContentView(status);
 
-        Uri data = getIntent() == null ? null : getIntent().getData();
-        handleCallback(data);
+        handleCallback(getIntent() == null ? null : getIntent().getData());
     }
 
     private void handleCallback(Uri uri) {
