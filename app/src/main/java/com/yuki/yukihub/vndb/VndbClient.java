@@ -173,28 +173,35 @@ public final class VndbClient {
         return out;
     }
 
-    /** 拼 [["or", ["id","=","v1"], ["id","=","v2"], ...]] 形状的过滤器；单条时省略 or。 */
+    /**
+     * 拼 VNDB 的 filters 表达式。
+     * <p>
+     * <b>形状必须是一层数组，不能多包一层。</b>
+     * 正确：{@code ["or", ["id","=","v1"], ["id","=","v2"]]}
+     * 正确：{@code ["id","=","v1"]}
+     * 错误：{@code [["or", ["id","=","v1"]]]}  ← VNDB 回 400 "Invalid query"
+     * <p>
+     * 之前多包了一层，导致每次 fetchStates 都 400，
+     * 而 400 被当成「没有结果」，于是所有条目被误判成「远端不存在」，
+     * 表现为「第二次同步仍然全量显示」。这是真实缺陷，已修正。
+     */
     private static JSONArray buildIdOrFilter(List<String> vnIds) throws Exception {
         JSONArray filters = new JSONArray();
         if (vnIds.size() == 1) {
-            // 只有一条：直接给单条件，不必套 or
-            JSONArray one = new JSONArray();
-            one.put("id");
-            one.put("=");
-            one.put(vnIds.get(0));
-            filters.put(one);
+            // 只有一条：直接给单条件
+            filters.put("id");
+            filters.put("=");
+            filters.put(vnIds.get(0));
             return filters;
         }
-        JSONArray orWrap = new JSONArray();
-        orWrap.put("or");
+        filters.put("or");
         for (String id : vnIds) {
             JSONArray one = new JSONArray();
             one.put("id");
             one.put("=");
             one.put(id);
-            orWrap.put(one);
+            filters.put(one);
         }
-        filters.put(orWrap);
         return filters;
     }
 

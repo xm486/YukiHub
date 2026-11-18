@@ -278,6 +278,12 @@ public final class VndbSyncDialog {
         if (p.username != null && !p.username.isEmpty()) {
             sb.append("VNDB 账号：").append(p.username).append('\n');
         }
+        // 读远端失败必须显式说明，否则用户看到一堆“加入”会以为是
+        // 缓存没生效、每次都在全量同步。这是之前真实发生过的误判来源。
+        if (p.remoteReadFailed) {
+            sb.append("⚠ 读取 VNDB 现有列表失败，无法判断哪些已是最新\n");
+            sb.append("下面列出的是「按本地状态需要写一次」的游戏（写入是幂等的，重复写不会出错）\n\n");
+        }
         if (p.changesCount == 0 && p.skippedCount == 0) {
             sb.append("没有可同步的游戏");
             return sb.toString();
@@ -286,7 +292,11 @@ public final class VndbSyncDialog {
             sb.append("全部 ").append(p.skippedCount).append(" 个都已是最新，无需同步");
             return sb.toString();
         }
-        sb.append("本次将更新 ").append(p.changesCount).append(" 个游戏");
+        if (p.remoteReadFailed) {
+            sb.append("需写入 ").append(p.changesCount).append(" 个游戏");
+        } else {
+            sb.append("本次将更新 ").append(p.changesCount).append(" 个游戏");
+        }
         if (p.skippedCount > 0) {
             sb.append("\n另有 ").append(p.skippedCount).append(" 个已是最新，会跳过");
         }
