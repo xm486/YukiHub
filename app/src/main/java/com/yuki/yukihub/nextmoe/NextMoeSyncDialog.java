@@ -19,7 +19,6 @@ import android.widget.Toast;
 import com.yuki.yukihub.model.Game;
 import com.yuki.yukihub.util.AppExecutors;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
