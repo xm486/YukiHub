@@ -231,9 +231,11 @@ public final class NextMoeClient {
 
             if (code == 401 && authed && allowRefresh) {
                 // 令牌过期：强制刷新一次后重放。
+                // force=true —— 服务端已经明确回了 401，不必再走「进锁后复核本地有效期」那条捷径，
+                // 否则本地时钟偏慢时会误判「还没过期」而死循环。
                 // 刷新失败 = 登录已失效（凭据会被清掉），重放将自动退化为匿名——
                 // 这是有意的优雅降级（还能继续刮削），但必须留痕，避免用户「以为登录着」。
-                String fresh = NextMoeAuth.refreshAccessToken();
+                String fresh = NextMoeAuth.refreshAccessToken(true);
                 if (fresh == null || fresh.isEmpty()) {
                     Log.w(TAG, "令牌刷新失败，NextMoe 登录已失效；本次请求按匿名配额重放（设置页将显示未登录）");
                 }

@@ -111,30 +111,102 @@ public final class NextMoeAuth {
         }
     }
 
+    // ======================== 刷新锁 ========================
+
+    /**
+     * 刷新串行化锁。
+     * <p>
+     * refresh token 是<b>一次性轮换</b>的：每次刷新成功，旧的立即作废，只下发新的。
+     * 若两个线程同时拿同一个 refresh token 去刷，后到的那个必然失败，
+     * 还会把先到的线程刚存好的新 token 一起清掉 —— 直接表现为「登录莫名其妙掉了」。
+     * 同步功能会在 IO 线程池并发发请求，撞上这个的概率很高，所以必须串行化。
+     */
+    private static final Object REFRESH_LOCK = new Object();
+
+    /** 最近一次刷新成功的时刻。用于「等锁期间已被别人刷过」的快速放行。 */
+    private static volatile long lastRefreshSuccessAt = 0L;
+
     /**
      * 刷新令牌。refresh 每次轮换——save 覆盖写即满足契约。
      * @return 新 access token；失败返回 null
      */
     public static String refreshAccessToken() {
-        String refresh = NextMoeAuthStore.getRefreshToken();
-        if (refresh.isEmpty()) return null;
-        try {
-            String body = "grant_type=refresh_token"
-                    + "&refresh_token=" + url(refresh)
-                    + "&client_id=" + url(CLIENT_ID);
-            JSONObject resp = tokenPost(body);
-            long expiresIn = resp.optLong("expires_in", 900L);
-            saveTokens(resp, expiresIn);
-            return NextMoeAuthStore.getAccessToken();
-        } catch (Throwable t) {
-            Log.w(TAG, "refresh token failed", t);
-            // 刷新失败 = 会话过期（refresh token 不透明、无法解析，过期唯一信号就是刷新失败）。
-            // 例外：服务端瞬态故障（5xx/server_error）会保留凭据，等下次再试。
-            if (!(t instanceof OAuthException) || !((OAuthException) t).transientError) {
-                NextMoeAuthStore.clear();
+        return refreshAccessToken(false);
+    }
+
+    /**
+     * 刷新令牌（串行化 + 双检）。
+     *
+     * @param force 调用方刚从服务端拿到 401，确信当前 access token 已失效。
+     *              为 false 时表示只是本地判断快过期了，进锁后会先复核一次。
+     * @return 新 access token；失败返回 null（<b>凭据仅在确认失效时才清除</b>）
+     */
+    static String refreshAccessToken(boolean force) {
+        synchronized (REFRESH_LOCK) {
+            long now = System.currentTimeMillis();
+
+            // ---- 双检 1：刚被别的线程刷过 ----
+            // 5 秒窗口内已经有人刷成功，直接用它的结果。
+            // 这样并发进来的线程不会拿同一个（已作废的）refresh token 去撞。
+            if (now - lastRefreshSuccessAt < 5000L) {
+                String cur = NextMoeAuthStore.getAccessToken();
+                if (!cur.isEmpty() && NextMoeAuthStore.getAccessExpiresAt() - 60_000L > now) return cur;
             }
-            return null;
+
+            // ---- 双检 2：非强制场景，进锁后复核是否还有效 ----
+            // 等锁期间可能已经过期→刷新完成，这里再判一次可省掉一次多余刷新。
+            if (!force) {
+                long exp = NextMoeAuthStore.getAccessExpiresAt();
+                if (exp - 60_000L > now) {
+                    String cur = NextMoeAuthStore.getAccessToken();
+                    if (!cur.isEmpty()) return cur;
+                }
+            }
+
+            String refresh = NextMoeAuthStore.getRefreshToken();
+            if (refresh.isEmpty()) return null;
+            try {
+                String body = "grant_type=refresh_token"
+                        + "&refresh_token=" + url(refresh)
+                        + "&client_id=" + url(CLIENT_ID);
+                JSONObject resp = tokenPost(body);
+                long expiresIn = resp.optLong("expires_in", 900L);
+                saveTokens(resp, expiresIn);
+                lastRefreshSuccessAt = System.currentTimeMillis();
+                return NextMoeAuthStore.getAccessToken();
+            } catch (Throwable t) {
+                Log.w(TAG, "refresh token failed", t);
+                // 只有服务端明确说凭据失效才清除。
+                // 网络超时 / 断网 / DNS 失败 / 5xx / 429 都是「暂时拿不到」，
+                // 一律保留凭据等下次重试 —— 否则一次网络抖动就把用户登出了。
+                if (isCredentialInvalid(t)) {
+                    Log.w(TAG, "refresh token 已被服务端判定失效，清除本地凭据");
+                    NextMoeAuthStore.clear();
+                } else {
+                    Log.w(TAG, "刷新失败但保留凭据（网络或服务端暂时不可用，非授权失效）");
+                }
+                return null;
+            }
         }
+    }
+
+    /**
+     * 判断异常是否代表「凭据确实失效」（可以安全清除）。
+     * <p>
+     * 白名单式判定：只有 RFC 6749 §5.2 里表示 refresh token 不可用的错误码才算。
+     * 其余一切情况（含 IOException、JSON 解析失败、未知错误码）都按「暂时不可用」处理，
+     * 保守地保留凭据 —— 多保留一次的代价只是下轮再试，
+     * 而误清除的代价是用户必须重新授权。
+     */
+    private static boolean isCredentialInvalid(Throwable t) {
+        if (!(t instanceof OAuthException)) return false;
+        OAuthException e = (OAuthException) t;
+        if (e.transientError) return false;
+        String code = e.errorCode == null ? "" : e.errorCode;
+        return "invalid_grant".equals(code)
+                || "invalid_token".equals(code)
+                || "expired_token".equals(code)
+                || "unauthorized_client".equals(code);
     }
 
     /** 取可用 access token：未过期直接用，过期了走刷新。 */
@@ -161,12 +233,20 @@ public final class NextMoeAuth {
     /**
      * OAuth 错误。携带人类可读消息（新旧两种线格式统一），
      * transientError=true 表示服务端瞬态故障（如 5xx / server_error），不应清掉本地凭据。
+     * <p>
+     * errorCode 保留 RFC 6749 §5.2 的原始错误码（invalid_grant 等），
+     * 用于区分「凭据真的失效」与「暂时不可用」——这是能否安全清除凭据的唯一依据。
      */
     static final class OAuthException extends RuntimeException {
         final boolean transientError;
+        final String errorCode;
         OAuthException(String message, boolean transientError) {
+            this(message, transientError, null);
+        }
+        OAuthException(String message, boolean transientError, String errorCode) {
             super(message);
             this.transientError = transientError;
+            this.errorCode = errorCode == null ? "" : errorCode;
         }
     }
 
@@ -199,7 +279,7 @@ public final class NextMoeAuth {
             String err = o.optString("error", "");
             if (!err.isEmpty()) {
                 return new OAuthException(o.optString("error_description", err) + " (" + err + ")",
-                        "server_error".equals(err));
+                        "server_error".equals(err), err);
             }
         } catch (Throwable ignored) { }
         return new OAuthException("HTTP " + http + (body == null || body.isEmpty() ? "" : ": " + body), false);
@@ -215,7 +295,7 @@ public final class NextMoeAuth {
         if (o.has("error")) {
             String err = o.optString("error", "");
             throw new OAuthException(o.optString("error_description", err)
-                    + (err.isEmpty() ? "" : " (" + err + ")"), "server_error".equals(err));
+                    + (err.isEmpty() ? "" : " (" + err + ")"), "server_error".equals(err), err);
         }
         if (http >= 400) throw new OAuthException("HTTP " + http, false);
         return o;
