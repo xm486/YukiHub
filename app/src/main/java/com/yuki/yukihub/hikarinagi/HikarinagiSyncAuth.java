@@ -1,33 +1,37 @@
 package com.yuki.yukihub.hikarinagi;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.util.Log;
-import android.widget.Toast;
 
 /**
- * Hikarinagi 同步专用的授权发起器（授权码 + PKCE S256，public client）。
+ * Hikarinagi 同步专用的授权编排（授权码 + PKCE S256，public client，环回回调）。
+ * <p>
+ * 与 {@code HikarinagiOAuthCallbackActivity}（快捷登录用）<b>没有任何关系</b>：
+ * 回调走 {@code http://127.0.0.1:14791/callback}，由本类借助
+ * {@link HikarinagiSyncClient#openLoopback()} 自己开的 {@code ServerSocket} 接收，
+ * 不经过任何 Activity，也不读写 {@code yukihub_prefs} 里的登录态。
+ * <b>这就是「独立登录」的实质。</b>
  *
- * <h3>为什么复用 {@code yukihub://hikarinagi/callback}</h3>
- * Hikarinagi 控制台里一个 client 只能登记一个回调地址，而「Hikarinagi 快捷登录」
- * 已经占用了这个地址。好在 OAuth 的 {@code state} 参数本就是用来区分
- * 「这是哪一次授权请求」的，所以：
- * <ul>
- *   <li>本流程发起时把 state / verifier / nonce 写进<b>独立的 prefs</b>
- *       （{@code hikarinagi_sync}，而快捷登录用 {@code yukihub_prefs}）；</li>
- *   <li>回调 Activity 到达时，先问同步流程「这个 state 是你的吗」；</li>
- *   <li>是 → 同步流程换令牌并保存，不碰 YukiHub 登录态；</li>
- *   <li>否 → 原样交还给快捷登录逻辑，行为与改动前完全一致。</li>
- * </ul>
- * 两边 state 都是 32 字节随机串，撞车概率可以忽略；即使真的撞了，
- * 也是「同步流程认领了快捷登录的回调」，此时同步流程会用错误的 verifier
- * 换码失败并报错，<b>不会</b>写入任何错误凭据，也不会破坏登录态。
+ * <h3>时序</h3>
+ * <pre>
+ *   1. openLoopback()  在固定端口开始监听（必须先绑，否则浏览器回来时没人接）
+ *   2. 拼授权 URL（PKCE + state），用系统浏览器打开
+ *   3. 同一 socket 上阻塞收回调（5 分钟超时）
+ *   4. 校验 state → 换令牌 → 落独立 prefs（hikarinagi_sync）
+ * </pre>
+ * PKCE verifier 只在内存中流转，从不落盘。
  *
- * <h3>必须用系统浏览器</h3>
- * RFC 8252 §8.12 禁止用内嵌 WebView 走 OAuth（会拿到应用自己控制不了的会话），
- * 所以这里用 {@link Intent#ACTION_VIEW} 交给系统浏览器。
+ * <h3>为什么固定端口</h3>
+ * NextMoe 靠 RFC 8252 §7.3 的「端口无关匹配」才能用随机端口；
+ * Hikarinagi 文档明确要求 redirect_uri「与控制台登记的某一条完全一致，
+ * 包括协议、端口、路径与结尾斜杠，不做前缀匹配」，
+ * 因此端口必须是控制台里登记的那个固定值。
+ *
+ * <h3>同一地址 PC 版也在用，不冲突</h3>
+ * {@code 127.0.0.1} 是各设备自己的回环：PC 与手机的 127.0.0.1 属于不同的
+ * 网络栈，物理上互不相通，所以两端都用 14791 也不会互相干扰。
  */
 public final class HikarinagiSyncAuth {
 
@@ -36,43 +40,69 @@ public final class HikarinagiSyncAuth {
     private HikarinagiSyncAuth() { }
 
     /**
-     * 发起授权。已在主线程。
-     * <p>
-     * 写入 pending 状态后打开系统浏览器；结果由
-     * {@code HikarinagiOAuthCallbackActivity} 收，再分流回本流程。
+     * 执行一次完整授权（<b>阻塞</b>，必须在后台线程调用）。
+     *
+     * @param ctx 用于落令牌（内部会取 applicationContext）
+     * @return 失败原因；null 表示成功（令牌已存入 {@link HikarinagiAuthStore}）
      */
-    public static void start(Activity activity) {
-        if (activity == null) return;
+    public static String connectAndWait(Context ctx) {
+        HikarinagiSyncClient.LoopbackHandle handle = null;
         try {
             String state = HikarinagiSyncClient.randomUrlSafe(32);
             String verifier = HikarinagiSyncClient.randomUrlSafe(64);
             String nonce = HikarinagiSyncClient.randomUrlSafe(16);
 
-            HikarinagiAuthStore.savePending(activity, state, verifier, nonce);
+            // 1) 先绑监听，再开浏览器：顺序反了浏览器回调回来会没人接
+            handle = HikarinagiSyncClient.openLoopback();
 
+            // 2) 拼授权 URL 并用系统浏览器打开
+            //    RFC 8252 §8.12：禁止内嵌 WebView 走 OAuth
             String url = HikarinagiSyncClient.buildAuthorizeUrl(verifier, state, nonce);
-            Log.i(TAG, "启动同步授权，scope=" + HikarinagiSyncClient.SCOPES);
+            Log.i(TAG, "启动同步授权，redirect=" + HikarinagiSyncClient.REDIRECT_URI);
 
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             i.addCategory(Intent.CATEGORY_BROWSABLE);
-            activity.startActivity(i);
-        } catch (Throwable t) {
-            Log.w(TAG, "启动同步授权失败", t);
-            Toast.makeText(activity, "无法打开 Hikarinagi 授权页："
-                    + (t.getMessage() == null ? "请检查浏览器" : t.getMessage()),
-                    Toast.LENGTH_LONG).show();
-        }
-    }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.getApplicationContext().startActivity(i);
 
-    /**
-     * 同步流程是否正在等回调（纯本地判断）。
-     * <p>
-     * 用于回调 Activity 首次绑定时决定是否展示「正在完成同步授权」的提示。
-     */
-    public static boolean hasPending(Context c) {
-        return c.getSharedPreferences(HikarinagiAuthStore.PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(HikarinagiAuthStore.KEY_PENDING_STATE, "") != null
-                && !c.getSharedPreferences(HikarinagiAuthStore.PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(HikarinagiAuthStore.KEY_PENDING_STATE, "").trim().isEmpty();
+            // 3) 阻塞收回调
+            HikarinagiSyncClient.LoopbackResult result = handle.await();
+            handle.close();
+            handle = null;
+
+            if ("timeout".equals(result.error)) return "授权超时（5 分钟未完成）";
+            if ("io".equals(result.error)) return "本地回调监听失败";
+            if (!result.error.isEmpty()) return "授权被取消或失败：" + result.error;
+
+            // 4) 校验 state，防 CSRF / 串号
+            if (!state.equals(result.state)) return "状态校验失败，请重试";
+            if (result.code.trim().isEmpty()) return "回调缺少授权码";
+
+            // 5) 换令牌（redirect_uri 必须与授权请求逐字节一致）
+            HikarinagiSyncClient.Tokens tokens = HikarinagiSyncClient
+                    .exchangeCode(result.code.trim(), verifier, "");
+            if (tokens == null || tokens.accessToken.trim().isEmpty()) {
+                return "服务端未返回访问令牌";
+            }
+            HikarinagiAuthStore.saveTokens(ctx, tokens);
+
+            // 6) 顺手取账号名（纯显示用，失败不影响授权结果）
+            try {
+                String name = HikarinagiSyncClient.authInfo(tokens.accessToken).displayName();
+                HikarinagiAuthStore.setAccountLabel(ctx, name);
+            } catch (Throwable ignored) { }
+
+            Log.i(TAG, "同步授权成功");
+            return null;
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "loopback bind failed", e);
+            return "无法监听本地端口 " + HikarinagiSyncClient.LOOPBACK_PORT
+                    + "（可能上次授权未退出，请重试）";
+        } catch (Throwable t) {
+            Log.w(TAG, "connect flow failed", t);
+            return t.getMessage() == null ? "授权流程异常" : t.getMessage();
+        } finally {
+            if (handle != null) handle.close();
+        }
     }
 }

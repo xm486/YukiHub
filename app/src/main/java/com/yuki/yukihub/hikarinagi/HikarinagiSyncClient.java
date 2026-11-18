@@ -18,6 +18,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Hikarinagi 游玩状态同步的 API 客户端。
@@ -73,12 +74,33 @@ public final class HikarinagiSyncClient {
     public static final String TOKEN_URL = "https://id.hikarinagi.org/oidc/token";
     /**
      * Android 客户端的 client_id（公共客户端，无 client_secret，靠 PKCE 保证安全）。
-     * 与「Hikarinagi 快捷登录」用的是同一个 client —— 控制台里无法为同一 client
-     * 登记多个回调地址，复用才能免去再建应用的麻烦。
+     * 与「Hikarinagi 快捷登录」用的是同一个 client —— 只是复用这个应用身份，
+     * 授权通道本身是独立的（环回端口，不经过快捷登录的回调 Activity）。
+     * 控制台里该 client 已登记两条回调：
+     * <ul>
+     *   <li>{@code yukihub://hikarinagi/callback} —— 快捷登录用；</li>
+     *   <li>{@code http://127.0.0.1:14791/callback} —— 本同步功能用（环回）。</li>
+     * </ul>
      */
     public static final String CLIENT_ID = "hkn_qtmXMJfBoxcNLA-a";
-    /** 回调地址。必须与控制台登记逐字节一致（含结尾斜杠），否则授权会被拒。 */
-    public static final String REDIRECT_URI = "yukihub://hikarinagi/callback";
+    /**
+     * 回调地址：<b>环回</b>（RFC 8252 §7 loopback redirect），与 NextMoe 同一套路。
+     * <p>
+     * 这是「独立授权」的关键——不走 {@code yukihub://} 自定义 scheme，
+     * 因此完全不经过 {@code HikarinagiOAuthCallbackActivity}，
+     * 与「Hikarinagi 快捷登录」的登录态零交集。
+     * <p>
+     * 端口写死 14791 而不是随机端口：NextMoe 那边靠「端口无关匹配」才能用随机端口，
+     * 而 Hikarinagi 文档明确要求 redirect_uri
+     * 「必须与控制台登记的某一条完全一致，包括协议、端口、路径与结尾斜杠，
+     * 不做前缀匹配」，所以端口必须固定，且必须在控制台里登记这条地址。
+     * <p>
+     * 该地址是各设备自己的回环：PC 上的 127.0.0.1 与手机上的 127.0.0.1
+     * 属于不同网络栈，互不相通，所以 PC 版用同一个地址不受影响。
+     */
+    public static final String REDIRECT_URI = "http://127.0.0.1:14791/callback";
+    /** 环回监听端口，必须与 {@link #REDIRECT_URI} 里的端口一致。 */
+    public static final int LOOPBACK_PORT = 14791;
 
     /**
      * 同步功能申请的权限。
@@ -583,6 +605,130 @@ public final class HikarinagiSyncClient {
     public static void resetAppToken() {
         appToken = "";
         appTokenExpiresAt = 0L;
+    }
+
+    // ======================== 环回回调监听 ========================
+
+    /**
+     * 一次授权会话的回调结果。
+     */
+    public static class LoopbackResult {
+        public final String code;
+        public final String state;
+        /** 空表示成功；否则是错误标识（access_denied / timeout / io / bind）。 */
+        public final String error;
+
+        LoopbackResult(String code, String state, String error) {
+            this.code = code == null ? "" : code;
+            this.state = state == null ? "" : state;
+            this.error = error == null ? "" : error;
+        }
+    }
+
+    /**
+     * 环回监听句柄：{@link #open()} 到 {@link #close()} 之间保持监听。
+     */
+    public static class LoopbackHandle implements java.io.Closeable {
+        private final java.net.ServerSocket server;
+
+        LoopbackHandle(java.net.ServerSocket server) {
+            this.server = server;
+        }
+
+        /** 阻塞收一个回调请求（必须在后台线程调用）。 */
+        public LoopbackResult await() {
+            try {
+                server.setSoTimeout((int) LOOPBACK_TIMEOUT_MS);
+                try (java.net.Socket socket = server.accept()) {
+                    socket.setSoTimeout(10000);
+                    String requestLine = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(
+                                    socket.getInputStream(), StandardCharsets.US_ASCII)).readLine();
+                    Map<String, String> q = parseLoopbackQuery(requestLine);
+                    respondAndClose(socket);
+                    String err = q.get("error");
+                    if (err != null && !err.isEmpty()) {
+                        String desc = q.get("error_description");
+                        return new LoopbackResult("", q.get("state"),
+                                desc == null || desc.trim().isEmpty() ? err : err + "：" + desc);
+                    }
+                    return new LoopbackResult(q.get("code"), q.get("state"), "");
+                }
+            } catch (java.net.SocketTimeoutException e) {
+                return new LoopbackResult("", "", "timeout");
+            } catch (Throwable t) {
+                Log.w(TAG, "loopback await failed", t);
+                return new LoopbackResult("", "", "io");
+            }
+        }
+
+        @Override public void close() {
+            try { server.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** 授权页停留时间上限，与 NextMoe 一致取 5 分钟。 */
+    private static final long LOOPBACK_TIMEOUT_MS = 5L * 60L * 1000L;
+
+    /**
+     * 在固定端口 {@link #LOOPBACK_PORT} 上开始监听。
+     * <p>
+     * 为什么固定端口而不是像 NextMoe 那样随机端口：Hikarinagi 要求 redirect_uri
+     * 与控制台登记的字符串<b>完全一致（含端口）</b>，随机端口必然对不上。
+     * <p>
+     * 只绑 127.0.0.1：流量不出设备，也不需要任何网络权限暴露。
+     *
+     * @throws java.io.IOException 端口被占用等情况（多半是上一次授权没退干净）
+     */
+    public static LoopbackHandle openLoopback() throws java.io.IOException {
+        java.net.ServerSocket server = new java.net.ServerSocket(
+                LOOPBACK_PORT, 1, java.net.InetAddress.getByName("127.0.0.1"));
+        Log.i(TAG, "loopback listening on 127.0.0.1:" + LOOPBACK_PORT);
+        return new LoopbackHandle(server);
+    }
+
+    /** 请求行形如 GET /callback?code=..&state=.. HTTP/1.1 */
+    private static Map<String, String> parseLoopbackQuery(String requestLine) {
+        Map<String, String> out = new java.util.HashMap<>();
+        try {
+            if (requestLine == null) return out;
+            int sp1 = requestLine.indexOf(' ');
+            int sp2 = requestLine.lastIndexOf(' ');
+            if (sp1 < 0 || sp2 <= sp1) return out;
+            String target = requestLine.substring(sp1 + 1, sp2);
+            int qm = target.indexOf('?');
+            if (qm < 0) return out;
+            for (String pair : target.substring(qm + 1).split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq <= 0) continue;
+                String k = java.net.URLDecoder.decode(pair.substring(0, eq), "UTF-8");
+                String v = java.net.URLDecoder.decode(pair.substring(eq + 1), "UTF-8");
+                out.put(k, v);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "parse loopback query failed", t);
+        }
+        return out;
+    }
+
+    /** 给浏览器回一个「可以关掉了」的页面。 */
+    private static void respondAndClose(java.net.Socket socket) {
+        try {
+            String body = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+                    + "<title>YukiHub</title></head>"
+                    + "<body style=\"font-family:sans-serif;text-align:center;padding-top:15vh;"
+                    + "background:#0B1020;color:#EAF7FF;\">"
+                    + "<h2>授权完成</h2><p>可以关闭此页面，回到 YukiHub 继续同步。</p>"
+                    + "</body></html>";
+            byte[] data = body.getBytes(StandardCharsets.UTF_8);
+            OutputStream os = socket.getOutputStream();
+            os.write(("HTTP/1.1 200 OK\r\n"
+                    + "Content-Type: text/html; charset=utf-8\r\n"
+                    + "Content-Length: " + data.length + "\r\n"
+                    + "Connection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            os.write(data);
+            os.flush();
+        } catch (Throwable ignored) { }
     }
 
     // ======================== HTTP ========================

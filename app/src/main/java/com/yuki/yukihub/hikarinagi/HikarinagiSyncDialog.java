@@ -86,9 +86,45 @@ public final class HikarinagiSyncDialog {
         new AlertDialog.Builder(activity)
                 .setTitle("连接 Hikarinagi")
                 .setView(wrapScroll(activity, root))
-                .setPositiveButton("去授权", (d, w) -> HikarinagiSyncAuth.start(activity))
+                .setPositiveButton("去授权", (d, w) -> authorize(activity))
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    /**
+     * 走一次完整授权（阻塞式，在后台线程）。
+     * <p>
+     * 与 NextMoe 的做法一致：先开环回监听，再拉浏览器，然后在同一 socket 上
+     * 等回调回来，全程不经过任何 Activity。
+     */
+    private static void authorize(Activity activity) {
+        ProgressDialog pd = new ProgressDialog(activity);
+        pd.setMessage("请在浏览器中完成授权…");
+        pd.setCancelable(false);
+        pd.show();
+
+        new Thread(() -> {
+            String err;
+            try {
+                err = HikarinagiSyncAuth.connectAndWait(activity);
+            } catch (Throwable t) {
+                err = t.getMessage() == null ? "授权流程异常" : t.getMessage();
+            }
+            final String error = err;
+            UI.post(() -> {
+                safeDismiss(pd);
+                if (!alive(activity)) return;
+                boolean ok = error == null && HikarinagiAuthStore.isConnected(activity);
+                if (ok) {
+                    Toast.makeText(activity, "授权成功", Toast.LENGTH_SHORT).show();
+                    runPrepare(activity);
+                } else {
+                    Toast.makeText(activity,
+                            error == null ? "授权未完成" : ("授权失败：" + error),
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        }, "yukihub-hikarinagi-sync-auth").start();
     }
 
     // ======================== 阶段 1：匹配 ========================
@@ -137,7 +173,7 @@ public final class HikarinagiSyncDialog {
                     .setMessage(msg)
                     .setPositiveButton("重新授权", (d, w) -> {
                         HikarinagiAuthStore.clear(activity);
-                        HikarinagiSyncAuth.start(activity);
+                        authorize(activity);
                     })
                     .setNegativeButton("取消", null)
                     .show();

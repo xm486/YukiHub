@@ -34,15 +34,6 @@ public final class HikarinagiAuthStore {
     private static final String KEY_ACCOUNT = "account_label";
     private static final String KEY_LAST_SYNC_AT = "last_sync_at";
 
-    /** 授权流程的临时状态（只在从点「去授权」到回调之间有效）。 */
-    public static final String KEY_PENDING_STATE = "pending_state";
-    public static final String KEY_PENDING_VERIFIER = "pending_verifier";
-    public static final String KEY_PENDING_NONCE = "pending_nonce";
-    public static final String KEY_PENDING_STARTED_AT = "pending_started_at";
-
-    /** 授权状态的有效期：超过这个时间视为过期，避免用过期的 verifier 去换码。 */
-    private static final long PENDING_TTL_MS = 10L * 60L * 1000L;
-
     private HikarinagiAuthStore() { }
 
     private static SharedPreferences prefs(Context c) {
@@ -101,57 +92,6 @@ public final class HikarinagiAuthStore {
                 .remove(KEY_REFRESH)
                 .remove(KEY_EXPIRES_AT)
                 .remove(KEY_ACCOUNT)
-                .apply();
-    }
-
-    // ======================== 授权流程临时状态 ========================
-
-    public static void savePending(Context c, String state, String verifier, String nonce) {
-        prefs(c).edit()
-                .putString(KEY_PENDING_STATE, state)
-                .putString(KEY_PENDING_VERIFIER, verifier)
-                .putString(KEY_PENDING_NONCE, nonce)
-                .putLong(KEY_PENDING_STARTED_AT, System.currentTimeMillis())
-                .apply();
-    }
-
-    /**
-     * 取出并校验回调参数是否属于本流程。
-     * <p>
-     * 返回 null 表示<b>不是同步授权流程</b>（可能是快捷登录的回调），
-     * 调用方据此把控制权交还给原来的登录链路。
-     *
-     * @return 校验通过的 verifier；不匹配或已过期返回 null
-     */
-    public static String takePendingVerifier(Context c, String callbackState) {
-        SharedPreferences p = prefs(c);
-        String state = p.getString(KEY_PENDING_STATE, "");
-        String verifier = p.getString(KEY_PENDING_VERIFIER, "");
-        long startedAt = p.getLong(KEY_PENDING_STARTED_AT, 0L);
-
-        // 没有发起过同步授权 → 与本流程无关
-        if (state == null || state.trim().isEmpty()) return null;
-        // state 不匹配 → 不是本次流程的回调
-        if (callbackState == null || !state.equals(callbackState)) return null;
-        // 过期
-        if (startedAt <= 0 || System.currentTimeMillis() - startedAt > PENDING_TTL_MS) {
-            Log.w(TAG, "同步授权已超时，忽略本次回调");
-            clearPending(c);
-            return null;
-        }
-        if (verifier == null || verifier.trim().isEmpty()) {
-            clearPending(c);
-            return null;
-        }
-        return verifier;
-    }
-
-    public static void clearPending(Context c) {
-        prefs(c).edit()
-                .remove(KEY_PENDING_STATE)
-                .remove(KEY_PENDING_VERIFIER)
-                .remove(KEY_PENDING_NONCE)
-                .remove(KEY_PENDING_STARTED_AT)
                 .apply();
     }
 
