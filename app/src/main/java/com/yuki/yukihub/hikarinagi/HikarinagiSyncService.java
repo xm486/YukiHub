@@ -201,8 +201,21 @@ public final class HikarinagiSyncService {
         if (token == null || token.trim().isEmpty()) {
             throw new HikarinagiSyncClient.NotAuthorizedException("Hikarinagi 授权已失效，请重新授权");
         }
-        HikarinagiSyncClient.AuthInfo auth = HikarinagiSyncClient.authInfo(token);
-        HikarinagiAuthStore.setAccountLabel(context, auth.displayName());
+
+        // 取账号名只用于展示，失败不该拦住同步：
+        // /user/me 只是只读校验，而真正的写入走 rates/galgames/batch，
+        // 两者权限与故障面都不一样。这里降级为「用缓存的名字」而不是抛错。
+        String displayName = HikarinagiAuthStore.getAccountLabel(context);
+        try {
+            HikarinagiSyncClient.AuthInfo auth = HikarinagiSyncClient.authInfo(token);
+            displayName = auth.displayName();
+            HikarinagiAuthStore.setAccountLabel(context, displayName);
+        } catch (HikarinagiSyncClient.NotAuthorizedException e) {
+            // 只有 name/nickname 完全缺失才走到这里，说明令牌确实不可用
+            throw e;
+        } catch (Throwable t) {
+            Log.w(TAG, "取账号名失败，继续同步（仅影响展示）", t);
+        }
 
         GameRepository repo = new GameRepository(context);
         List<Game> all = repo.getAll();
@@ -277,7 +290,7 @@ public final class HikarinagiSyncService {
         }
 
         Preview p = new Preview();
-        p.username = auth.displayName();
+        p.username = displayName;
         p.items.addAll(matched);
         p.unmatched.addAll(unmatched);
         p.newlyResolved.putAll(newlyResolved);

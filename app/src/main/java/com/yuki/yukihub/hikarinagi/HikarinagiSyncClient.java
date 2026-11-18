@@ -278,15 +278,18 @@ public final class HikarinagiSyncClient {
 
     /** 用户信息（用于校验令牌并显示账号名）。 */
     public static class AuthInfo {
-        public final String uid;
+        /** 用户名（文档字段 {@code name}）。 */
+        public final String userName;
+        /** 昵称（文档字段 {@code nickname}，可为空）。 */
         public final String nickname;
-        AuthInfo(String uid, String nickname) {
-            this.uid = uid == null ? "" : uid;
+        AuthInfo(String userName, String nickname) {
+            this.userName = userName == null ? "" : userName;
             this.nickname = nickname == null ? "" : nickname;
         }
+        /** 优先显示昵称，没有就用用户名。 */
         public String displayName() {
             if (!nickname.trim().isEmpty()) return nickname.trim();
-            if (!uid.trim().isEmpty()) return "uid " + uid.trim();
+            if (!userName.trim().isEmpty()) return userName.trim();
             return "Hikarinagi";
         }
     }
@@ -294,23 +297,37 @@ public final class HikarinagiSyncClient {
     /**
      * 校验用户令牌并取回账号信息。
      * <p>
-     * 这一步会真正用 {@code status:write} 之外的只读接口验证令牌有效性，
+     * 这一步会真正用只读接口验证令牌有效性，
      * 避免用户同步几十条之后才发现授权早已失效。
+     *
+     * <h3>字段名以文档为准（曾经写错，导致「授权成功但报授权失效」）</h3>
+     * {@code GET /v3/user/me} 的真实响应里<b>没有 {@code id} / {@code uid} 字段</b>，
+     * 只有 {@code name}（用户名）、{@code nickname}（昵称，可为 null）、
+     * {@code role}、{@code signature}、{@code status}、{@code avatar} 等。
+     * <p>
+     * 早期实现拿 {@code id} 和 {@code uid} 当作「有没有用户信息」的判据，
+     * 结果两个都取不到就误判成授权失效——而实际上令牌是好的，
+     * 于是出现了「浏览器显示授权完成，回到 App 却弹授权有问题」。
+     * 现在只认 {@code name} / {@code nickname}。
      */
     public static AuthInfo authInfo(String accessToken) throws Exception {
         if (accessToken == null || accessToken.trim().isEmpty()) {
             throw new NotAuthorizedException("尚未授权 Hikarinagi");
         }
         JSONObject o = request("GET", "/user/me", null, accessToken);
-        String uid = o.optString("id", "");
-        if (uid.isEmpty()) uid = o.optString("uid", "");
-        String name = o.optString("nickname", "");
-        if (name.isEmpty()) name = o.optString("name", "");
-        if (name.isEmpty()) name = o.optString("username", "");
-        if (uid.isEmpty() && name.isEmpty()) {
+
+        // 文档里的用户名是 name，昵称是 nickname（nullable）。
+        String userName = o.optString("name", "");
+        if (userName == null) userName = "";
+        String nickname = o.optString("nickname", "");
+        if (nickname == null || "null".equalsIgnoreCase(nickname.trim())) nickname = "";
+
+        // 两个都空才认为响应异常（注意：不能拿 id/uid 判断，接口没有这两个字段）
+        if (userName.trim().isEmpty() && nickname.trim().isEmpty()) {
+            Log.w(TAG, "user/me 响应缺少 name/nickname：" + preview(o.toString()));
             throw new NotAuthorizedException("Hikarinagi 未返回用户信息，授权可能已失效");
         }
-        return new AuthInfo(uid, name);
+        return new AuthInfo(userName.trim(), nickname.trim());
     }
 
     // ======================== 写：批量状态 + 时长 ========================
