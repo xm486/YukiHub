@@ -2465,12 +2465,29 @@ private void showProfileDialog() {
             LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
     vndbLp.setMargins(0, dp(8), 0, 0);
     root.addView(vndbSyncBtn, vndbLp);
-    TextView vndbSyncHint = new TextView(this);
+TextView vndbSyncHint = new TextView(this);
     vndbSyncHint.setText(vndbSyncStatusText());
     vndbSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
     vndbSyncHint.setTextSize(10);
     vndbSyncHint.setPadding(0, dp(4), 0, 0);
     root.addView(vndbSyncHint);
+
+    // Bangumi 游玩状态同步：与 NextMoe / VNDB 并列的第三个独立入口。
+    // 同样只同步状态，用独立的 Access Token（不复用元数据里那个，
+    // 免得用户还要去设置页翻）。
+    Button bangumiSyncBtn = krButton("同步到 Bangumi");
+    bangumiSyncBtn.setTextColor(primaryTextColor());
+    bangumiSyncBtn.setOnClickListener(v -> openBangumiSync());
+    LinearLayout.LayoutParams bgmLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+    bgmLp.setMargins(0, dp(8), 0, 0);
+    root.addView(bangumiSyncBtn, bgmLp);
+    TextView bangumiSyncHint = new TextView(this);
+    bangumiSyncHint.setText(bangumiSyncStatusText());
+    bangumiSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+    bangumiSyncHint.setTextSize(10);
+    bangumiSyncHint.setPadding(0, dp(4), 0, 0);
+    root.addView(bangumiSyncHint);
 
     LinearLayout kunRow = new LinearLayout(this);
     kunRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3178,6 +3195,31 @@ private void showAccountSettingsDialog() {
     private void openVndbSync() {
         try {
             com.yuki.yukihub.vndb.VndbSyncDialog.start(this);
+        } catch (Throwable t) {
+            Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ==================== Bangumi 游玩状态同步 ====================
+    // 与 NextMoe / VNDB 并列的第三个独立入口。
+    // 只同步「收藏状态」（想看/看过/在看/搁置/抛弃），
+    // 不动评分、吐槽、标签、私密设置。
+    // token 独立存储（bangumi_sync 这个 prefs），不复用元数据里的 bangumi_token。
+
+    /** 按钮下方的状态小字。 */
+    private String bangumiSyncStatusText() {
+        if (!com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this)) {
+            return "填 Bangumi Access Token 后可同步游玩状态";
+        }
+        long last = com.yuki.yukihub.bangumi.BangumiSyncService.lastSyncAt(this);
+        if (last <= 0) return "上次同步：从未";
+        return "上次同步：" + TimeFormatUtil.date(last);
+    }
+
+    private void openBangumiSync() {
+        try {
+            com.yuki.yukihub.bangumi.BangumiSyncDialog.start(this);
         } catch (Throwable t) {
             Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
                     Toast.LENGTH_LONG).show();

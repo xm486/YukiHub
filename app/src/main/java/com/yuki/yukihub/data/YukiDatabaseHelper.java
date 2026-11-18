@@ -24,7 +24,7 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
      *           所以加了「标题搜索」作为第二级匹配。搜索要发网络请求、费配额，
      *           因此把匹配到的 vNNN 缓存下来，之后每次同步零搜索。
      */
-    public static final int DB_VERSION = 25;
+    public static final int DB_VERSION = 26;
 
     /**
      * 升级时清理过孤儿行的标记。
@@ -114,7 +114,11 @@ public class YukiDatabaseHelper extends SQLiteOpenHelper {
                 "nextmoe_synced_sig TEXT DEFAULT ''," +
                 "vndb_synced_at INTEGER DEFAULT 0," +
                 "vndb_synced_sig TEXT DEFAULT ''," +
-                "vndb_vn_id TEXT DEFAULT ''" +
+                "vndb_vn_id TEXT DEFAULT ''," +
+                // v26：Bangumi 游玩状态同步的本机状态与匹配缓存（不参与云同步快照）
+                "bangumi_subject_id TEXT DEFAULT ''," +
+                "bangumi_synced_at INTEGER DEFAULT 0," +
+                "bangumi_synced_sig TEXT DEFAULT ''" +
                 ")");
         db.execSQL("CREATE TABLE play_sessions (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -264,6 +268,16 @@ safeAlter(db, "ALTER TABLE games ADD COLUMN nextmoe_work_id TEXT DEFAULT ''");
             // 同样 onUpgrade 与 onCreate 两处都要写。
             // 同样不参与云同步快照（纯本机匹配缓存）。
             safeAlter(db, "ALTER TABLE games ADD COLUMN vndb_vn_id TEXT DEFAULT ''");
+        }
+        if (oldVersion < 26) {
+            // v26：Bangumi 游玩状态同步。
+            // 三列：匹配缓存（subject_id）+ 同步状态（时间 + 签名）。
+            // onCreate 建表语句里也要写（见上），这是 v20 的历史教训：
+            // 只改一处会导致全新安装的库缺列，INSERT 时报 no such column。
+            // 同样不参与云同步快照（纯本机同步状态）。
+            safeAlter(db, "ALTER TABLE games ADD COLUMN bangumi_subject_id TEXT DEFAULT ''");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN bangumi_synced_at INTEGER DEFAULT 0");
+            safeAlter(db, "ALTER TABLE games ADD COLUMN bangumi_synced_sig TEXT DEFAULT ''");
         }
     }
 

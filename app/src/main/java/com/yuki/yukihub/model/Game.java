@@ -67,6 +67,23 @@ public class Game {
      */
     public String vndbVnId = "";
 
+    // ==================== Bangumi 状态同步（v26） ====================
+    // 同样是**本机状态**，不参与云同步快照。
+    /** 上次成功推送到 Bangumi 的时间戳，0 表示从未成功。 */
+    public long bangumiSyncedAt = 0;
+    /** 上次成功推送的状态签名（Bangumi type，如 "3"），用于跳过未变动的游戏。 */
+    public String bangumiSyncedSig = "";
+    /**
+     * 匹配到的 Bangumi subject_id（如 "109746"），空表示尚未匹配。
+     * <p>
+     * 绝大部分游戏不是用 Bangumi 源刮的，所以这一列多数情况下由「标题搜索」
+     * 填上并缓存，之后每次同步就不必再搜。
+     * <p>
+     * 注意：存的是纯数字字符串。Bangumi 的 subject_id 就是数字，
+     * 而 metadata_cache 里 source='bangumi' 的 source_id 也是纯数字，两者可直接互用。
+     */
+    public String bangumiSubjectId = "";
+
     public Game() {
         engine = EngineType.UNKNOWN;
         createdAt = System.currentTimeMillis();

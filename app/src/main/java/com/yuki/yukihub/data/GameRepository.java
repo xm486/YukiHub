@@ -1006,6 +1006,70 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
     }
 
     /**
+     * 读出「game_id → Bangumi subject_id」映射（来自 metadata_cache 里 source='bangumi' 的 source_id）。
+     * <p>
+     * 只接受纯数字：Bangumi 的 subject_id 就是数字（如 109746）。
+     * 历史上存在过把别的 id 误写进 bangumi 源的情况，所以这里做格式校验，
+     * 脏数据宁可当成「没匹配到」，也不要把状态写到别的条目上。
+     */
+    public java.util.Map<Long, String> getBangumiSourceIds() {
+        java.util.Map<Long, String> out = new java.util.LinkedHashMap<>();
+        Cursor c = null;
+        try {
+            c = helper.getReadableDatabase().query(
+                    "metadata_cache",
+                    new String[]{"game_id", "source_id"},
+                    "source=?",
+                    new String[]{"bangumi"},
+                    null, null, null);
+            while (c.moveToNext()) {
+                long gameId = c.getLong(0);
+                String sid = c.isNull(1) ? "" : c.getString(1);
+                if (sid == null) continue;
+                sid = sid.trim();
+                if (sid.isEmpty()) continue;
+                boolean digits = true;
+                for (int i = 0; i < sid.length(); i++) {
+                    if (!Character.isDigit(sid.charAt(i))) { digits = false; break; }
+                }
+                if (!digits) continue;
+                out.put(gameId, sid);
+            }
+        } catch (Throwable t) {
+            Log.w("GameRepository", "getBangumiSourceIds failed", t);
+        } finally {
+            if (c != null) c.close();
+        }
+        return out;
+    }
+
+    /** 写回 Bangumi 同步状态（时间 + 签名）。只动这两个字段。 */
+    public void updateBangumiSyncState(long gameId, long syncedAt, String sig) {
+        ContentValues v = new ContentValues();
+        v.put("bangumi_synced_at", syncedAt);
+        v.put("bangumi_synced_sig", sig == null ? "" : sig);
+        helper.getWritableDatabase().update("games", v, "id=?", new String[]{String.valueOf(gameId)});
+    }
+
+    /** 批量写回 Bangumi 匹配结果（subject_id），供下次同步免搜索。 */
+    public void updateBangumiSubjectIds(java.util.Map<Long, String> idByGameId) {
+        if (idByGameId == null || idByGameId.isEmpty()) return;
+        SQLiteDatabase db = helper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (java.util.Map.Entry<Long, String> e : idByGameId.entrySet()) {
+                if (e.getKey() == null) continue;
+                ContentValues v = new ContentValues();
+                v.put("bangumi_subject_id", e.getValue() == null ? "" : e.getValue());
+                db.update("games", v, "id=?", new String[]{String.valueOf(e.getKey())});
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /**
      * 读出「game_id → 原名/罗马字」映射，供 VNDB 标题搜索优先使用。
      * <p>
      * VNDB 是日语为核心的数据库，用中文译名搜命中率很低。
@@ -1169,6 +1233,13 @@ g.description = c.getString(c.getColumnIndexOrThrow("description"));
         g.vndbSyncedSig = vdSig == null ? "" : vdSig;
         String vdVn = getStringOrNull(c, "vndb_vn_id");
         g.vndbVnId = vdVn == null ? "" : vdVn;
+        // v26：Bangumi 同步状态。同样只读不写，写入走 updateBangumiSyncState()，
+        // 避免 toValues() 覆盖路径把同步状态一起写坏。
+        g.bangumiSyncedAt = getLongOrDefault(c, "bangumi_synced_at", 0L);
+        String bgSig = getStringOrNull(c, "bangumi_synced_sig");
+        g.bangumiSyncedSig = bgSig == null ? "" : bgSig;
+        String bgId = getStringOrNull(c, "bangumi_subject_id");
+        g.bangumiSubjectId = bgId == null ? "" : bgId;
         return g;
     }
 
