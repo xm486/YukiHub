@@ -1011,30 +1011,54 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
      * 本地 metadata_cache 的 json 里存了 originalTitle / romanTitle
      * （不管用哪个源刮削都会写），用它们去搜才对。
      * 实测：「西园家的秘密」用中文名搜 0 候选，用原名「西園家のかくしゴト」命中 v66872。
+     * <p>
+     * 这里要解析 json 字段，成本不低，所以只给「确实需要标题搜索的那几个游戏」调用：
+     * 多数情况下（第二次同步起）全部走缓存，根本不会走到这里。
+     *
+     * @param games 只需要这些游戏的原名；传 null 表示全部（不建议）
      */
-    public java.util.Map<Long, java.util.List<String>> getOriginalTitles() {
+    public java.util.Map<Long, java.util.List<String>> getOriginalTitles(
+            java.util.List<Game> games) {
         java.util.Map<Long, java.util.List<String>> out = new java.util.LinkedHashMap<>();
+        if (games == null || games.isEmpty()) return out;
+
+        java.util.Set<Long> want = new java.util.HashSet<>();
+        for (Game g : games) {
+            if (g != null) want.add(g.id);
+        }
+        if (want.isEmpty()) return out;
+
         Cursor c = null;
         try {
-            c = helper.getReadableDatabase().query(
-                    "metadata_cache", new String[]{"game_id", "json"},
-                    null, null, null, null, null);
-            while (c.moveToNext()) {
-                long gameId = c.getLong(0);
-                String json = c.isNull(1) ? "" : c.getString(1);
-                if (json == null || json.trim().isEmpty()) continue;
-                java.util.List<String> names = out.get(gameId);
-                if (names == null) {
-                    names = new java.util.ArrayList<>();
-                    out.put(gameId, names);
+            // 两遍扫描，保证「日文原名」一定排在「罗马字」前面。
+            // 若一遍扫描直接 add(original) + add(roman)，
+            // 同一游戏挂多个源时，某个源的 romanTitle 可能抢在
+            // 另一个源的 originalTitle 之前被加入，顺序就乱了。
+            // 顺序直接影响搜索成功率（原名命中率远高于罗马字），所以必须保证。
+            for (int pass = 0; pass < 2; pass++) {
+                String field = (pass == 0) ? "originalTitle" : "romanTitle";
+                c = helper.getReadableDatabase().query(
+                        "metadata_cache", new String[]{"game_id", "json"},
+                        null, null, null, null, null);
+                while (c.moveToNext()) {
+                    long gameId = c.getLong(0);
+                    if (!want.contains(gameId)) continue;   // 只解析需要的
+                    String json = c.isNull(1) ? "" : c.getString(1);
+                    if (json == null || json.trim().isEmpty()) continue;
+                    java.util.List<String> names = out.get(gameId);
+                    if (names == null) {
+                        names = new java.util.ArrayList<>();
+                        out.put(gameId, names);
+                    }
+                    try {
+                        org.json.JSONObject o = new org.json.JSONObject(json);
+                        addIfUseful(names, o.optString(field, ""));
+                    } catch (Throwable ignored) {
+                        // 单条 JSON 坏了不影响其它
+                    }
                 }
-                try {
-                    org.json.JSONObject o = new org.json.JSONObject(json);
-                    addIfUseful(names, o.optString("originalTitle", ""));
-                    addIfUseful(names, o.optString("romanTitle", ""));
-                } catch (Throwable ignored) {
-                    // 单条 JSON 坏了不影响其它
-                }
+                c.close();
+                c = null;
             }
         } catch (Throwable t) {
             Log.w("GameRepository", "getOriginalTitles failed", t);

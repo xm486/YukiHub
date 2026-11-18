@@ -213,11 +213,16 @@ public final class VndbSyncService {
         }
 
         // 第3级：标题搜索。候选词按「原名 > 罗马字 > 本地标题」排序，
-// 因为 VNDB 是日语为核心的库，用中文译名搜命中率很低。
-Map<Long, java.util.List<String>> originalTitles = repo.getOriginalTitles();
+        // 因为 VNDB 是日语为核心的库，用中文译名搜命中率很低。
         List<Game> unmatched = new ArrayList<>();
         Map<Long, String> newlyResolved = new LinkedHashMap<>();
         if (!needTitleSearch.isEmpty()) {
+            // 只在前两级确实有漏网时才去读原名，且只读这几个游戏的。
+            // （getOriginalTitles 要解析 metadata_cache 的 json 字段，
+            //  全表扫一遍是白费功夫——多数情况下走向缓存，一个都不用搜。）
+            Map<Long, java.util.List<String>> originalTitles =
+                    repo.getOriginalTitles(needTitleSearch);
+
             int done = matched.size();
             int total = all.size();
             for (Game g : needTitleSearch) {
