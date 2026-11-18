@@ -174,6 +174,10 @@ public final class BangumiSyncClient {
                 Log.i(TAG, "title search hit: 「" + trimmed + "」 -> " + hit);
                 return hit;
             }
+            // 未命中也要记：只记命中会让「为什么这个没匹配上」完全无从排查。
+            // 之前时钟机关三部曲匹配不到，就是因为日志里只有 hit 没有 miss，
+            // 连候选词有没有被搜过都看不出来。
+            Log.w(TAG, "title search miss: 「" + trimmed + "」");
         }
         return null;
     }
@@ -183,6 +187,45 @@ public final class BangumiSyncClient {
         String nq = normalizeTitle(query);
         if (nq.isEmpty()) return null;
 
+        // 变体 1：原样
+        // 变体 2：把各种横线（全角－/半角-/破折号）换成空格
+        //   原因：Bangumi 的搜索后端对全角连字符的处理不稳，
+        //   而 VNDB 那边刮出来的日文原名常带全角「－」（U+FF0D），
+        //   直接搜可能 0 候选。换成空格后分词更稳。
+        java.util.LinkedHashSet<String> variants = new java.util.LinkedHashSet<>();
+        variants.add(query);
+        String spaced = replaceDashesWithSpace(query).trim();
+        if (!spaced.isEmpty() && !spaced.equals(query)) variants.add(spaced);
+
+        for (String q : variants) {
+            JSONArray data = doSearch(token, q);
+            if (data == null || data.length() == 0) continue;
+            String got = pickFromCandidates(nq, data, q);
+            if (got != null) return got;
+        }
+        return null;
+    }
+
+    /** 把各种横线换成空格，供搜索变体使用。 */
+    private static String replaceDashesWithSpace(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            // 全角－(FF0D) 已被全角转换覆盖，这里把几种常见横线统一成空格
+            if (ch == '-' || ch == '\uFF0D' || ch == '\u2014' || ch == '\u2013'
+                    || ch == '\u2212' || ch == '\u30FC' || ch == '\uFF70') {
+                sb.append(' ');
+            } else {
+                sb.append(ch);
+            }
+        }
+        // 压掉连续空格
+        return sb.toString().replaceAll("\\s+", " ");
+    }
+
+    /** 发一次搜索，返回 data 数组（可能为 null）。 */
+    private static JSONArray doSearch(String token, String query) throws Exception {
         JSONObject body = new JSONObject();
         body.put("keyword", query);
         body.put("sort", "match");
@@ -194,21 +237,74 @@ public final class BangumiSyncClient {
         // limit 走 query string
         JSONObject resp = requestWithQuery("POST", "/v0/search/subjects", "?limit=10", body, token);
         JSONArray data = resp.optJSONArray("data");
-        if (data == null) return null;
+        if (data == null) {
+            Log.w(TAG, "search 「" + query + "」 无 data 字段");
+            return null;
+        }
+        if (data.length() == 0) {
+            Log.w(TAG, "search 「" + query + "」 返回 0 个候选");
+            return null;
+        }
+        // 打出候选，否则「为什么没匹配上」完全无从判断
+        StringBuilder cand = new StringBuilder();
+        for (int i = 0; i < Math.min(data.length(), 5); i++) {
+            JSONObject o = data.optJSONObject(i);
+            if (o == null) continue;
+            if (cand.length() > 0) cand.append(" | ");
+            cand.append(o.optString("id", "?"))
+                .append('=').append(o.optString("name", ""))
+                .append('/').append(o.optString("name_cn", ""));
+        }
+        Log.i(TAG, "search 「" + query + "」 候选" + data.length() + "个: " + cand);
+        return data;
+    }
 
-        // 先找完全相等，再退一步找包含：
-        // Bangumi 的 name 常带副标题或译名混排，
-        // 本地往往只有主标题，永远不可能完全相等，但包含关系是明确的。
-        String fuzzy = null;
+    /**
+     * 从候选里挑出唯一可接受的那一个。
+     * <p>
+     * 规则（宁可漏掉，也绝不能写错）：
+     * <ol>
+     *   <li>完全相等 → 直接采纳；</li>
+     *   <li>包含关系 → <b>必须唯一</b>。若有多条都包含，说明查询词太泛
+     *       （比如只搜系列名「時計仕掛けのレイライン」会命中四部），
+     *       此时无法确定是哪一部，一律放弃。</li>
+     * </ol>
+     * 之前是「取第一个包含的」，那会把状态写到同系列的别的作品上，
+     * 比不同步严重得多。
+     */
+    private static String pickFromCandidates(String nq, JSONArray data, String query) {
         for (int i = 0; i < data.length(); i++) {
             JSONObject it = data.optJSONObject(i);
             if (it == null) continue;
             String id = it.optString("id", "");
             if (id.isEmpty()) continue;
-            if (titleEquals(nq, it)) return id;
-            if (fuzzy == null && titleContains(nq, it)) fuzzy = id;
+            if (titleEquals(nq, it)) {
+                Log.i(TAG, "候选「" + query + "」完全相等 -> " + id);
+                return id;
+            }
         }
-        return fuzzy;
+
+        // 退一步：包含关系，但要求唯一
+        String one = null;
+        int hits = 0;
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject it = data.optJSONObject(i);
+            if (it == null) continue;
+            String id = it.optString("id", "");
+            if (id.isEmpty()) continue;
+            if (titleContains(nq, it)) {
+                hits++;
+                if (one == null) one = id;
+            }
+        }
+        if (hits == 1) {
+            Log.i(TAG, "候选「" + query + "」包含命中(唯一) -> " + one);
+            return one;
+        }
+        if (hits > 1) {
+            Log.w(TAG, "候选「" + query + "」有 " + hits + " 条都包含，无法确定是哪一部，放弃");
+        }
+        return null;
     }
 
     /** 判断搜索结果的名称字段里，是否有与查询词归一化后完全相等的一个。 */
