@@ -1004,6 +1004,53 @@ o.put("description", c.getString(c.getColumnIndexOrThrow("description")));
         return out;
     }
 
+    /**
+     * 读出「game_id → 原名/罗马字」映射，供 VNDB 标题搜索优先使用。
+     * <p>
+     * VNDB 是日语为核心的数据库，用中文译名搜命中率很低。
+     * 本地 metadata_cache 的 json 里存了 originalTitle / romanTitle
+     * （不管用哪个源刮削都会写），用它们去搜才对。
+     * 实测：「西园家的秘密」用中文名搜 0 候选，用原名「西園家のかくしゴト」命中 v66872。
+     */
+    public java.util.Map<Long, java.util.List<String>> getOriginalTitles() {
+        java.util.Map<Long, java.util.List<String>> out = new java.util.LinkedHashMap<>();
+        Cursor c = null;
+        try {
+            c = helper.getReadableDatabase().query(
+                    "metadata_cache", new String[]{"game_id", "json"},
+                    null, null, null, null, null);
+            while (c.moveToNext()) {
+                long gameId = c.getLong(0);
+                String json = c.isNull(1) ? "" : c.getString(1);
+                if (json == null || json.trim().isEmpty()) continue;
+                java.util.List<String> names = out.get(gameId);
+                if (names == null) {
+                    names = new java.util.ArrayList<>();
+                    out.put(gameId, names);
+                }
+                try {
+                    org.json.JSONObject o = new org.json.JSONObject(json);
+                    addIfUseful(names, o.optString("originalTitle", ""));
+                    addIfUseful(names, o.optString("romanTitle", ""));
+                } catch (Throwable ignored) {
+                    // 单条 JSON 坏了不影响其它
+                }
+            }
+        } catch (Throwable t) {
+            Log.w("GameRepository", "getOriginalTitles failed", t);
+        } finally {
+            if (c != null) c.close();
+        }
+        return out;
+    }
+
+    private static void addIfUseful(java.util.List<String> list, String s) {
+        if (s == null) return;
+        String v = s.trim();
+        if (v.isEmpty() || "null".equalsIgnoreCase(v)) return;
+        if (!list.contains(v)) list.add(v);
+    }
+
     public void insertSamplesIfEmpty() {
         // Production build should not auto-create placeholder games.
     }

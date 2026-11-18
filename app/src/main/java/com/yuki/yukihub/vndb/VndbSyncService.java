@@ -212,19 +212,21 @@ public final class VndbSyncService {
             needTitleSearch.add(g);
         }
 
-        // 第3级：标题搜索（逐个，串行；已有 250ms 节流）
+        // 第3级：标题搜索。候选词按「原名 > 罗马字 > 本地标题」排序，
+// 因为 VNDB 是日语为核心的库，用中文译名搜命中率很低。
+Map<Long, java.util.List<String>> originalTitles = repo.getOriginalTitles();
         List<Game> unmatched = new ArrayList<>();
         Map<Long, String> newlyResolved = new LinkedHashMap<>();
         if (!needTitleSearch.isEmpty()) {
             int done = matched.size();
             int total = all.size();
             for (Game g : needTitleSearch) {
-                String title = g.title == null ? "" : g.title.trim();
-                if (title.isEmpty()) {
+                List<String> candidates = buildSearchCandidates(g, originalTitles.get(g.id));
+                if (candidates.isEmpty()) {
                     unmatched.add(g);
                 } else {
                     try {
-                        String vnId = VndbClient.searchVnByExactTitle(token, title);
+                        String vnId = VndbClient.searchVnByTitle(token, candidates);
                         if (vnId == null || vnId.isEmpty()) {
                             unmatched.add(g);
                         } else {
@@ -237,7 +239,7 @@ public final class VndbSyncService {
                         throw e;
                     } catch (Throwable t) {
                         // 单个搜索失败不影响其它条目
-                        Log.w(TAG, "title search failed: " + title, t);
+                        Log.w(TAG, "title search failed: " + candidates.get(0), t);
                         unmatched.add(g);
                     }
                 }
@@ -312,6 +314,33 @@ public final class VndbSyncService {
             if (!Character.isDigit(s.charAt(i))) return false;
         }
         return true;
+    }
+
+    /**
+     * 构建标题搜索的候选词，<b>按命中率排序</b>。
+     * <p>
+     * 顺序很重要：VNDB 是日语为核心的数据库。
+     * 「西园家的秘密」这类中文译名在其库里根本不存在，搜了也是 0 候选；
+     * 而本地元数据的 originalTitle 通常是日文原名，几乎一定能命中。
+     * <p>
+     * 顺序：原文原名 → 罗马字 → 本地标题（兜底）。
+     * 去重后返回，避免同一个词搜两次。
+     */
+    static List<String> buildSearchCandidates(Game g, List<String> originals) {
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+        if (originals != null) {
+            for (String s : originals) {
+                if (s == null) continue;
+                String v = s.trim();
+                if (v.isEmpty() || "null".equalsIgnoreCase(v)) continue;
+                seen.add(v);
+            }
+        }
+        if (g != null && g.title != null) {
+            String t = g.title.trim();
+            if (!t.isEmpty()) seen.add(t);
+        }
+        return new ArrayList<>(seen);
     }
 
     /** 从远端 label 集合里挑出「状态类」的那一个（互斥，最多一个）。 */

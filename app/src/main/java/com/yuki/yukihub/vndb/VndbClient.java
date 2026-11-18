@@ -200,28 +200,45 @@ public final class VndbClient {
 
     // ======================== 读：按标题搜索 ========================
 
-    /**
+/**
      * 按标题搜索 VN，用于「不是用 VNDB 源刮削」的游戏。
      * <p>
-     * <b>只接受归一化后完全相等的命中</b>，不做模糊匹配。
-     * VNDB 的 search 是模糊的（搜 "Senren" 会带回一堆 Senren 系），
-     * 取第一条会把状态写到别的作品上，比不同步更糟。
+     * <b>必须优先用原名/罗马字搜，而不是本地标题。</b>
+     * VNDB 是日语为核心的数据库，用中文译名搜命中率很低；
+     * 而本地 metadata_cache 里通常已有 originalTitle / romanTitle
+     * （来自任何源刮削都会记录），用它们搜才是对的。
      * <p>
-     * 比对范围覆盖 title / alttitle / titles[] 里的 title 与 latin，
-     * 这样中文名能命中 VNDB 的 zh-Hans 条目（实测：「千恋万花」→ v19073）。
+     * 实测：「西园家的秘密」用中文名搜 0 候选，
+     * 用原名「西園家のかくしゴト」搜能命中 v66872。
      *
-     * @param title 本地游戏标题
-     * @return VN id（vNNN）；无精确命中返回 null
+     * @param token       API token
+     * @param candidates  按优先级排列的候选查询词（原名 > 罗马字 > 本地标题），调用方负责排序
+     * @return VN id（vNNN）；全部候选都无命中返回 null
      */
-    public static String searchVnByExactTitle(String token, String title) throws Exception {
-        String nq = normalizeTitle(title);
+    public static String searchVnByTitle(String token, List<String> candidates) throws Exception {
+        if (candidates == null || candidates.isEmpty()) return null;
+        for (String q : candidates) {
+            String trimmed = q == null ? "" : q.trim();
+            if (trimmed.isEmpty()) continue;
+            String hit = searchOnce(token, trimmed);
+            if (hit != null && !hit.isEmpty()) {
+                Log.i(TAG, "title search hit: 「" + trimmed + "」 -> " + hit);
+                return hit;
+            }
+        }
+        return null;
+    }
+
+    /** 单次搜索 + 精确/包含判定。 */
+    private static String searchOnce(String token, String query) throws Exception {
+        String nq = normalizeTitle(query);
         if (nq.isEmpty()) return null;
 
         JSONObject body = new JSONObject();
         JSONArray filters = new JSONArray();
         filters.put("search");
         filters.put("=");
-        filters.put(title == null ? "" : title.trim());
+        filters.put(query);
         body.put("filters", filters);
         body.put("fields", "id,title,alttitle,titles{lang,title,latin}");
         body.put("results", 10);
@@ -230,18 +247,25 @@ public final class VndbClient {
         JSONArray results = resp.optJSONArray("results");
         if (results == null) return null;
 
+        // 先找「完全相等」，再退一步找「包含」。
+        // 分两轮是为了优先选中真正对得上的那一个：
+        // 搜「西園家のかくしゴト」时，VNDB 的标题是
+        // 「西園家のかくしゴト - The Secret Revealed by the Lens -」，
+        // 永远不可能完全相等，但包含关系是明确的。
+        String fuzzy = null;
         for (int i = 0; i < results.length(); i++) {
             JSONObject it = results.optJSONObject(i);
             if (it == null) continue;
-            if (!titleMatches(nq, it)) continue;
             String id = it.optString("id", "");
-            if (!id.isEmpty()) return id;
+            if (id.isEmpty()) continue;
+            if (titleEquals(nq, it)) return id;
+            if (fuzzy == null && titleContains(nq, it)) fuzzy = id;
         }
-        return null;
+        return fuzzy;
     }
 
     /** 判断搜索结果的所有名称字段里，是否有与查询词归一化后完全相等的一个。 */
-    private static boolean titleMatches(String normalizedQuery, JSONObject vn) {
+    private static boolean titleEquals(String normalizedQuery, JSONObject vn) {
         if (normalizedQuery.equals(normalizeTitle(vn.optString("title", "")))) return true;
         if (normalizedQuery.equals(normalizeTitle(vn.optString("alttitle", "")))) return true;
         JSONArray titles = vn.optJSONArray("titles");
@@ -254,6 +278,36 @@ public final class VndbClient {
             }
         }
         return false;
+    }
+
+    /**
+     * 判断查询词是否是某个名称字段的「子串」。
+     * <p>
+     * 只在完全相等失败时才用。VNDB 的标题经常带副标题
+     * （如 {@code 西園家のかくしゴト - The Secret Revealed by the Lens -}），
+     * 而本地存的往往只是主标题，所以必须允许这种包含关系。
+     * <p>
+     * 约束：查询词归一化后至少 4 个字符，避免「爱」这种短词误匹配一堆作品。
+     */
+    private static boolean titleContains(String normalizedQuery, JSONObject vn) {
+        if (normalizedQuery.length() < 4) return false;
+        if (containsNorm(normalizedQuery, vn.optString("title", ""))) return true;
+        if (containsNorm(normalizedQuery, vn.optString("alttitle", ""))) return true;
+        JSONArray titles = vn.optJSONArray("titles");
+        if (titles != null) {
+            for (int i = 0; i < titles.length(); i++) {
+                JSONObject t = titles.optJSONObject(i);
+                if (t == null) continue;
+                if (containsNorm(normalizedQuery, t.optString("title", ""))) return true;
+                if (containsNorm(normalizedQuery, t.optString("latin", ""))) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsNorm(String normalizedNeedle, String haystack) {
+        String h = normalizeTitle(haystack);
+        return !h.isEmpty() && h.contains(normalizedNeedle);
     }
 
     /**
