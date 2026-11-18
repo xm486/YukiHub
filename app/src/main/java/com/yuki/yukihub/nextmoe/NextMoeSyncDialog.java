@@ -65,20 +65,19 @@ public final class NextMoeSyncDialog {
 
     /**
      * 从首页按钮调起。已在主线程。
+     * <p>
+     * <b>绝对不能在这里调 {@link NextMoeAuth#ensureAccessToken()}</b>：
+     * access token 15 分钟就过期，一旦过期该方法内部会发网络请求刷新，
+     * 而主线程发网络请求会被 StrictMode 直接抛 {@code NetworkOnMainThreadException}。
+     * <p>
+     * 旧实现正是在这里同步刷新，结果每次「过期后点按钮」都必然异常，
+     * 异常又被刷新逻辑当成凭据失效清掉 —— 表现为「登录莫名其妙掉了」。
+     * <p>
+     * 现在改为：只做纯本地的 {@code isConnected()} 判断（不联网），
+     * 令牌过期与否交给 {@link #runPrepare} 在 IO 线程里处理。
      */
     public static void start(Activity activity) {
         if (!NextMoeAuthStore.isConnected()) {
-            showNeedAuth(activity);
-            return;
-        }
-        // 过期令牌会在这里被刷新；拿不到就是会话失效
-        String token;
-        try {
-            token = NextMoeAuth.ensureAccessToken();
-        } catch (Throwable t) {
-            token = null;
-        }
-        if (token == null || token.isEmpty()) {
             showNeedAuth(activity);
             return;
         }
@@ -135,6 +134,36 @@ public final class NextMoeSyncDialog {
         pd.show();
 
         AppExecutors.runOnIo(() -> {
+            // 令牌过期时的刷新必须在这里做 —— 这是 IO 线程，可以发网络请求。
+            // 主线程调 ensureAccessToken() 会抛 NetworkOnMainThreadException。
+            String token = null;
+            try {
+                token = NextMoeAuth.ensureAccessToken();
+            } catch (Throwable t) {
+                android.util.Log.w("NextMoeSync", "ensureAccessToken failed in prepare", t);
+            }
+            if (token == null || token.isEmpty()) {
+                // 拿不到令牌：要么凭据已被清掉，要么刷新暂时失败。
+                // 不能只报「同步失败」——要区分「需要重新授权」和「网络问题，凭据还在」。
+                final boolean stillConnected = NextMoeAuthStore.isConnected();
+                UI.post(() -> {
+                    safeDismiss(pd);
+                    if (!alive(activity)) return;
+                    if (stillConnected) {
+                        new AlertDialog.Builder(activity)
+                                .setTitle("暂时无法连接")
+                                .setMessage("刷新登录状态失败，可能是网络问题。\n\n"
+                                        + "你的 NextMoe 授权仍然保留，请检查网络后重试，不需要重新授权。")
+                                .setPositiveButton("重试", (d, w) -> runPrepare(activity))
+                                .setNegativeButton("取消", null)
+                                .show();
+                    } else {
+                        showNeedAuth(activity);
+                    }
+                });
+                return;
+            }
+
             try {
                 NextMoeSyncService.Preview preview = NextMoeSyncService.prepare(activity, (done, total) -> {
                     UI.post(() -> {
@@ -185,24 +214,18 @@ public final class NextMoeSyncDialog {
         // ---- 本次有更新（最重要的分组，放最前面）----
         // 首次全量同步之后，绝大多数条目都是「没变化」的；
         // 把它们和真正要改动的混在一起列，用户根本看不出这次会动什么。
+        //
+        // 注意：这里绝对不能有「changed 为空就退化成一堆 items」的兜底。
+        // changed 为空的意思就是「本次没有需要更新的」——那正是最常见的情况，
+        // 硬凑一份列表出来反而会显示成「38 个都有更新」，与实际完全相反。
+        // Preview 由 NextMoeSyncService.prepare 统一构造，changed/skipped 一定已分好类。
         List<NextMoeSyncService.ChangeItem> changed = preview.changed;
-        if (changed.isEmpty() && !preview.items.isEmpty()) {
-            // 兜底：Preview 被别处构造时可能没填 changed，退化成「全部视为变化」
-            changed = new ArrayList<>();
-            for (NextMoeWorkResolver.Matched m : preview.items) {
-                changed.add(new NextMoeSyncService.ChangeItem(m,
-                        m.game.nextmoeSyncedSig, NextMoeSyncService.signatureOf(m.game),
-                        m.game.nextmoeSyncedAt <= 0));
-            }
-        }
-
         if (!changed.isEmpty()) {
             root.addView(sectionHeader(activity, "本次有更新（" + changed.size() + "）"));
             for (NextMoeSyncService.ChangeItem c : changed) {
                 root.addView(row(activity, c.matched.game.title, describeChange(c)));
             }
         }
-
         // ---- 与上次相同，将跳过（折叠，避免长列表淹没重点）----
         if (!preview.skipped.isEmpty()) {
             root.addView(collapsibleSection(activity,

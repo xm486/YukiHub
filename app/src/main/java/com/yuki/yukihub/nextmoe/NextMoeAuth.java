@@ -197,8 +197,16 @@ public final class NextMoeAuth {
      * 其余一切情况（含 IOException、JSON 解析失败、未知错误码）都按「暂时不可用」处理，
      * 保守地保留凭据 —— 多保留一次的代价只是下轮再试，
      * 而误清除的代价是用户必须重新授权。
+     * <p>
+     * <b>特别排除 NetworkOnMainThreadException</b>：它表示「调用方在错误的线程上」，
+     * 是纯客户端的编程错误，与凭据有效性毫无关系。早期版本正是把它当成失效，
+     * 导致每次主线程触发刷新都把用户登出。
      */
     private static boolean isCredentialInvalid(Throwable t) {
+        // 客户端侧错误：一律不当成凭据失效
+        if (t instanceof android.os.NetworkOnMainThreadException) return false;
+        if (t instanceof InterruptedException) return false;
+
         if (!(t instanceof OAuthException)) return false;
         OAuthException e = (OAuthException) t;
         if (e.transientError) return false;
