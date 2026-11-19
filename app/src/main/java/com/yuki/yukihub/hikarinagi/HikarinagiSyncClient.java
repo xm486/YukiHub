@@ -543,8 +543,12 @@ public final class HikarinagiSyncClient {
      *   <li>命中后立刻停，不再尝试后面的候选词。</li>
      * </ol>
      * 这样做的前提是<b>查询词本身足够精确</b>（原名/罗马字/完整标题），
-     * 而不是「時計仕掛けのレイライン」这种只有系列名的泛词——
-     * 泛词会在别处被过滤掉（见 {@code isSeriesOnlyQuery}）。
+     * 而不是「時計仕掛けのレイライン」这种只有系列名的泛词。
+     * <p>
+     * 注意这里<b>不做泛词过滤</b>：没有额外的「系列名识别层」，
+     * 这一级只认「完全相等」与「包含关系」两种判据。
+     * 也就是说匹配刻意偏宽松——宁可在少量条目上认错，
+     * 也不因为用户多打一个字就整条匹配不上。
      */
     private static Long pickFromCandidates(String nq, JSONArray items, String query) {
         if (items == null || items.length() == 0) return null;
