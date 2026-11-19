@@ -2438,72 +2438,142 @@ private void showProfileDialog() {
     syncLp.setMargins(dp(8), 0, 0, 0);
     accountRow.addView(syncBtn, syncLp);
     root.addView(accountRow);
-    // NextMoe 游玩记录同步：独立入口，刻意与上面的「云同步」分开。
-    // 两者语义完全不同：云同步是本项目服务器上的全量快照（双向），
-    // 这里只把游玩时长与状态单向推给第三方 NextMoe，且失败不影响任何本地数据。
-    Button nextMoeSyncBtn = krButton(nextMoeSyncButtonLabel());
-    nextMoeSyncBtn.setTextColor(primaryTextColor());
-    nextMoeSyncBtn.setOnClickListener(v -> openNextMoeSync());
-    LinearLayout.LayoutParams nMoeLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
-    nMoeLp.setMargins(0, dp(8), 0, 0);
-    root.addView(nextMoeSyncBtn, nMoeLp);
-    TextView nextMoeSyncHint = new TextView(this);
-    nextMoeSyncHint.setText(nextMoeSyncStatusText());
-    nextMoeSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
-    nextMoeSyncHint.setTextSize(10);
-    nextMoeSyncHint.setPadding(0, dp(4), 0, 0);
-    root.addView(nextMoeSyncHint);
+    // ==================== 第三方同步：折叠式汇总入口 ====================
+    // 原先这里是 4 个「按钮 + 状态小字」上下排开，占掉很大一块高度，
+    // 而用户真正想看的是游戏库。现在收成一个可折叠卡片：
+    //   折叠态 = 一行摘要（四色图标 + 已连接数 + 最近同步时间）
+    //   展开态 = 四个平台各自的入口（点哪个开哪个，逻辑与原来完全一致）
+    // 四个 open*Sync() 一个没动，只是换了触发位置。
+    final LinearLayout syncSection = new LinearLayout(this);
+    syncSection.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    sectionLp.setMargins(0, dp(8), 0, 0);
+    root.addView(syncSection, sectionLp);
 
-    // VNDB 游玩状态同步：与上面的 NextMoe 入口并列。
-    // 两者都是「单向推送到第三方」，但机制完全不同（VNDB 用手动 API token，
-    // 且只同步状态、不同步时长），所以各自独立一个按钮，互不影响。
-    Button vndbSyncBtn = krButton("同步到 VNDB");
-    vndbSyncBtn.setTextColor(primaryTextColor());
-    vndbSyncBtn.setOnClickListener(v -> openVndbSync());
-    LinearLayout.LayoutParams vndbLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
-    vndbLp.setMargins(0, dp(8), 0, 0);
-    root.addView(vndbSyncBtn, vndbLp);
-TextView vndbSyncHint = new TextView(this);
-    vndbSyncHint.setText(vndbSyncStatusText());
-    vndbSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
-    vndbSyncHint.setTextSize(10);
-    vndbSyncHint.setPadding(0, dp(4), 0, 0);
-    root.addView(vndbSyncHint);
+    // ---------- 折叠头 ----------
+    final LinearLayout syncHead = new LinearLayout(this);
+    syncHead.setOrientation(LinearLayout.HORIZONTAL);
+    syncHead.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    syncHead.setPadding(dp(11), dp(9), dp(11), dp(9));
+    syncHead.setBackground(roundedBg(dp(11), adaptiveTint(0x2A), adaptiveLine(0x3A)));
 
-    // Bangumi 游玩状态同步：与 NextMoe / VNDB 并列的第三个独立入口。
-    // 同样只同步状态，用独立的 Access Token（不复用元数据里那个，
-    // 免得用户还要去设置页翻）。
-    Button bangumiSyncBtn = krButton("同步到 Bangumi");
-    bangumiSyncBtn.setTextColor(primaryTextColor());
-    bangumiSyncBtn.setOnClickListener(v -> openBangumiSync());
-    LinearLayout.LayoutParams bgmLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
-    bgmLp.setMargins(0, dp(8), 0, 0);
-    root.addView(bangumiSyncBtn, bgmLp);
-    TextView bangumiSyncHint = new TextView(this);
-    bangumiSyncHint.setText(bangumiSyncStatusText());
-    bangumiSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
-    bangumiSyncHint.setTextSize(10);
-    bangumiSyncHint.setPadding(0, dp(4), 0, 0);
-    root.addView(bangumiSyncHint);
+    // 四色叠加图标
+    FrameLayout chipStack = new FrameLayout(this);
+    String[] chipLetters = {"H", "B", "V", "N"};
+    int[] chipColors = {0xFF8AB4FF, 0xFFFF8AB3, 0xFF5BC8D6, 0xFF34C759};
+    for (int i = 0; i < 4; i++) {
+        TextView chip = new TextView(this);
+        chip.setText(chipLetters[i]);
+        chip.setTextSize(8.5f);
+        chip.setTextColor(0xFFFFFFFF);
+        chip.setTypeface(null, android.graphics.Typeface.BOLD);
+        chip.setGravity(android.view.Gravity.CENTER);
+        chip.setBackground(roundedBg(dp(6), chipColors[i], 0));
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(dp(17), dp(17));
+        // 2x2 摆放：0=左上 1=右上 2=左下 3=右下
+        clp.leftMargin = (i % 2 == 0) ? 0 : dp(19);
+        clp.topMargin = (i < 2) ? 0 : dp(19);
+        chipStack.addView(chip, clp);
+    }
+    syncHead.addView(chipStack, new LinearLayout.LayoutParams(dp(36), dp(36)));
 
-    // Hikarinagi 游玩状态同步：与 NextMoe / VNDB / Bangumi 并列的第四个独立入口。
-    // 唯一能同时写「状态 + 时长」的一个，且用批量接口（库大也只有 1 次写请求）。
-    Button hikarinagiSyncBtn = krButton("同步到 Hikarinagi");
-    hikarinagiSyncBtn.setTextColor(primaryTextColor());
-    hikarinagiSyncBtn.setOnClickListener(v -> openHikarinagiSync());
-    LinearLayout.LayoutParams hkgLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
-    hkgLp.setMargins(0, dp(8), 0, 0);
-    root.addView(hikarinagiSyncBtn, hkgLp);
-    TextView hikarinagiSyncHint = new TextView(this);
-    hikarinagiSyncHint.setText(hikarinagiSyncStatusText());
-    hikarinagiSyncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
-    hikarinagiSyncHint.setTextSize(10);
-    hikarinagiSyncHint.setPadding(0, dp(4), 0, 0);
-    root.addView(hikarinagiSyncHint);
+    // 标题 + 摘要
+    LinearLayout syncTitleBox = new LinearLayout(this);
+    syncTitleBox.setOrientation(LinearLayout.VERTICAL);
+    syncTitleBox.setPadding(dp(10), 0, 0, 0);
+    TextView syncSectionTitle = new TextView(this);
+    syncSectionTitle.setText("同步游玩状态");
+    syncSectionTitle.setTextSize(13);
+    syncSectionTitle.setTextColor(primaryTextColor());
+    syncSectionTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+    syncTitleBox.addView(syncSectionTitle);
+    final TextView syncSummary = new TextView(this);
+    syncSummary.setText(syncSummaryText());
+    syncSummary.setTextSize(10);
+    syncSummary.setTextColor(getColorCompat(R.color.yh_text_muted));
+    syncSummary.setPadding(0, dp(3), 0, 0);
+    syncSummary.setSingleLine(true);
+    syncSummary.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    syncTitleBox.addView(syncSummary);
+    syncHead.addView(syncTitleBox, new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+    // 右侧迷你状态点：亮=已连接，灰=未连接
+    LinearLayout miniDots = new LinearLayout(this);
+    miniDots.setOrientation(LinearLayout.HORIZONTAL);
+    miniDots.setGravity(android.view.Gravity.CENTER_VERTICAL);
+    boolean[] connectedStates = {
+            com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this),
+            com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this),
+            com.yuki.yukihub.vndb.VndbSyncService.isConnected(this),
+            com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()
+    };
+    for (int i = 0; i < 4; i++) {
+        View dot = new View(this);
+        dot.setBackground(roundedBg(dp(3),
+                connectedStates[i] ? chipColors[i] : adaptiveTint(0x22), 0));
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(6), dp(6));
+        if (i > 0) dlp.setMargins(dp(4), 0, 0, 0);
+        miniDots.addView(dot, dlp);
+    }
+    syncHead.addView(miniDots);
+
+    // 展开箭头
+    final TextView syncChevron = new TextView(this);
+    syncChevron.setText("⌄");
+    syncChevron.setTextSize(13);
+    syncChevron.setTextColor(getColorCompat(R.color.yh_primary));
+    syncChevron.setPadding(dp(9), 0, 0, 0);
+    syncHead.addView(syncChevron);
+
+    // ---------- 折叠体：四个平台 ----------
+    final LinearLayout syncBody = new LinearLayout(this);
+    syncBody.setOrientation(LinearLayout.VERTICAL);
+    syncBody.setPadding(0, dp(6), 0, 0);
+    syncBody.setVisibility(View.GONE);
+
+    addSyncSourceRow(syncBody, "H", 0xFF8AB4FF,
+            "Hikarinagi",
+            com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this),
+            hikarinagiSyncStatusText(),
+            v -> openHikarinagiSync());
+    addSyncSourceRow(syncBody, "B", 0xFFFF8AB3,
+            "Bangumi",
+            com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this),
+            bangumiSyncStatusText(),
+            v -> openBangumiSync());
+    addSyncSourceRow(syncBody, "V", 0xFF5BC8D6,
+            "VNDB",
+            com.yuki.yukihub.vndb.VndbSyncService.isConnected(this),
+            vndbSyncStatusText(),
+            v -> openVndbSync());
+    addSyncSourceRow(syncBody, "N", 0xFF34C759,
+            "NextMoe",
+            com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected(),
+            nextMoeSyncStatusText(),
+            v -> openNextMoeSync());
+
+    // 开关
+    final boolean[] syncExpanded = {false};
+    syncHead.setOnClickListener(v -> {
+        syncExpanded[0] = !syncExpanded[0];
+        if (syncExpanded[0]) {
+            syncBody.setVisibility(View.VISIBLE);
+            syncBody.setAlpha(0f);
+            syncBody.animate().alpha(1f).setDuration(180).start();
+            syncChevron.setText("⌃");
+            syncHead.setBackground(roundedBg(dp(11), adaptiveTint(0x3A), adaptiveLine(0x55)));
+        } else {
+            syncBody.animate().alpha(0f).setDuration(140)
+                    .withEndAction(() -> syncBody.setVisibility(View.GONE)).start();
+            syncChevron.setText("⌄");
+            syncHead.setBackground(roundedBg(dp(11), adaptiveTint(0x2A), adaptiveLine(0x3A)));
+        }
+    });
+
+    syncSection.addView(syncHead);
+    syncSection.addView(syncBody);
 
     LinearLayout kunRow = new LinearLayout(this);
     kunRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3165,16 +3235,11 @@ private void showAccountSettingsDialog() {
 }
 
 // ==================== NextMoe 游玩记录同步 ====================
-
-    /** 首页按钮文案：未绑定时提示去绑定，已绑定时是正常动作。 */
-    private String nextMoeSyncButtonLabel() {
-        if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
-            return "绑定 NextMoe 账号";
-        }
-        return "同步游玩记录到 NextMoe";
-    }
-
-    /** 按钮下方的状态小字。 */
+    // 说明：原先这里还有 nextMoeSyncButtonLabel()（返回「绑定 NextMoe 账号」/
+    // 「同步游玩记录到 NextMoe」），是首页那个独立按钮的文案。
+    // 现在四个平台收进「同步游玩状态」折叠卡，卡片里固定显示平台名，
+    // 不再需要动态按钮文案，故删除。nextMoeSyncStatusText() 仍在用（卡片里的状态小字）。
+    /** 卡片里的状态小字。 */
     private String nextMoeSyncStatusText() {
         if (!com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
             return "绑定后可把游玩时长与状态同步到 NextMoe（未萌）";
@@ -11518,6 +11583,166 @@ return b;
     private int primaryTextColor() {
         DynamicTheme dt = DynamicTheme.getInstance();
         return (dt.isEnabled() && dt.getColors() != null) ? 0xFFFFFFFF : getColorCompat(R.color.yh_primary);
+    }
+
+    // ==================== 第三方同步汇总卡：辅助方法 ====================
+
+    /**
+     * 造一个纯色圆角背景（描边可选）。
+     * <p>
+     * 项目里原有若干 tintXxx() 各自造 GradientDrawable，但都绑定了特定用途，
+     * 这里需要通用的小圆角背景（chip、圆点、卡片头），所以单独抽一个。
+     *
+     * @param radius    圆角半径（像素，已 dp 化）
+     * @param fillColor 填充色（含 alpha）
+     * @param strokeColor 描边色（含 alpha）；传 0 表示不描边
+     */
+    private android.graphics.drawable.GradientDrawable roundedBg(int radius, int fillColor, int strokeColor) {
+        android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
+        d.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        d.setColor(fillColor);
+        d.setCornerRadius(radius);
+        if (strokeColor != 0) d.setStroke(dp(1), strokeColor);
+        return d;
+    }
+
+    /**
+     * 半透明白色（跟随主题深浅用的通用叠色）。
+     * 动态主题开启时也用白色叠加，因为它是在卡片底色上加的一层薄雾，
+     * 与卡片自身的 tint 叠加后自然适配任意配色。
+     */
+    private int adaptiveTint(int alphaHex) {
+        return ((alphaHex & 0xFF) << 24) | 0x00FFFFFF;
+    }
+
+    /**
+     * 半透明描边色。
+     * 主题开启时用主题 primary 上色（更有整体感），
+     * 否则用固定的 yh_line，与其它卡片保持一致。
+     */
+    private int adaptiveLine(int alphaHex) {
+        DynamicTheme dt = DynamicTheme.getInstance();
+        int base = (dt.isEnabled() && dt.getColors() != null)
+                ? dt.getColors().primary
+                : getColorCompat(R.color.yh_line);
+        return ((alphaHex & 0xFF) << 24) | (base & 0x00FFFFFF);
+    }
+
+    /**
+     * 折叠态那一行摘要文字，例如：
+     * 「2 个已连接 · 最近 11-19 13:59」/「均未连接 · 点开展开」
+     */
+    private String syncSummaryText() {
+        int conn = 0;
+        long latest = 0L;
+        if (com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this)) {
+            conn++;
+            latest = Math.max(latest, com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.lastSyncAt(this));
+        }
+        if (com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this)) {
+            conn++;
+            latest = Math.max(latest, com.yuki.yukihub.bangumi.BangumiSyncService.lastSyncAt(this));
+        }
+        if (com.yuki.yukihub.vndb.VndbSyncService.isConnected(this)) {
+            conn++;
+            latest = Math.max(latest, com.yuki.yukihub.vndb.VndbSyncService.lastSyncAt(this));
+        }
+        if (com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected()) {
+            conn++;
+        }
+        if (conn == 0) return "4 个平台 · 均未连接";
+        String base = "4 个平台 · " + conn + " 个已连接";
+        if (latest <= 0) return base + " · 尚未同步";
+        return base + " · 最近 " + TimeFormatUtil.date(latest);
+    }
+
+    /**
+     * 往折叠体里加一行「平台入口」。
+     * <p>
+     * 每行：左侧色块字母图标 + 平台名 + 连接状态徽章 + 状态小字 + 右侧箭头。
+     * 点击整行即触发对应平台的同步弹窗（与原按钮行为一致）。
+     *
+     * @param parent    折叠体容器
+     * @param letter    图标上的字母（H/B/V/N）
+     * @param color     平台品牌色
+     * @param name      平台名
+     * @param connected 是否已连接（决定徽章文案与颜色）
+     * @param status    状态小字（沿用原来的 xxxSyncStatusText()）
+     * @param onClick   点击动作（沿用原来的 openXxxSync()）
+     */
+    private void addSyncSourceRow(LinearLayout parent, String letter, int color,
+                                  String name, boolean connected, String status,
+                                  android.view.View.OnClickListener onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        row.setBackground(roundedBg(dp(10), adaptiveTint(0x14), adaptiveLine(0x28)));
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, dp(5), 0, 0);
+
+        // 左侧字母色块
+        TextView icon = new TextView(this);
+        icon.setText(letter);
+        icon.setTextSize(11);
+        icon.setTextColor(0xFFFFFFFF);
+        icon.setTypeface(null, android.graphics.Typeface.BOLD);
+        icon.setGravity(android.view.Gravity.CENTER);
+        icon.setBackground(roundedBg(dp(8), color, 0));
+        row.addView(icon, new LinearLayout.LayoutParams(dp(26), dp(26)));
+
+        // 中间：平台名 + 徽章 / 状态小字
+        LinearLayout mid = new LinearLayout(this);
+        mid.setOrientation(LinearLayout.VERTICAL);
+        mid.setPadding(dp(9), 0, dp(6), 0);
+
+        LinearLayout nameRow = new LinearLayout(this);
+        nameRow.setOrientation(LinearLayout.HORIZONTAL);
+        nameRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView nameView = new TextView(this);
+        nameView.setText(name);
+        nameView.setTextSize(12);
+        nameView.setTextColor(primaryTextColor());
+        nameView.setTypeface(null, android.graphics.Typeface.BOLD);
+        nameRow.addView(nameView);
+
+        TextView badge = new TextView(this);
+        badge.setText(connected ? "已连接" : "未连接");
+        badge.setTextSize(8.5f);
+        badge.setTextColor(connected ? 0xFF34C759 : getColorCompat(R.color.yh_text_muted));
+        badge.setBackground(roundedBg(dp(999),
+                connected ? ((0x24 << 24) | 0x0034C759) : adaptiveTint(0x18), 0));
+        badge.setPadding(dp(6), dp(1), dp(6), dp(1));
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        badgeLp.setMargins(dp(6), 0, 0, 0);
+        nameRow.addView(badge, badgeLp);
+        mid.addView(nameRow);
+
+        TextView statusView = new TextView(this);
+        statusView.setText(status);
+        statusView.setTextSize(9.5f);
+        statusView.setTextColor(getColorCompat(R.color.yh_text_muted));
+        statusView.setPadding(0, dp(3), 0, 0);
+        statusView.setSingleLine(true);
+        statusView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mid.addView(statusView);
+
+        row.addView(mid, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        // 右侧箭头
+        TextView arrow = new TextView(this);
+        arrow.setText("›");
+        arrow.setTextSize(14);
+        arrow.setTextColor(getColorCompat(R.color.yh_primary));
+        row.addView(arrow);
+
+        row.setOnClickListener(v -> {
+            if (onClick != null) onClick.onClick(v);
+        });
+        parent.addView(row, rowLp);
     }
 
     /** Create an ArrayAdapter with dynamic theme text colors for Spinner. */
