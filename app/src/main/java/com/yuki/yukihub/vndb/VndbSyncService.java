@@ -221,7 +221,10 @@ public final class VndbSyncService {
         //   丢弃「我们自己搜的缓存」(games.vndb_vn_id)，让条目重新走标题搜索；
         //   但保留「站点锚点」(metadata_cache)，那是刮削来的可信数据。
         //   搜索规则（候选词原名优先）一概不动。
-
+        //
+        // 注意：vndb_vn_id 是 Game 上的字段而不是独立 Map（与另外三个源不同），
+        // 所以这里没法像它们那样 clear() 一个集合，改为在下面第 1 级判断里
+        // 加 !forceResync 前置条件。语义完全等价。
         List<Game> all = repo.getAll();
         List<Matched> matched = new ArrayList<>();
         List<Game> needTitleSearch = new ArrayList<>();
