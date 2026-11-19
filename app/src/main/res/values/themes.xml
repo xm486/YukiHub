@@ -10,6 +10,12 @@
         <item name="colorPrimary">@color/yh_primary</item>
         <item name="colorPrimaryVariant">@color/yh_bg_2</item>
         <item name="colorOnPrimary">@color/yh_bg</item>
+
+        <!-- 全局弹窗外观（圆角 18dp / 渐变底 / 主题色描边 / 自绘按钮）。
+             这一行让全项目 120+ 处 AlertDialog 统一换壳，调用代码一行不用动。
+             具体样式见 values/styles_dialog.xml。 -->
+        <item name="alertDialogTheme">@style/Theme.YukiHub.AlertDialog</item>
+        <item name="materialAlertDialogTheme">@style/Theme.YukiHub.AlertDialog</item>
     </style>
 
     <style name="AppTheme" parent="Base.AppTheme" />
