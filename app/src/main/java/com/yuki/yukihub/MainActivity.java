@@ -6160,66 +6160,46 @@ private String cacheRemoteImageSync(String url, String prefix) {
     return metadataController.cacheRemoteImageSync(url, prefix);
 }
 
-/**
-     * 统一把 AlertDialog 染成站内深色风格。
-     * <p>
-     * <b>历史</b>：早期靠这里逐项 setBackground / setTextColor 来「手动染黑」系统弹窗，
-     * 因为那时没有统一主题。后来在 Base.AppTheme 里加了 {@code alertDialogTheme}
-     * （见 values/styles_dialog.xml），**主题已经负责了背景与按钮样式**，
-     * 这里如果继续 setBackgroundDrawableResource(R.drawable.bg_dialog)，
-     * 就会把主题里的 18dp 圆角渐变底又覆盖回旧的 10dp 纯色底——
-     * 这正是「改了主题却看不出差别」的原因。
-     * <p>
-     * <b>现在的职责</b>：只补主题管不到的部分——
-     * 动态主题开启时按提取出的配色重绘背景/按钮，
-     * 以及少数系统控件（标题、message、ListView）的文字色兜底。
-     * 未开动态主题时<b>不再覆盖背景</b>，交给 alertDialogTheme。
-     */
-    private void styleAlertDialogDark(AlertDialog dialog) {
-        if (dialog == null) return;
-        try {
-            Window w = dialog.getWindow();
+private void styleAlertDialogDark(AlertDialog dialog) {
+    if (dialog == null) return;
+    try {
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawableResource(R.drawable.bg_dialog);
             DynamicTheme dt = DynamicTheme.getInstance();
-            final boolean themed = dt.isEnabled() && dt.getColors() != null;
-
-            if (w != null && themed) {
-                // 仅在动态主题开启时覆盖：此时用户选了自定义配色，
-                // 必须按该配色重绘，否则与主题内其它元素不协调。
+            if (dt.isEnabled() && dt.getColors() != null) {
                 w.setBackgroundDrawable(tintDialog(dt.getColors()));
             }
-            // 未开动态主题：背景交由 alertDialogTheme（18dp 圆角 + 渐变 + 主题色描边），不再干预
-
-            int text = getColorCompat(R.color.yh_text);
-            int muted = getColorCompat(R.color.yh_text_muted);
-            int primary = getColorCompat(R.color.yh_primary);
-            int titleId = getResources().getIdentifier("alertTitle", "id", "android");
-            TextView title = dialog.findViewById(titleId);
-            if (title != null) title.setTextColor(text);
-            TextView msg = dialog.findViewById(android.R.id.message);
-            if (msg != null) msg.setTextColor(muted);
-
-            Button p = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-            Button n = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
-            Button neu = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            if (themed) {
-                ThemeColorExtractor.ThemeColors dc = dt.getColors();
-                if (p != null) { p.setBackground(tintButton(dc)); p.setTextColor(0xFFFFFFFF); }
-                if (n != null) { n.setBackground(tintInput(dc)); n.setTextColor(0xFFFFFFFF); }
-                if (neu != null) { neu.setBackground(tintInput(dc)); neu.setTextColor(0xFFFFFFFF); }
-            } else {
-                // 未开动态主题：只给文字上主色，背景/圆角/涟漪全部交给 alertDialogTheme，
-                // 避免把主题样式（圆角、涟漪）覆盖成纯色方块。
-                if (p != null) p.setTextColor(primary);
-                if (n != null) n.setTextColor(primary);
-                if (neu != null) neu.setTextColor(primary);
-            }
-            android.widget.ListView list = dialog.getListView();
-            if (list != null) {
-                list.setBackgroundColor(Color.TRANSPARENT);
-                list.setCacheColorHint(Color.TRANSPARENT);
-            }
-        } catch (Throwable ignored) { }
-    }
+        }
+        int text = getColorCompat(R.color.yh_text);
+        int muted = getColorCompat(R.color.yh_text_muted);
+        int primary = getColorCompat(R.color.yh_primary);
+        int titleId = getResources().getIdentifier("alertTitle", "id", "android");
+        TextView title = dialog.findViewById(titleId);
+        if (title != null) title.setTextColor(text);
+        TextView msg = dialog.findViewById(android.R.id.message);
+        if (msg != null) msg.setTextColor(muted);
+        Button p = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        Button n = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        Button neu = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        DynamicTheme dt2 = DynamicTheme.getInstance();
+        if (dt2.isEnabled() && dt2.getColors() != null) {
+            ThemeColorExtractor.ThemeColors dc = dt2.getColors();
+            if (p != null) { p.setBackground(tintButton(dc)); p.setTextColor(0xFFFFFFFF); }
+            if (n != null) { n.setBackground(tintInput(dc)); n.setTextColor(0xFFFFFFFF); }
+            if (neu != null) { neu.setBackground(tintInput(dc)); neu.setTextColor(0xFFFFFFFF); }
+        } else {
+            if (p != null) p.setTextColor(primary);
+            if (n != null) n.setTextColor(primary);
+            if (neu != null) neu.setTextColor(primary);
+        }
+        android.widget.ListView list = dialog.getListView();
+        if (list != null) {
+            list.setBackgroundColor(Color.TRANSPARENT);
+            list.setCacheColorHint(Color.TRANSPARENT);
+        }
+    } catch (Throwable ignored) { }
+}
 
 private void showSideOptions(Game game) {
         if (game == null) return;
