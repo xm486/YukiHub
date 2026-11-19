@@ -60,6 +60,13 @@ public class SyncProgressDialog {
     private int lastPercent = 0;
     private boolean finished = false;
 
+    /** 无进度回调时的保底推进（Handler 驱动，只做视觉，不假装真实数据）。 */
+    private final android.os.Handler creepHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable creepRunnable;
+    /** 保底推进的上限百分比，绝不越过（避免假装已完成）。 */
+    private static final int CREEP_CEILING = 86;
+
     private SyncProgressDialog(Activity activity, String sourceName) {
         this.activity = activity;
         this.dialog = new Dialog(activity);
@@ -90,14 +97,6 @@ public class SyncProgressDialog {
         LinearLayout center = new LinearLayout(activity);
         center.setOrientation(LinearLayout.VERTICAL);
         center.setGravity(Gravity.CENTER);
-        pctView = new TextView(activity);
-        pctView.setText("0%");
-        pctView.setTextSize(21);
-        pctView.setTextColor(0xFFF5F7FF);
-        pctView.setTypeface(null, android.graphics.Typeface.BOLD);
-        pctView.setGravity(Gravity.CENTER);
-        center.addView(pctView);
-
         countView = new TextView(activity);
         countView.setTextSize(9.5f);
         countView.setTextColor(0xFF9AA4BF);
@@ -108,6 +107,30 @@ public class SyncProgressDialog {
         ringBox.addView(center, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         card.addView(ringBox, new LinearLayout.LayoutParams(ringSize, ringSize));
+
+        // 大号百分比（盖在环中间）。原先误加在 center 里导致与实际层级不符，
+        // 这里显式放到 ringBox 上层并居中。
+        pctView = new TextView(activity);
+        pctView.setText("0%");
+        pctView.setTextSize(21);
+        pctView.setTextColor(0xFFF5F7FF);
+        pctView.setTypeface(null, android.graphics.Typeface.BOLD);
+        pctView.setGravity(Gravity.CENTER);
+        android.widget.FrameLayout.LayoutParams pctLp =
+                new android.widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pctLp.gravity = Gravity.CENTER;
+        // 稍微上移，给下面的 0 / 39 留位
+        pctLp.bottomMargin = dp * 10;
+        ringBox.addView(pctView, pctLp);
+
+        android.widget.FrameLayout.LayoutParams cntLp =
+                new android.widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cntLp.gravity = Gravity.CENTER;
+        cntLp.topMargin = dp * 30;
+        ringBox.removeView(countView);
+        ringBox.addView(countView, cntLp);
 
         // ---------- 右：标题 + 阶段 + 步骤 ----------
         LinearLayout right = new LinearLayout(activity);
@@ -191,27 +214,62 @@ public class SyncProgressDialog {
         return d;
     }
 
-    /** 阶段 1：读取本地库（0% 起步）。 */
+    /** 阶段 1：读取本地库（从 0% 起步，并启动保底爬升）。 */
     public void stageReading() {
         stageView.setText("读取本地游戏库…");
-        setProgress(0, 0, 0f);
+        ring.setIndeterminate(false);
+        lastPercent = 0;
+        ring.resetProgress();
+        pctView.setText("0%");
+        countView.setText("");
         setStepState(0, STATE_ACTIVE);
+        startCreep();
     }
 
     /**
      * 阶段 2：匹配中。
+     * <p>
+     * 这里有两条路：
+     * <ul>
+     *   <li>有真实回调（done/total 单调增长）→ 用真实比例，同时关掉保底爬升</li>
+     *   <li>total <= 0（数据源没有回调）→ 保持保底爬升，环继续往上走，
+     *       不会卡在 0% 让用户以为卡死</li>
+     * </ul>
      *
      * @param done  已完成条数
-     * @param total 总条数
+     * @param total 总条数；<=0 表示未知（无进度回调）
      */
     public void stageMatching(int done, int total) {
         if (finished) return;
-        stageView.setText("匹配中… " + done + " / " + total);
         setStepState(0, STATE_DONE);
         setStepState(1, STATE_ACTIVE);
+
+        if (total <= 0) {
+            stageView.setText("匹配中…");
+            return;   // 保持 creep 兜底
+        }
+
+        stopCreep();
+        stageView.setText("匹配中… " + done + " / " + total);
+        countView.setText(done + " / " + total);
         // 匹配占 10% ~ 88%
-        float ratio = 0.10f + 0.78f * (total <= 0 ? 0f : Math.min(1f, done / (float) total));
-        setProgress(done, total, ratio);
+        float ratio = 0.10f + 0.78f * Math.min(1f, done / (float) total);
+        applyPercent(Math.round(ratio * 100f));
+    }
+
+    /**
+     * 数据源完全没有进度回调（如 NextMoe 的 resolve）。
+     * 用不确定模式转圈，让用户知道还在跑，而不是卡在 0%。
+     */
+    public void stageMatchingUnknown() {
+        if (finished) return;
+        setStepState(0, STATE_DONE);
+        setStepState(1, STATE_ACTIVE);
+        stageView.setText("匹配中…");
+        countView.setText("");
+        stopCreep();
+        ring.setIndeterminate(true);
+        pctView.setText("…");
     }
 
     /** 阶段 3：写入云端。 */
@@ -221,7 +279,8 @@ public class SyncProgressDialog {
         setStepState(0, STATE_DONE);
         setStepState(1, STATE_DONE);
         setStepState(2, STATE_ACTIVE);
-        // 写入占 88% ~ 100%；这里先到 94%，真正的 100% 由 finish() 给
+        stopCreep();
+        ring.setIndeterminate(false);
         applyPercent(94);
     }
 
@@ -234,7 +293,42 @@ public class SyncProgressDialog {
         setStepState(1, STATE_DONE);
         setStepState(2, STATE_DONE);
         setStepState(3, STATE_DONE);
+        stopCreep();
+        ring.setIndeterminate(false);
         applyPercent(100);
+    }
+
+    /**
+     * 保底爬升：当没有真实进度回调时，让百分比缓慢往 CREEP_CEILING 爬。
+     * <p>
+     * 这不是「假装完成」——上限卡在 86%，且真实回调一旦到来会立刻 stopCreep()
+     * 交给真实数据。目的只是避免弹窗长时间停在 0% 像卡死。
+     * <p>
+     * 速度递减（越接近上限越慢），视觉上像「在努力但还没完」。
+     */
+    private void startCreep() {
+        stopCreep();
+        creepRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (finished) return;
+                int cur = lastPercent;
+                if (cur >= CREEP_CEILING) return;
+                // 20% 以前走得快，之后逐渐减速
+                int step = cur < 20 ? 3 : (cur < 50 ? 2 : 1);
+                int next = Math.min(CREEP_CEILING, cur + step);
+                applyPercent(next);
+                creepHandler.postDelayed(this, 260);
+            }
+        };
+        creepHandler.postDelayed(creepRunnable, 300);
+    }
+
+    private void stopCreep() {
+        if (creepRunnable != null) {
+            creepHandler.removeCallbacks(creepRunnable);
+            creepRunnable = null;
+        }
     }
 
     /** 直接设置进度（不改变阶段文案）。percent 会被夹紧且保证单调。 */
@@ -279,6 +373,8 @@ public class SyncProgressDialog {
 
     /** 关闭，带淡出。 */
     public void close() {
+        stopCreep();               // 必须停，否则关窗后 Handler 还在跑
+        ring.setIndeterminate(false);
         try {
             if (dialog.isShowing()) dialog.dismiss();
         } catch (Throwable ignored) { }
