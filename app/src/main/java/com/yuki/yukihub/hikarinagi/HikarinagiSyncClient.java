@@ -472,19 +472,36 @@ public final class HikarinagiSyncClient {
      * {@code auth} 是 {@code app}。必须用 {@code catalog:full}，因为
      * {@code catalog:read} 看不到 NSFW 条目（详见 {@link #APP_SCOPE} 的说明）。
      *
+     * <h3>两轮策略：先把「精确」试完，再谈「兜底」</h3>
+     * <ol>
+     *   <li><b>第一轮</b>：逐个候选词，只认「完全相等」和「包含关系」；</li>
+     *   <li><b>第二轮</b>：只有第一轮全部落空时，才对<b>第一个候选词</b>启用
+     *       「服务端相关度第 1 条」这种模糊兜底。</li>
+     * </ol>
+     * 这个顺序差别很关键。实测反例：本地「快乐☆玛格丽特！」的中文译名搜不到，
+     * 第一轮落空后立刻兜底拿了「爱丽丝学园」（id 16749，完全不相干）；
+     * 而它的<b>日文原名</b>「はっぴぃ☆マーガレット!」能搜到精确相等的 id 3390——
+     * 可那个候选词根本没机会被尝试。
+     * <p>
+     * 换句话说：兜底一旦混在第一轮里，就会在「后面还有更准的候选词」时提前认错。
+     * 挪到第二轮后，只要任一候选词能精确命中就用精确的，兜底只对
+     * 「全部候选都精确落空」的条目生效。
+     *
      * <h3>性能要点</h3>
-     * 每个请求都要占 1 次配额（60/分钟），所以这里<b>一命中就立刻返回</b>，
+     * 每个请求都要占 1 次配额（60/分钟），所以<b>一命中就立刻返回</b>，
      * 绝不再试后面的候选词。早期版本对每个候选词都再试一遍「横线换空格」变体，
      * 等于把请求数翻倍，是那次「扫 39 个游戏花了 7 分钟」的主要原因之一。
      *
-     * @param candidates 已按命中率排序的候选词（本地标题 > 原名 > 罗马字）
+     * @param candidates 已按命中率排序的候选词（元数据正式标题优先）
      */
     public static Long searchGalgameId(List<String> candidates) throws Exception {
         if (candidates == null || candidates.isEmpty()) return null;
+
+        // ---------- 第一轮：精确（完全相等 / 包含）----------
         for (String q : candidates) {
             String trimmed = q == null ? "" : q.trim();
             if (trimmed.isEmpty()) continue;
-            Long hit = searchOnce(trimmed);
+            Long hit = searchOnce(trimmed, false);
             if (hit != null) {
                 Log.i(TAG, "title search hit: 「" + trimmed + "」 -> " + hit);
                 return hit;
@@ -492,11 +509,32 @@ public final class HikarinagiSyncClient {
             // 未命中也要记：只记命中会让「为什么这个没匹配上」完全无从排查
             Log.w(TAG, "title search miss: 「" + trimmed + "」");
         }
+
+        // ---------- 第二轮：模糊兜底（仅第一个候选词）----------
+        // 走到这里说明所有候选词都没能精确命中。此时才允许「服务端第 1 条即命中」，
+        // 用来兜住跨语言（中日译名差异）这类归一化也解决不了的情况。
+        // 只试第一个候选词：它是命中率最高的那个，且能避免请求数成倍膨胀。
+        for (String q : candidates) {
+            String trimmed = q == null ? "" : q.trim();
+            if (trimmed.isEmpty()) continue;
+            Long hit = searchOnce(trimmed, true);
+            if (hit != null) {
+                Log.i(TAG, "title search fallback hit: 「" + trimmed + "」 -> " + hit);
+                return hit;
+            }
+            break; // 兜底只对第一个非空候选词做一次
+        }
+
         return null;
     }
 
-    /** 单次搜索 + 判定。 */
-    private static Long searchOnce(String query) throws Exception {
+    /**
+     * 单次搜索 + 判定。
+     *
+     * @param allowRelevanceFallback 是否允许「服务端相关度第 1 条」兜底。
+     *                               第一轮传 false（只认精确），第二轮传 true。
+     */
+    private static Long searchOnce(String query, boolean allowRelevanceFallback) throws Exception {
         String nq = normalizeTitle(query);
         if (nq.isEmpty()) return null;
 
@@ -511,7 +549,7 @@ public final class HikarinagiSyncClient {
         for (String q : variants) {
             JSONArray items = doSearch(token, q);
             if (items == null || items.length() == 0) continue;
-            Long got = pickFromCandidates(nq, items, q);
+            Long got = pickFromCandidates(nq, items, q, allowRelevanceFallback);
             if (got != null) return got;
         }
         return null;
@@ -571,8 +609,14 @@ public final class HikarinagiSyncClient {
      * 这一级只认「完全相等」与「包含关系」两种判据。
      * 也就是说匹配刻意偏宽松——宁可在少量条目上认错，
      * 也不因为用户多打一个字就整条匹配不上。
+     *
+     * @param allowRelevanceFallback 是否允许「服务端相关度第 1 条」兜底。
+     *       由 {@link #searchGalgameId} 控制：第一轮传 {@code false}（只认精确），
+     *       等所有候选词都精确落空后，第二轮才对第一个候选词传 {@code true}。
+     *       这样「后面还有更准的候选词」时不会被提前兜底认错。
      */
-    private static Long pickFromCandidates(String nq, JSONArray items, String query) {
+    private static Long pickFromCandidates(String nq, JSONArray items, String query,
+                                           boolean allowRelevanceFallback) {
         if (items == null || items.length() == 0) return null;
 
         // 1) 完全相等优先（含全角/空格归一化后相等）
@@ -608,8 +652,13 @@ public final class HikarinagiSyncClient {
         }
 
         // 3) 跨语言兜底：服务端排序第一即视为命中。
-        //    仅在查询词足够具体时才敢这么做，否则会把泛词的第一条误当目标。
-        if (hits == 0 && nq.length() >= 4) {
+        //    两道开关同时满足才敢这么做：
+        //      a) allowRelevanceFallback —— 由调用方控制。第一轮传 false，
+        //         这样「中文译名没命中但日文原名能精确命中」的情况不会在这里认错
+        //         （实测「快乐☆玛格丽特！」：中文落空后若立刻兜底会拿到不相关的
+        //         「爱丽丝学园」，而它的日文原名其实能精确命中）。
+        //      b) 查询词足够具体，否则「爱」这种短词会乱撞。
+        if (hits == 0 && allowRelevanceFallback && nq.length() >= 4) {
             JSONObject first = items.optJSONObject(0);
             if (first != null) {
                 long id = first.optLong("id", 0L);
