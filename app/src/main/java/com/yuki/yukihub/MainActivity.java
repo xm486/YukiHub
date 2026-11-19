@@ -352,7 +352,19 @@ private static final String KEY_KUN_OAUTH_STATE = "kun_oauth_state";
     private static final String HIKARINAGI_ANDROID_CLIENT_ID = "hkn_qtmXMJfBoxcNLA-a";
     private static final String HIKARINAGI_OAUTH_AUTHORIZE_URL = "https://id.hikarinagi.org/oidc/auth";
     private static final String HIKARINAGI_OAUTH_REDIRECT_URI = "yukihub://hikarinagi/callback";
-    private static final String HIKARINAGI_OAUTH_SCOPE = "openid user:read";
+    /**
+     * Hikarinagi 授权 scope。
+     * <p>
+     * {@code email} 必须显式申请：Hikarinagi 是标准 OIDC，邮箱只在 email scope 下
+     * 通过 {@code email} / {@code email_verified} 声明下发，{@code user:read} 拿到的
+     * {@code /v3/user/me} 里没有邮箱。
+     * <p>
+     * 缺了它，后端只能用 {@code hash@hikarinagi.oauth} 假邮箱建号，
+     * 导致「本站已用邮箱注册过的用户，再用 Hikarinagi 快捷登录」无法登进原账号。
+     * <p>
+     * {@code user:read} 仍保留：昵称/头像来自 {@code /v3/user/me}。
+     */
+    private static final String HIKARINAGI_OAUTH_SCOPE = "openid user:read email";
 private static final String AUTH_BASE_URL = "https://yukihub.zh.kg/api";
 private static final String KEY_CLOUD_SYNC_ENABLED = "cloud_sync_enabled";
 private static final String KEY_SHARE_PLAYING = "share_playing_status";
