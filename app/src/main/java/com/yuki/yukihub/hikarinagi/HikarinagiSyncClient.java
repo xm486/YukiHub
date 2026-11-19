@@ -32,7 +32,8 @@ import java.util.Map;
  *   <li><b>写状态</b>：用户级 OAuth 令牌（授权码 + PKCE S256），scope {@code status:write}。
  *       令牌只代表「这个用户」，不能凭空生成。</li>
  *   <li><b>搜条目</b>：{@code GET /v3/search} 文档标注 {@code auth: app}，
- *       scope 为 {@code catalog:read}，即<b>应用级</b>令牌就够。
+ *       scope 需要 {@code catalog:full}（<b>不能用 {@code catalog:read}</b>，
+ *       那个看不到 NSFW 与乙女向条目），走<b>应用级</b>令牌。
  *       所以搜索用 {@code client_credentials}，不依赖用户授权到 catalog scope，
  *       这样即使用户只勾了 status 权限也能正常匹配。</li>
  * </ol>
@@ -117,8 +118,28 @@ public final class HikarinagiSyncClient {
     public static final String SCOPES =
             "openid user:read status:read status:write offline_access";
 
-    /** 应用级令牌只用于搜索，只要这一个 scope。 */
-    private static final String APP_SCOPE = "catalog:read";
+    /**
+     * 应用级令牌的 scope，只用于标题搜索。
+     * <p>
+     * <b>必须是 {@code catalog:full}，不能用 {@code catalog:read}。</b>
+     * 文档 {@code guide/scopes} 原文：
+     * <ul>
+     *   <li>{@code catalog:read} ——「读取条目数据，<b>不含 NSFW 与乙女向条目</b>」</li>
+     *   <li>{@code catalog:full} ——「读取条目数据（全部），<b>含 NSFW 与乙女向条目</b>」，
+     *       且「{@code catalog:full} 包含 {@code catalog:read}，申请上位 scope 即可」</li>
+     * </ul>
+     * 早期这里是 {@code catalog:read}，导致大批 NSFW 条目在搜索结果里<b>根本不存在</b>，
+     * 而不是排在后面。实测「末世孤雄」四部曲：
+     * <pre>
+     *   catalog:read -> 只剩 id 2044（Vol 1）
+     *   catalog:full -> 2045(Vol 0) / 2044(Vol 1) / 2046(Vol 2) / 2047(Vol 3) 全在
+     * </pre>
+     * 更糟的是「看不见」会触发相关度兜底，把续作全部错认成第一作。
+     * 控制条目可见性的是 scope，<b>不是</b>请求参数（{@code nsfw} 等一律 422 白名单拒绝）。
+     * <p>
+     * 用户令牌下的可见范围以该用户账号的内容偏好为上限，与这里无关。
+     */
+    private static final String APP_SCOPE = "catalog:full";
     /** 应用级凭据（公共只读用途，与 metadata.HikarinagiClient 各自持有一份，互不依赖）。 */
     private static final String APP_CLIENT_ID = "hkn_4poXX7v37j_iM2-o";
     private static final String APP_CLIENT_SECRET = "hks_Wv6tW5O6ev8Mbifvg1tPJ7UexehLATQcKpZJiFhV48Y";
@@ -447,8 +468,9 @@ public final class HikarinagiSyncClient {
     /**
      * 按标题搜索 Galgame，返回命中的 galgame id；全部候选都没命中返回 null。
      * <p>
-     * 走应用级令牌（{@code catalog:read}）——文档标注 {@code /v3/search} 的
-     * {@code auth} 是 {@code app}。
+     * 走应用级令牌（{@code catalog:full}）——文档标注 {@code /v3/search} 的
+     * {@code auth} 是 {@code app}。必须用 {@code catalog:full}，因为
+     * {@code catalog:read} 看不到 NSFW 条目（详见 {@link #APP_SCOPE} 的说明）。
      *
      * <h3>性能要点</h3>
      * 每个请求都要占 1 次配额（60/分钟），所以这里<b>一命中就立刻返回</b>，
