@@ -22,7 +22,7 @@
     <!-- ==================== 全局弹窗主题 ==================== -->
     <style name="Theme.YukiHub.AlertDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
         <!-- 背景：竖向渐变 + 18dp 圆角 + 主题色描边（drawable 提供） -->
-        <item name="android:windowBackground">@drawable/bg_dialog_v2</item>
+        <item name="android:windowBackground">@drawable/bg_dialog</item>
         <item name="android:backgroundDimAmount">0.66</item>
         <item name="android:windowIsFloating">true</item>
         <item name="android:windowContentOverlay">@null</item>
