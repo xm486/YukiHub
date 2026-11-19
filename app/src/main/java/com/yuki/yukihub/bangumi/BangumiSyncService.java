@@ -207,6 +207,20 @@ public final class BangumiSyncService {
      */
     public static Preview prepare(Context context, String token, ResolveProgress progress)
             throws Exception {
+        return prepare(context, token, false, progress);
+    }
+
+    /**
+     * 收集并匹配，不写任何数据。
+     *
+     * @param forceResync 强制重推：为 true 时忽略本地签名，把所有能匹配上的条目
+     *                    都算作「有变化」，全部重新写入远端。
+     *                    本地签名只能证明「我这边没变」，无法证明云端收到了；
+     *                    远端被改动或曾写入失败时，签名看不出来。
+     */
+    public static Preview prepare(Context context, String token, boolean forceResync,
+                                  ResolveProgress progress)
+            throws Exception {
         BangumiSyncClient.AuthInfo auth = BangumiSyncClient.authInfo(token);
 
         GameRepository repo = new GameRepository(context);
@@ -296,8 +310,10 @@ public final class BangumiSyncService {
 
             String sig = String.valueOf(target);
             boolean syncedBefore = m.game.bangumiSyncedAt > 0;
-            boolean firstTime = !syncedBefore;
-            boolean unchanged = syncedBefore && sig.equals(m.game.bangumiSyncedSig);
+            // 强制重推时，一律视为「首次」，全部进 changed；签名比对被绕过。
+            boolean firstTime = forceResync || !syncedBefore;
+            boolean unchanged = !forceResync && syncedBefore
+                    && sig.equals(m.game.bangumiSyncedSig);
 
             if (unchanged) {
                 p.skipped.add(m);

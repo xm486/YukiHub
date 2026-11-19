@@ -127,8 +127,15 @@ public final class NextMoeSyncDialog {
     // ======================== 阶段 1：匹配 ========================
 
     private static void runPrepare(Activity activity) {
+        startPrepare(activity, false);
+    }
+
+    /**
+     * @param forceResync true 表示忽略本地「已同步」记录，把所有能匹配上的条目重新推一遍
+     */
+    private static void startPrepare(Activity activity, boolean forceResync) {
         ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在匹配作品…");
+        pd.setMessage(forceResync ? "正在准备重新同步…" : "正在匹配作品…");
         pd.setCancelable(false);
         pd.show();
 
@@ -153,7 +160,7 @@ public final class NextMoeSyncDialog {
                                 .setTitle("暂时无法连接")
                                 .setMessage("刷新登录状态失败，可能是网络问题。\n\n"
                                         + "你的 NextMoe 授权仍然保留，请检查网络后重试，不需要重新授权。")
-                                .setPositiveButton("重试", (d, w) -> runPrepare(activity))
+                                .setPositiveButton("重试", (d, w) -> startPrepare(activity, forceResync))
                                 .setNegativeButton("取消", null)
                                 .show();
                     } else {
@@ -164,7 +171,7 @@ public final class NextMoeSyncDialog {
             }
 
             try {
-                NextMoeSyncService.Preview preview = NextMoeSyncService.prepare(activity, (done, total) -> {
+                NextMoeSyncService.Preview preview = NextMoeSyncService.prepare(activity, forceResync, (done, total) -> {
                     UI.post(() -> {
                         if (!alive(activity)) return;
                         try { pd.setMessage("正在匹配作品… " + done + " / " + total); } catch (Throwable ignored) { }
@@ -261,14 +268,36 @@ public final class NextMoeSyncDialog {
                 .setNegativeButton("取消", null);
 
         if (preview.changesCount == 0 && preview.skippedCount > 0) {
-            // 全部无变化：不给「开始同步」，避免发无意义的请求
+            // 全部无变化：不给「开始同步」，避免发无意义的请求。
+            // 但「已是最新」只是本地签名判断，云端被改动或曾写入失败时看不出来，
+            // 所以仍要留一个「强制重新同步」的入口。
+            b.setNeutralButton("强制重新同步",
+                    (d, w) -> confirmForceResync(activity));
             b.setPositiveButton("好", null);
             b.show();
             return;
         }
 
+        if (preview.skippedCount > 0) {
+            b.setNeutralButton("强制重新同步",
+                    (d, w) -> confirmForceResync(activity));
+        }
         b.setPositiveButton("开始同步", (d, w) -> runExecute(activity, preview));
         b.show();
+    }
+
+    /** 确认后忽略本地签名，把所有能匹配上的条目重新推一遍。 */
+    private static void confirmForceResync(Activity activity) {
+        new AlertDialog.Builder(activity)
+                .setTitle("强制重新同步")
+                .setMessage("将忽略「已是最新」的本地记录，把所有能匹配到的游戏"
+                        + "全部重新写入 NextMoe。\n\n"
+                        + "用于远端数据被改动、或之前某次写入失败导致"
+                        + "「一直显示已是最新却推不上去」的情况。\n\n"
+                        + "只会覆盖游玩状态与时长，不会动你的评分与短评。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("重新同步", (d, w) -> startPrepare(activity, true))
+                .show();
     }
 
     private static String buildSummary(NextMoeSyncService.Preview p) {

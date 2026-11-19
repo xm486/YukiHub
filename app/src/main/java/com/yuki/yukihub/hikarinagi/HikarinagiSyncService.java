@@ -245,8 +245,26 @@ public final class HikarinagiSyncService {
 
     /**
      * 收集并匹配，不写任何数据（本地缓存也留到 execute 成功后再写）。
+     * <p>
+     * 等价于 {@code prepare(context, false, progress)}。
      */
     public static Preview prepare(Context context, ResolveProgress progress) throws Exception {
+        return prepare(context, false, progress);
+    }
+
+    /**
+     * 收集并匹配，不写任何数据（本地缓存也留到 execute 成功后再写）。
+     *
+     * @param forceResync 强制重推：为 true 时<b>忽略本地签名</b>，把所有能匹配上的条目
+     *                    都算作「有变化」，全部重新写入远端。
+     *                    <p>
+     *                    这是必需品而非可选项：本地签名只能证明「我这边数据没变」，
+     *                    无法证明「云端确实收到了」。远端数据被改动、回档、单条写入
+     *                    曾经失败过等情况，签名是看不出来的——那时界面会一直显示
+     *                    「全部已是最新，无需同步」，用户就彻底没办法把数据推上去。
+     */
+    public static Preview prepare(Context context, boolean forceResync,
+                                  ResolveProgress progress) throws Exception {
         // 校验令牌并取账号名。用主线程之外的线程调用。
         String token = HikarinagiAuthStore.ensureAccessToken(context);
         if (token == null || token.trim().isEmpty()) {
@@ -401,8 +419,10 @@ public final class HikarinagiSyncService {
 
             String sig = status + ":" + minutes;
             boolean syncedBefore = m.game.hikarinagiSyncedAt > 0;
-            boolean firstTime = !syncedBefore;
-            boolean unchanged = syncedBefore && sig.equals(m.game.hikarinagiSyncedSig);
+            // 强制重推时，一律视为「首次」，全部进 changed；签名比对被绕过。
+            boolean firstTime = forceResync || !syncedBefore;
+            boolean unchanged = !forceResync && syncedBefore
+                    && sig.equals(m.game.hikarinagiSyncedSig);
 
             if (unchanged) {
                 p.skipped.add(m);

@@ -168,6 +168,19 @@ public final class VndbSyncService {
      * @param token 用户填写的 VNDB API token
      */
     public static Preview prepare(Context context, String token, Progress progress) throws Exception {
+        return prepare(context, token, false, progress);
+    }
+
+    /**
+     * 收集并匹配，不写任何数据。
+     *
+     * @param forceResync 强制重推：为 true 时忽略本地签名，把所有能匹配上的条目
+     *                    都算作「有变化」，全部重新写入远端。
+     *                    本地签名只能证明「我这边没变」，无法证明云端收到了；
+     *                    远端被改动或曾写入失败时，签名看不出来。
+     */
+    public static Preview prepare(Context context, String token, boolean forceResync,
+                                  Progress progress) throws Exception {
         GameRepository repo = new GameRepository(context);
 
         // 1) 校验 token，拿 user_id（读列表要用）与权限
@@ -280,8 +293,10 @@ public final class VndbSyncService {
 
             String sig = String.valueOf(target);
             boolean syncedBefore = m.game.vndbSyncedAt > 0;
-            boolean firstTime = !syncedBefore;
-            boolean unchanged = syncedBefore && sig.equals(m.game.vndbSyncedSig);
+            // 强制重推时，一律视为「首次」，全部进 changed；签名比对被绕过。
+            boolean firstTime = forceResync || !syncedBefore;
+            boolean unchanged = !forceResync && syncedBefore
+                    && sig.equals(m.game.vndbSyncedSig);
 
             if (unchanged) {
                 p.skipped.add(m);

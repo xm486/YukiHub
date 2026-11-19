@@ -182,6 +182,19 @@ public final class NextMoeSyncService {
      * 收集并匹配，不写任何数据（包括本地缓存也不写，留到 execute 成功后再写）。
      */
     public static Preview prepare(Context context, Progress progress) throws Exception {
+        return prepare(context, false, progress);
+    }
+
+    /**
+     * 收集并匹配，不写任何数据（包括本地缓存也不写，留到 execute 成功后再写）。
+     *
+     * @param forceResync 强制重推：为 true 时忽略本地签名，把所有能匹配上的条目
+     *                    都算作「有变化」，全部重新写入远端。
+     *                    本地签名只能证明「我这边没变」，无法证明云端收到了；
+     *                    远端被改动或曾写入失败时，签名看不出来。
+     */
+    public static Preview prepare(Context context, boolean forceResync, Progress progress)
+            throws Exception {
         GameRepository repo = new GameRepository(context);
         List<Game> all = repo.getAll();
 
@@ -211,8 +224,10 @@ public final class NextMoeSyncService {
         // 「首次同步」= 从没记录过 syncedAt，即使签名恰好与空串不同也必然是变化。
         for (NextMoeWorkResolver.Matched m : p.items) {
             String sig = signatureOf(m.game);
-            boolean firstTime = m.game.nextmoeSyncedAt <= 0;
-            boolean unchanged = !firstTime && sig.equals(m.game.nextmoeSyncedSig);
+            // 强制重推时，一律视为「首次」，全部进 changed；签名比对被绕过。
+            boolean firstTime = forceResync || m.game.nextmoeSyncedAt <= 0;
+            boolean unchanged = !forceResync && !firstTime
+                    && sig.equals(m.game.nextmoeSyncedSig);
             if (unchanged) {
                 p.skipped.add(m);
             } else {

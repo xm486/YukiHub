@@ -149,14 +149,21 @@ public final class VndbSyncDialog {
     // ======================== 阶段 1：匹配 ========================
 
     private static void runPrepare(Activity activity, String token) {
+        startPrepare(activity, token, false);
+    }
+
+    /**
+     * @param forceResync true 表示忽略本地「已同步」记录，把所有能匹配上的条目重新推一遍
+     */
+    private static void startPrepare(Activity activity, String token, boolean forceResync) {
         ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在匹配作品…");
+        pd.setMessage(forceResync ? "正在准备重新同步…" : "正在匹配作品…");
         pd.setCancelable(false);
         pd.show();
 
         AppExecutors.runOnIo(() -> {
             try {
-                VndbSyncService.Preview preview = VndbSyncService.prepare(activity, token,
+                VndbSyncService.Preview preview = VndbSyncService.prepare(activity, token, forceResync,
                         (done, total) -> UI.post(() -> {
                             if (!alive(activity)) return;
                             try { pd.setMessage("正在匹配… " + done + " / " + total); } catch (Throwable ignored) { }
@@ -264,13 +271,38 @@ public final class VndbSyncDialog {
                 .setNegativeButton("取消", null);
 
         if (preview.changesCount == 0) {
+            // 全部「已是最新」不等于云端一定是对的：本地签名只证明「我这边没变」。
+            // 远端被改动、单条写入曾经失败过等情况都看不出来。
+            // 所以这里必须给出「强制重新同步」的入口，否则用户就彻底没法把数据推上去。
+            if (preview.skippedCount > 0) {
+                b.setNeutralButton("强制重新同步",
+                        (d, w) -> confirmForceResync(activity, token));
+            }
             b.setPositiveButton("好", null);
             b.show();
             return;
         }
 
+        if (preview.skippedCount > 0) {
+            b.setNeutralButton("强制重新同步",
+                    (d, w) -> confirmForceResync(activity, token));
+        }
         b.setPositiveButton("开始同步", (d, w) -> runExecute(activity, token, preview));
         b.show();
+    }
+
+    /** 确认后忽略本地签名，把所有能匹配上的条目重新推一遍。 */
+    private static void confirmForceResync(Activity activity, String token) {
+        new AlertDialog.Builder(activity)
+                .setTitle("强制重新同步")
+                .setMessage("将忽略「已是最新」的本地记录，把所有能匹配到的游戏"
+                        + "全部重新写入 VNDB。\n\n"
+                        + "用于远端数据被改动、或之前某次写入失败导致"
+                        + "「一直显示已是最新却推不上去」的情况。\n\n"
+                        + "只会覆盖游玩状态，不会动你的评分与短评。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("重新同步", (d, w) -> startPrepare(activity, token, true))
+                .show();
     }
 
     private static String buildSummary(VndbSyncService.Preview p) {
