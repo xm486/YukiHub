@@ -137,15 +137,22 @@ public final class HikarinagiSyncService {
         public final int minutes;
         /** true 表示这款游戏是第一次同步（没有旧签名）。 */
         public final boolean firstTime;
+        /** 非 null 表示这条代表了一组指向同一作品的本地条目（已合并）。 */
+        public final DuplicateGroup duplicate;
 
         public ChangeItem(Matched matched, String status, int minutes, boolean firstTime) {
+            this(matched, status, minutes, firstTime, null);
+        }
+
+        public ChangeItem(Matched matched, String status, int minutes, boolean firstTime,
+                          DuplicateGroup duplicate) {
             this.matched = matched;
             this.status = status;
             this.minutes = minutes;
             this.firstTime = firstTime;
+            this.duplicate = duplicate;
         }
     }
-
     /** 预览：还没写任何东西。 */
     public static class Preview {
         public final List<Matched> items = new ArrayList<>();
@@ -154,6 +161,14 @@ public final class HikarinagiSyncService {
         public final Map<Long, Long> newlyResolved = new LinkedHashMap<>();
         public final List<ChangeItem> changed = new ArrayList<>();
         public final List<Matched> skipped = new ArrayList<>();
+        /**
+         * 本地多个条目指向同一部作品时被合并的组。
+         * <p>
+         * 常见于「HD 版」与「原版」分别入库，或同一部游戏用不同引擎各装一份。
+         * Hikarinagi 上只有<b>一个</b>条目，而批量接口规定「同一作品不能重复出现」，
+         * 一条重复就会让整批 422 全部失败，所以必须先在本地合并。
+         */
+        public final List<DuplicateGroup> duplicates = new ArrayList<>();
 
         /** 连接信息（展示用）。 */
         public String username = "";
@@ -161,10 +176,35 @@ public final class HikarinagiSyncService {
         public int changesCount = 0;
         public int skippedCount = 0;
 
+        /** 被并入别条、本次不会单独写入的本地条目总数。 */
+        public int mergedCount() {
+            int n = 0;
+            for (DuplicateGroup g : duplicates) n += g.dropped.size();
+            return n;
+        }
+
         public boolean isEmpty() {
             return items.isEmpty();
         }
     }
+
+    /**
+     * 一组指向同一部 Hikarinagi 作品的本地条目。
+     * <p>
+     * {@code canonical} 是代表项（真正会被写入的那条），
+     * {@code dropped} 是并入它的其余本地条目。
+     */
+    public static class DuplicateGroup {
+        public final long galgameId;
+        public final Matched canonical;
+        public final List<Matched> dropped = new ArrayList<>();
+
+        public DuplicateGroup(long galgameId, Matched canonical) {
+            this.galgameId = galgameId;
+            this.canonical = canonical;
+        }
+    }
+
 
     /** 单条失败。 */
     public static class ItemFailure {
@@ -310,15 +350,54 @@ public final class HikarinagiSyncService {
 
         Preview p = new Preview();
         p.username = displayName;
-        p.items.addAll(matched);
+
+        // ===== 去重：多个本地条目指向同一部作品时合并 =====
+        // 批量接口硬性规定「同一作品不能重复出现」，违反会让整批 422 全部失败
+        // （实测：39 个条目一条都没写进去）。所以必须在发请求前就在本地合并。
+        Map<Long, List<Matched>> byGalgame = new LinkedHashMap<>();
+        for (Matched m : matched) {
+            List<Matched> bucket = byGalgame.get(m.galgameId);
+            if (bucket == null) {
+                bucket = new ArrayList<>(2);
+                byGalgame.put(m.galgameId, bucket);
+            }
+            bucket.add(m);
+        }
+
+        List<Matched> effective = new ArrayList<>(matched.size());
+        Map<Long, DuplicateGroup> groupOf = new LinkedHashMap<>();
+        for (Map.Entry<Long, List<Matched>> e : byGalgame.entrySet()) {
+            List<Matched> bucket = e.getValue();
+            if (bucket.size() == 1) {
+                effective.add(bucket.get(0));
+                continue;
+            }
+            Matched canonical = pickCanonical(bucket);
+            DuplicateGroup dg = new DuplicateGroup(e.getKey(), canonical);
+            for (Matched m : bucket) {
+                if (m != canonical) dg.dropped.add(m);
+            }
+            p.duplicates.add(dg);
+            groupOf.put(canonical.galgameId, dg);
+            effective.add(canonical);
+            Log.i(TAG, "dup galgame_id=" + e.getKey() + " 合并 " + bucket.size()
+                    + " 个本地条目 -> " + safeTitle(canonical.game));
+        }
+
+        p.items.addAll(effective);
         p.unmatched.addAll(unmatched);
         p.newlyResolved.putAll(newlyResolved);
 
         // 判断哪些需要写：纯本地签名比对，不发任何读请求
-        for (Matched m : matched) {
-            String status = toHikarinagiStatus(m.game.playStatus);
+        for (Matched m : effective) {
+            DuplicateGroup dg = groupOf.get(m.galgameId);
+            // 合并组的状态/时长必须取「合并后」的值，不能只用代表项自己的，
+            // 否则可能把组里进度更深的那条丢掉（例：一个通关、一个想玩）。
+            String status = dg == null
+                    ? toHikarinagiStatus(m.game.playStatus)
+                    : mergedStatus(dg);
             if (status == null) continue;
-            int minutes = toMinutes(m.game.totalPlayTime);
+            int minutes = dg == null ? toMinutes(m.game.totalPlayTime) : mergedMinutes(dg);
 
             String sig = status + ":" + minutes;
             boolean syncedBefore = m.game.hikarinagiSyncedAt > 0;
@@ -328,7 +407,7 @@ public final class HikarinagiSyncService {
             if (unchanged) {
                 p.skipped.add(m);
             } else {
-                p.changed.add(new ChangeItem(m, status, minutes, firstTime));
+                p.changed.add(new ChangeItem(m, status, minutes, firstTime, dg));
             }
         }
 
@@ -341,7 +420,8 @@ public final class HikarinagiSyncService {
         p.changesCount = p.changed.size();
         p.skippedCount = p.skipped.size();
 
-        Log.i(TAG, "prepare: matched=" + matched.size() + " unmatched=" + unmatched.size()
+        Log.i(TAG, "prepare: matched=" + matched.size() + " effective=" + effective.size()
+                + " dupGroups=" + p.duplicates.size() + " unmatched=" + unmatched.size()
                 + " changes=" + p.changesCount + " skipped=" + p.skippedCount);
         return p;
     }
@@ -380,6 +460,106 @@ public final class HikarinagiSyncService {
             if (!t.isEmpty()) seen.add(t);
         }
         return new ArrayList<>(seen);
+    }
+
+    // ======================== 去重与合并规则 ========================
+
+    /**
+     * 本地状态 → 「进度」排序权重，越大越靠前（越「玩过」）。
+     * <p>
+     * 合并时状态取<b>进度最深</b>的那个：同一部作品你在一个条目里通关、
+     * 另一个条目里还是「想玩」，真正的事实是通关。
+     * 取最浅的会把已通关刷回「想玩」，属于毁数据。
+     */
+    public static int statusRank(String status) {
+        if (status == null) return -1;
+        switch (status) {
+            case HikarinagiSyncClient.STATUS_COMPLETED: return 4;
+            case HikarinagiSyncClient.STATUS_GOING:     return 3;
+            case HikarinagiSyncClient.STATUS_ON_HOLD:   return 2;
+            case HikarinagiSyncClient.STATUS_DROPPED:   return 1;
+            case HikarinagiSyncClient.STATUS_PLAN:      return 0;
+            default:                                    return -1;
+        }
+    }
+
+    /**
+     * 从一组指向同一作品的本地条目里，选出代表项。
+     * <p>
+     * 排序依据（依次比较）：
+     * <ol>
+     *   <li><b>进度更深</b>的优先（通关 &gt; 在玩 &gt; 搁置 &gt; 弃坑 &gt; 想玩）</li>
+     *   <li>已同步过的优先（避免把已有签名的那条丢成「未同步」）</li>
+     *   <li>时长更长的优先</li>
+     *   <li>最后按本地 id 升序，保证结果稳定可复现</li>
+     * </ol>
+     */
+    static Matched pickCanonical(List<Matched> bucket) {
+        Matched best = null;
+        for (Matched m : bucket) {
+            if (best == null) {
+                best = m;
+                continue;
+            }
+            int r1 = statusRank(toHikarinagiStatus(m.game.playStatus));
+            int r2 = statusRank(toHikarinagiStatus(best.game.playStatus));
+            if (r1 != r2) {
+                if (r1 > r2) best = m;
+                continue;
+            }
+            boolean s1 = m.game.hikarinagiSyncedAt > 0;
+            boolean s2 = best.game.hikarinagiSyncedAt > 0;
+            if (s1 != s2) {
+                if (s1) best = m;
+                continue;
+            }
+            long t1 = m.game.totalPlayTime;
+            long t2 = best.game.totalPlayTime;
+            if (t1 != t2) {
+                if (t1 > t2) best = m;
+                continue;
+            }
+            if (m.game.id < best.game.id) best = m;
+        }
+        return best;
+    }
+
+    /**
+     * 合并后的状态：取这一组里进度<b>最深</b>的那个状态。
+     * <p>
+     * 代表项本身就是按「进度最深」选出来的，所以直接用它即可；
+     * 但 {@link #pickCanonical} 的后几个比较项可能把代表项换成进度相同的另一条，
+     * 因此这里独立计算一遍，保证「状态」与「时长」两个维度互不干扰。
+     */
+    static String mergedStatus(DuplicateGroup dg) {
+        if (dg == null) return null;
+        String best = toHikarinagiStatus(dg.canonical.game.playStatus);
+        int bestRank = statusRank(best);
+        for (Matched m : dg.dropped) {
+            String s = toHikarinagiStatus(m.game.playStatus);
+            int r = statusRank(s);
+            if (r > bestRank) {
+                bestRank = r;
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 合并后的时长：<b>取最大值，不是相加</b>。
+     * <p>
+     * 「HD 版 + 原版」是两个可独立启动的安装，同一个游戏时间通常只记在其中一边，
+     * 相加会把时长翻倍，写到远端就是错数据。取最大值是保守且不会虚增的做法。
+     */
+    static int mergedMinutes(DuplicateGroup dg) {
+        if (dg == null) return 0;
+        int best = toMinutes(dg.canonical.game.totalPlayTime);
+        for (Matched m : dg.dropped) {
+            int v = toMinutes(m.game.totalPlayTime);
+            if (v > best) best = v;
+        }
+        return best;
     }
 
     // ======================== 阶段 2：执行推送 ========================
@@ -446,6 +626,14 @@ public final class HikarinagiSyncService {
                 result.fail += remaining;
                 result.failures.add(new ItemFailure("（已中止后续 " + remaining + " 个）", e.getMessage()));
                 Log.w(TAG, "abort remaining due to rate limit");
+                break;
+            } catch (HikarinagiSyncClient.ValidationException e) {
+                // 422 是整批拒绝：本批一条没写，但之前已成功的批次不作废。
+                // 记录原因后中止，把「前面成功的」如实报给用户，而不是整次同步算失败。
+                int remaining = total - start;
+                result.fail += remaining;
+                result.failures.add(new ItemFailure("（已中止后续 " + remaining + " 个）", e.getMessage()));
+                Log.w(TAG, "abort remaining due to validation failure: " + e.getMessage());
                 break;
             }
 

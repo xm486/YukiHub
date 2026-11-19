@@ -389,6 +389,17 @@ public final class HikarinagiSyncClient {
         if (items.size() > MAX_BATCH) {
             throw new IllegalArgumentException("批量上限 " + MAX_BATCH + " 条，实际 " + items.size());
         }
+        // 服务端规则：「同一作品不能重复出现」。一旦重复，整批会被 422 拒绝、
+        // 一条都写不进去（实测踩过：两个本地条目指向同一个 galgame）。
+        // 这里做前置拦截，把「服务端 422 整批失败」变成「本地立刻报出是哪一条」。
+        java.util.HashSet<Long> seenIds = new java.util.HashSet<>();
+        for (RateItem it : items) {
+            if (!seenIds.add(it.galgameId)) {
+                throw new IllegalArgumentException(
+                        "批量请求里 galgame_id " + it.galgameId + " 重复出现。"
+                                + "同一作品一次批量只能写一条，请先在调用方合并。");
+            }
+        }
         JSONArray arr = new JSONArray();
         for (RateItem it : items) arr.put(it.toJson());
         JSONObject body = new JSONObject();
@@ -870,6 +881,11 @@ public final class HikarinagiSyncClient {
                                 + "请在控制台为应用勾选该权限后重新授权。" + preview(text));
             }
             if (code == 404) throw new NotFoundException("Hikarinagi 找不到条目：" + preview(text));
+            if (code == 422) {
+                // 参数校验失败。服务端会整批拒绝（不是单条失败），所以必须按整体错误抛出。
+                // 错误体是 {"success":false,"error":{"code":..,"message":..,"field_errors":[..]}}
+                throw new ValidationException("Hikarinagi 拒绝了这次请求：" + validationMessage(text));
+            }
             if (code == 429) throw new RateLimitedException("Hikarinagi 请求过于频繁，请稍后再试");
             if (code < 200 || code >= 300) {
                 throw new Exception("HTTP " + code + "：" + preview(text));
@@ -901,12 +917,56 @@ public final class HikarinagiSyncClient {
         is.close();
         return new String(bos.toByteArray(), StandardCharsets.UTF_8);
     }
-
     private static String preview(String s) {
         if (s == null) return "";
         String t = s.replace('\n', ' ').trim();
         return t.length() <= 200 ? t : t.substring(0, 200) + "…";
     }
+
+    /**
+     * 从 422 的响应体里提取人能看懂的原因。
+     * <p>
+     * 服务端错误信封（与成功信封<b>不同</b>）：<br>
+     * {@code {"success":false,"error":{"code":"COMMON_VALIDATION_FAILED",
+     * "message":"请求参数校验失败","field_errors":[{"field":"items",
+     * "message":"同一 Galgame 不能重复出现","code":"arrayUnique"}]}}}
+     * <p>
+     * 只取 {@code error.message} 太笼统（只会得到「请求参数校验失败」），
+     * 真正有用的信息在 {@code field_errors[].message} 里，必须拼上。
+     * 解析失败一律退回原始文本，绝不因为解析挂了而丢掉错误原因。
+     */
+    static String validationMessage(String text) {
+        if (text == null || text.trim().isEmpty()) return "参数校验未通过（服务端未返回原因）";
+        try {
+            JSONObject root = new JSONObject(text);
+            // 这里不能用 unwrap()：错误信封的字段是 error，不是 data
+            JSONObject err = root.optJSONObject("error");
+            if (err == null) err = root;
+            StringBuilder sb = new StringBuilder();
+            String msg = err.optString("message", "").trim();
+            if (!msg.isEmpty()) sb.append(msg);
+            JSONArray fields = err.optJSONArray("field_errors");
+            if (fields != null && fields.length() > 0) {
+                for (int i = 0; i < fields.length() && i < 5; i++) {
+                    JSONObject f = fields.optJSONObject(i);
+                    if (f == null) continue;
+                    String fm = f.optString("message", "").trim();
+                    String fn = f.optString("field", "").trim();
+                    if (fm.isEmpty()) continue;
+                    if (sb.length() > 0) sb.append("；");
+                    sb.append(fn.isEmpty() ? fm : fn + ": " + fm);
+                }
+            }
+            if (sb.length() == 0) {
+                String code = err.optString("code", "").trim();
+                sb.append(code.isEmpty() ? "参数校验未通过" : code);
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return preview(text);
+        }
+    }
+
 
     private static String url(String s) {
         try {
@@ -927,11 +987,21 @@ public final class HikarinagiSyncClient {
     public static class RateLimitedException extends Exception {
         public RateLimitedException(String message) { super(message); }
     }
-
     /** 条目不存在。单条错误，不影响其它条目。 */
     public static class NotFoundException extends Exception {
         public NotFoundException(String message) { super(message); }
     }
+    /**
+     * 参数校验失败（HTTP 422）。
+     * <p>
+     * <b>整批拒绝</b>，不是单条失败：请求体里只要有一处不合规
+     * （例如同一个 galgame_id 出现两次），服务端就一个字段都不写。
+     * 因此必须按整体性错误处理，不能当成某一条的失败。
+     */
+    public static class ValidationException extends Exception {
+        public ValidationException(String message) { super(message); }
+    }
+
 
     /** OAuth 通用错误（带了 RFC 6749 的 error code 便于判定是否该清凭据）。 */
     public static class OAuthException extends Exception {

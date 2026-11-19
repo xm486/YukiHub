@@ -240,6 +240,37 @@ public final class HikarinagiSyncDialog {
                     }));
         }
 
+        // ---- 已合并的重复条目（折叠）----
+        if (!preview.duplicates.isEmpty()) {
+            root.addView(collapsibleSection(activity,
+                    "多个本地条目指向同一作品，已合并（" + preview.duplicates.size() + " 组）",
+                    () -> {
+                        LinearLayout box = new LinearLayout(activity);
+                        box.setOrientation(LinearLayout.VERTICAL);
+                        for (HikarinagiSyncService.DuplicateGroup dg : preview.duplicates) {
+                            // 代表项（真正写入的那条）
+                            box.addView(row(activity,
+                                    "✔ " + safeTitle(dg.canonical.game),
+                                    "写入：" + HikarinagiSyncService.statusText(
+                                            HikarinagiSyncService.mergedStatus(dg))));
+                            for (HikarinagiSyncService.Matched m : dg.dropped) {
+                                box.addView(row(activity,
+                                        "　↳ " + safeTitle(m.game),
+                                        "并入，不单独写入"));
+                            }
+                        }
+                        TextView tip = bodyText(activity,
+                                "Hikarinagi 上一部作品只有一个条目，而批量接口规定"
+                                        + "「同一作品不能重复出现」，重复会让整批请求被拒。\n"
+                                        + "所以这些条目按「进度最深」合并成一条写入，时长取最大值。\n"
+                                        + "本地数据不受影响。");
+                        tip.setTextColor(0xFF90CAF9);
+                        tip.setPadding(0, dp(activity, 8), 0, 0);
+                        box.addView(tip);
+                        return box;
+                    }));
+        }
+
         // ---- 无法匹配 ----
         if (!preview.unmatched.isEmpty()) {
             root.addView(sectionHeader(activity, "无法匹配（" + preview.unmatched.size() + "）"));
@@ -267,7 +298,6 @@ public final class HikarinagiSyncDialog {
         b.setPositiveButton("开始同步", (d, w) -> runExecute(activity, preview));
         b.show();
     }
-
     private static String buildSummary(HikarinagiSyncService.Preview p) {
         StringBuilder sb = new StringBuilder();
         if (p.username != null && !p.username.isEmpty()) {
@@ -284,6 +314,11 @@ public final class HikarinagiSyncDialog {
         sb.append("本次将更新 ").append(p.changesCount).append(" 个游戏");
         if (p.skippedCount > 0) {
             sb.append("\n另有 ").append(p.skippedCount).append(" 个已是最新，会跳过");
+        }
+        if (!p.duplicates.isEmpty()) {
+            // Hikarinagi 一部作品只有一个条目，本地多开时必须在合并后再写，
+            // 否则批量接口会因「同一作品重复出现」整批拒绝。这里如实告知用户。
+            sb.append("\n有 ").append(p.duplicates.size()).append(" 部作品存在多个本地条目，已合并写入");
         }
         return sb.toString();
     }
@@ -359,6 +394,9 @@ public final class HikarinagiSyncDialog {
         String msg;
         if (t instanceof HikarinagiSyncClient.RateLimitedException) {
             msg = "Hikarinagi 请求过于频繁，请过几分钟再试。";
+        } else if (t instanceof HikarinagiSyncClient.ValidationException) {
+            // 422：整批被拒，一条都没写。必须说清楚是「什么都没写」，别让用户以为成功了一半。
+            msg = safeStr(t.getMessage()) + "\n\n服务端拒绝了整批请求，本次一条都没有写入。";
         } else if (t instanceof HikarinagiSyncService.TokenRefreshFailedException) {
             msg = safeStr(t.getMessage());
         } else if (t instanceof HikarinagiSyncClient.NotAuthorizedException) {
