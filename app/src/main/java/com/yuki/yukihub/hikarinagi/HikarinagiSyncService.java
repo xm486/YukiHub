@@ -315,23 +315,25 @@ public final class HikarinagiSyncService {
         GameRepository repo = new GameRepository(context);
         List<Game> all = repo.getAll();
 
-        // 第1级：本机缓存（上次搜索命中的 galgame id）
+        // 第1级：本机缓存（上次<b>标题搜索</b>命中的 galgame id）
+        //   —— 这是「我们自己搜出来的结果」，可能搜错，所以强制重同步时丢弃。
         Map<Long, Long> cachedIds = new LinkedHashMap<>();
         for (Game g : all) {
             if (g.hikarinagiGalgameId > 0L) cachedIds.put(g.id, g.hikarinagiGalgameId);
         }
 
         // 第2级：metadata_cache 里 source='hikarinagi' 的 source_id
+        //   —— 这是刮削时从 Hikarinagi 站点拿到的锚点，属于「该源自己的 id」，
+        //      可信，强制重同步时<b>保留</b>（丢了会把本来匹配对的条目重新乱猜）。
         Map<Long, Long> metadataIds = repo.getHikarinagiSourceIds();
 
-        // 强制重同步的语义（重要，别理解错）：
-        //   它要解决的是「云端数据可能被改动/曾经写入失败，本地却以为已同步」，
-        //   属于<b>重新推送</b>，不是<b>重新匹配</b>。
-        //   所以第 1、2 级锚点<b>照常使用</b>——那些是已经验证过的正确映射，
-        //   丢掉它们只会让本来匹配对的条目重新乱猜（实测曾把
-        //   《星空的记忆 Eternal Heart》从正确的 68 认成 2202）。
-        //   唯一的区别在后面：签名比对被绕过，所有 matched 都算「有变化」。
-        // （早期版本在这里清空了缓存，是错的，已回退。）
+        // 强制重同步 = 重新匹配 + 重新推送：
+        //   丢掉「我们自己搜的缓存」，让没站点锚点的条目重新走一遍标题搜索；
+        //   但保留「站点锚点」，那是可信数据。
+        //   搜索规则本身（候选词顺序、两轮精确优先、兜底、去重合并）一概不动。
+        if (forceResync) {
+            cachedIds.clear();
+        }
 
         List<Matched> matched = new ArrayList<>();
         List<Game> needTitleSearch = new ArrayList<>();

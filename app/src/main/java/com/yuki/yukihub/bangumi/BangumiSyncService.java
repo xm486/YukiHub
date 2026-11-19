@@ -244,7 +244,8 @@ public final class BangumiSyncService {
         GameRepository repo = new GameRepository(context);
         List<Game> all = repo.getAll();
 
-        // 第1级：本机缓存（上次搜索命中的 subject_id）
+        // 第1级：本机缓存（上次<b>标题搜索</b>命中的 subject_id）
+        //   —— 我们自己搜出来的结果，可能搜错，强制重同步时丢弃。
         Map<Long, String> cachedIds = new LinkedHashMap<>();
         for (Game g : all) {
             String sid = g.bangumiSubjectId == null ? "" : g.bangumiSubjectId.trim();
@@ -252,11 +253,14 @@ public final class BangumiSyncService {
         }
 
         // 第2级：metadata_cache 里 source='bangumi' 的 source_id
+        //   —— 刮削时从 Bangumi 站点拿到的锚点，可信，强制重同步时<b>保留</b>。
         Map<Long, String> metadataIds = repo.getBangumiSourceIds();
 
-        // 强制重同步的语义是「重新推送」而非「重新匹配」：
-        // 第 1、2 级锚点是已验证的正确映射，照常使用；区别只在后面绕过签名比对。
-        // （早期版本在这里清空了缓存，会导致本来匹配对的条目重新乱猜，已回退。）
+        // 强制重同步 = 重新匹配 + 重新推送：丢自搜缓存，留站点锚点。
+        // 搜索规则（候选词顺序、精确/包含判定）一概不动。
+        if (forceResync) {
+            cachedIds.clear();
+        }
 
         List<Matched> matched = new ArrayList<>();
         List<Game> needTitleSearch = new ArrayList<>();

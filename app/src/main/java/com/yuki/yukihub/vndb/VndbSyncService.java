@@ -211,15 +211,16 @@ public final class VndbSyncService {
 
         // 2) 三级匹配
         //   第1级 cache：games.vndb_vn_id（上次标题搜索命中的结果，零请求）
-        //   第2级 metadata：metadata_cache 里 source='vndb' 的 source_id（vNNN，零请求）
+        //   第2级 metadata：metadata_cache 里 source='vndb' 的 source_id（刮削锚点）
         //   第3级 title：标题搜索（要发请求、费配额，只有前两级都没命中才走）
         // 实测（39 个游戏的真实备份）：第2级只能覆盖 32 个，
         // 剩下 7 个里有 4 个能被标题搜索救回来 —— 所以第3级是必要的，不是锦上添花。
         Map<Long, String> metadataVnIds = repo.getVndbSourceIds();
 
-        // 强制重同步的语义是「重新推送」而非「重新匹配」：
-        // 第 1、2 级锚点是已验证的正确映射，照常使用；区别只在后面绕过签名比对。
-        // （早期版本在这里清空了缓存，会导致本来匹配对的条目重新乱猜，已回退。）
+        // 强制重同步 = 重新匹配 + 重新推送：
+        //   丢弃「我们自己搜的缓存」(games.vndb_vn_id)，让条目重新走标题搜索；
+        //   但保留「站点锚点」(metadata_cache)，那是刮削来的可信数据。
+        //   搜索规则（候选词原名优先）一概不动。
 
         List<Game> all = repo.getAll();
         List<Matched> matched = new ArrayList<>();
@@ -231,9 +232,9 @@ public final class VndbSyncService {
             // 状态未知（空值/脏值）的跳过：既不上报，也不进「无法匹配」，避免噪音
             if (label < 0) continue;
 
-            // 第1级：缓存的标题搜索成果
+            // 第1级：上次<b>标题搜索</b>的成果（自搜缓存，强制重同步时跳过）
             String cached = g.vndbVnId == null ? "" : g.vndbVnId.trim();
-            if (!cached.isEmpty() && looksLikeVnId(cached)) {
+            if (!forceResync && !cached.isEmpty() && looksLikeVnId(cached)) {
                 matched.add(new Matched(g, cached, "cache"));
                 continue;
             }

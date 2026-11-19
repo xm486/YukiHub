@@ -100,18 +100,18 @@ public final class NextMoeWorkResolver {
     }
 
     /**
-     * @param forceResync 强制重同步。语义是<b>重新推送</b>，不是重新匹配：
+     * @param forceResync 强制重同步 = <b>重新匹配 + 重新推送</b>：
+     *                    <ul>
+     *                      <li>丢弃第 1 级的 {@code games.nextmoe_work_id}
+     *                          —— 那是我们自己搜出来的结果，可能搜错；</li>
+     *                      <li>保留第 2 级 metadata 锚点、第 3 级外部锚反查、第 4 级标题搜索
+     *                          —— 这些都是可信的匹配手段，规则不动；</li>
+     *                      <li>调用方拿到 matched 后不做签名比对，全部重新推送。</li>
+     *                    </ul>
      *                    <p>
-     *                    四级匹配（work_id → metadata → 外部锚反查 → 标题搜索）
-     *                    <b>完全不变</b>，已缓存的锚点照常使用。因为那些是已经
-     *                    验证过的正确映射，丢掉只会让本来匹配对的条目重新乱猜
-     *                    （实测曾把《星空的记忆 Eternal Heart》从正确的 68 认成 2202）。
-     *                    <p>
-     *                    区别只在于：调用方拿到 matched 之后不做签名比对，
-     *                    把所有条目都当「有变化」推一遍。
-     *                    <p>
-     *                    参数保留在签名里是为了与另外三个同步源对称，
-     *                    并给未来「真的需要重新匹配」留位置。
+     *                    关键取舍：只丢「自搜缓存」，不丢「站点锚点」。
+     *                    站点锚点是刮削时从该站直接拿到的 id，不存在搜错的问题；
+     *                    丢掉它只会把本来匹配对的条目重新乱猜。
      */
     public static ResolveResult resolve(Context context, List<Game> games,
                                         boolean forceResync, Progress progress)
@@ -122,7 +122,7 @@ public final class NextMoeWorkResolver {
         int total = games.size();
         int done = 0;
 
-        // ---- 第 1 级：已缓存 work_id ----
+        // ---- 第 1 级：已缓存的 work_id（<b>我们自己搜的</b>结果）----
         List<Game> pending = new ArrayList<>();
         // 进度节流：这一层是纯内存遍历，几乎瞬间完成。
         // 如果每个游戏都回调一次，上千个游戏会上千次 post 到主线程刷 ProgressDialog，
@@ -130,10 +130,10 @@ public final class NextMoeWorkResolver {
         int lastReported = -1;
         for (Game g : games) {
             String cached = g.nextmoeWorkId == null ? "" : g.nextmoeWorkId.trim();
-            // 强制重同步=<b>重新推送</b>，不是重新匹配：
-            // 已缓存的 work_id 是验证过的正确映射，照常使用。
-            // （早期版本在这里跳过缓存，会让匹配对的条目重新乱猜，已回退。）
-            if (!cached.isEmpty()) {
+            // 强制重同步 = 重新匹配 + 重新推送：
+            //   丢掉「我们自己搜的 work_id」，让条目重新走后面的匹配；
+            //   但保留第 2 级的 metadata 锚点与第 3 级的外部锚反查（那些是可信数据）。
+            if (!forceResync && !cached.isEmpty()) {
                 result.matched.add(new Matched(g, cached, "cache"));
             } else {
                 pending.add(g);
@@ -148,8 +148,7 @@ public final class NextMoeWorkResolver {
         }
         if (pending.isEmpty()) return result;
 
-        // ---- 第 2 级：metadata_cache 里 source='nextmoe' ----
-        // 同样是已验证的锚点，照常使用。
+        // ---- 第 2 级：metadata_cache 里 source='nextmoe'（刮削锚点，可信，始终保留）----
         Map<Long, String> nextMoeIds = readCachedSourceIds(context, idsOf(pending), "nextmoe");
         List<Game> stillPending = new ArrayList<>();
         for (Game g : pending) {
