@@ -448,11 +448,20 @@ public final class NextMoeSyncDialog {
         boolean tc = c.timeChanged();
         StringBuilder sb = new StringBuilder();
 
+        // 强制重同步导致条目变了：放在最前面单独标出。
+        // 注意与下面「状态 from → to」区分：那是游玩状态的变化，
+        // 这里是「重新匹配前指哪个作品 → 现在指哪个作品」，完全是两回事。
+        String idNote = "";
+        if (c.matched.idChanged()) {
+            idNote = "原作品 " + c.matched.previousId + " → 现 "
+                    + c.matched.workId + " · ";
+        }
+
         if (c.firstTime) {
             sb.append("新增");
             if (sc && !c.newState().isEmpty()) sb.append(" · ").append(stateLabel(c.newState()));
             if (tc && c.newMinutes() > 0) sb.append(" · ").append(minutesText(c.newMinutes() * 60_000L));
-            return sb.toString();
+            return idNote + sb;
         }
 
         if (sc) {
@@ -469,7 +478,7 @@ public final class NextMoeSyncDialog {
                 sb.append("-").append(minutesText(-delta * 60_000L));
             }
         }
-        return sb.length() == 0 ? "有更新" : sb.toString();
+        return idNote + (sb.length() == 0 ? "有更新" : sb.toString());
     }
 
     private static String minutesText(long ms) {

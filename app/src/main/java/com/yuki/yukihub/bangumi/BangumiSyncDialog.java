@@ -431,6 +431,10 @@ public final class BangumiSyncDialog {
      */
     private static String describeChange(BangumiSyncService.ChangeItem c) {
         String target = BangumiSyncService.typeText(c.targetType);
+        // 强制重同步导致条目变了：在右栏直接标出来，避免只看状态看不出风险。
+        if (c.matched.idChanged()) {
+            target = "原 " + c.matched.previousId + " → 现 " + c.matched.subjectId + " · " + target;
+        }
         if (c.firstTime) return "加入 · " + target;
         return "设为 " + target;
     }

@@ -438,6 +438,12 @@ public final class VndbSyncDialog {
      */
     private static String describeChange(VndbSyncService.ChangeItem c) {
         String target = VndbSyncService.labelText(c.targetLabel);
+        // 强制重同步导致条目变了：在右栏直接标出来，避免只看状态看不出风险。
+        // 与下面的 remoteLabel 展示是两回事：那个是「远端当前值 → 目标值」，
+        // 这个是「重新匹配前指哪个 VN → 现在指哪个 VN」。
+        if (c.matched.idChanged()) {
+            target = "原 " + c.matched.previousId + " → 现 " + c.matched.vnId + " · " + target;
+        }
         if (c.firstTime) return "加入 · " + target;
         if (c.remoteLabel < 0) return "设为 " + target;
         return VndbSyncService.labelText(c.remoteLabel) + " → " + target;
