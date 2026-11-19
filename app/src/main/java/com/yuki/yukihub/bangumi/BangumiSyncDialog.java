@@ -2,7 +2,6 @@ package com.yuki.yukihub.bangumi;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.ProgressDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.os.Handler;
@@ -44,12 +43,6 @@ public final class BangumiSyncDialog {
         if (a.isFinishing()) return false;
         if (android.os.Build.VERSION.SDK_INT >= 17 && a.isDestroyed()) return false;
         return true;
-    }
-
-    private static void safeDismiss(ProgressDialog pd) {
-        try {
-            if (pd != null && pd.isShowing()) pd.dismiss();
-        } catch (Throwable ignored) { }
     }
 
     // ======================== 入口 ========================
@@ -105,10 +98,10 @@ public final class BangumiSyncDialog {
 
     /** 在 IO 线程校验 token，成功才保存。 */
     private static void verifyAndSave(Activity activity, String token) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在校验 token…");
-        pd.setCancelable(false);
-        pd.show();
+        // 换成自定义环形进度弹窗（原系统 ProgressDialog 与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "Bangumi");
+        spd.stageReading();
 
         AppExecutors.runOnIo(() -> {
             String err = null;
@@ -122,7 +115,7 @@ public final class BangumiSyncDialog {
             final String e = err;
             final String n = name;
             UI.post(() -> {
-                safeDismiss(pd);
+                spd.finish(); spd.close();
                 if (!alive(activity)) return;
                 if (e != null) {
                     new AlertDialog.Builder(activity)
@@ -151,30 +144,30 @@ public final class BangumiSyncDialog {
      * @param forceResync true 表示忽略本地「已同步」记录，把所有能匹配上的条目重新推一遍
      */
     private static void startPrepare(Activity activity, String token, boolean forceResync) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage(forceResync ? "正在准备重新同步…" : "正在匹配条目…");
-        pd.setCancelable(false);
-        pd.show();
+        // 换成自定义环形进度弹窗（原系统 ProgressDialog 与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "Bangumi");
+        spd.stageReading();
 
         AppExecutors.runOnIo(() -> {
             try {
                 BangumiSyncService.Preview preview = BangumiSyncService.prepare(activity, token, forceResync,
                         (done, total) -> UI.post(() -> {
                             if (!alive(activity)) return;
-                            try { pd.setMessage("正在匹配… " + done + " / " + total); }
+                            try { spd.stageMatching(done, total); }
                             catch (Throwable ignored) { }
                         }));
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showPreview(activity, token, preview);
                 });
             } catch (BangumiSyncClient.NotAuthorizedException e) {
-                safeDismiss(pd);
+                spd.close();
                 handleAuthError(activity, e.getMessage());
             } catch (Throwable t) {
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showError(activity, t);
                 });
@@ -345,22 +338,22 @@ public final class BangumiSyncDialog {
     // ======================== 阶段 3：执行 ========================
 
     private static void runExecute(Activity activity, String token, BangumiSyncService.Preview preview) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在同步…");
-        pd.setCancelable(false);
-        pd.show();
+        // 换成自定义环形进度弹窗（原系统 ProgressDialog 与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "Bangumi");
+        spd.stageWriting();
 
         AppExecutors.runOnIo(() -> {
             try {
                 BangumiSyncService.Result result = BangumiSyncService.execute(activity, token, preview);
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.finish();
                     if (!alive(activity)) return;
                     showResult(activity, result);
                 });
             } catch (Throwable t) {
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showError(activity, t);
                 });

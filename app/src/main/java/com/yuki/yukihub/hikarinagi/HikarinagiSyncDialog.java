@@ -2,7 +2,6 @@ package com.yuki.yukihub.hikarinagi;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.ProgressDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.os.Handler;
@@ -44,12 +43,6 @@ public final class HikarinagiSyncDialog {
         if (a.isFinishing()) return false;
         if (android.os.Build.VERSION.SDK_INT >= 17 && a.isDestroyed()) return false;
         return true;
-    }
-
-    private static void safeDismiss(ProgressDialog pd) {
-        try {
-            if (pd != null && pd.isShowing()) pd.dismiss();
-        } catch (Throwable ignored) { }
     }
 
     // ======================== 入口 ========================
@@ -99,10 +92,9 @@ public final class HikarinagiSyncDialog {
      * 等回调回来，全程不经过任何 Activity。
      */
     private static void authorize(Activity activity) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("请在浏览器中完成授权…");
-        pd.setCancelable(false);
-        pd.show();
+                final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "Hikarinagi");
+        spd.stageReading();
 
         new Thread(() -> {
             String err;
@@ -113,7 +105,7 @@ public final class HikarinagiSyncDialog {
             }
             final String error = err;
             UI.post(() -> {
-                safeDismiss(pd);
+                spd.finish(); spd.close();
                 if (!alive(activity)) return;
                 boolean ok = error == null && HikarinagiAuthStore.isConnected(activity);
                 if (ok) {
@@ -138,29 +130,28 @@ public final class HikarinagiSyncDialog {
      * @param forceResync true 表示忽略本地「已同步」记录，把所有能匹配上的条目重新推一遍
      */
     private static void startPrepare(Activity activity, boolean forceResync) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage(forceResync ? "正在准备重新同步…" : "正在匹配条目…");
-        pd.setCancelable(false);
-        pd.show();
-
+        // 换成自定义环形进度弹窗（原来用系统 ProgressDialog，白色小圈，与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "Hikarinagi");
+        spd.stageReading();
         AppExecutors.runOnIo(() -> {
             try {
                 HikarinagiSyncService.Preview preview = HikarinagiSyncService.prepare(
                         activity, forceResync,
                         (done, total) -> UI.post(() -> {
                             if (!alive(activity)) return;
-                            try { pd.setMessage("正在匹配… " + done + " / " + total); }
+                            try { spd.stageMatching(done, total); }
                             catch (Throwable ignored) { }
                         }));
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showPreview(activity, preview);
                 });
             } catch (HikarinagiSyncService.TokenRefreshFailedException e) {
                 // 凭据还在，只是这次没刷成（多半网络问题）→ 给「重试」，劝用户别重新授权
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     final String msg = e.getMessage();
                     new AlertDialog.Builder(activity)
@@ -171,11 +162,11 @@ public final class HikarinagiSyncDialog {
                             .show();
                 });
             } catch (HikarinagiSyncClient.NotAuthorizedException e) {
-                safeDismiss(pd);
+                spd.close();
                 handleAuthError(activity, e.getMessage());
             } catch (Throwable t) {
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showError(activity, t);
                 });
@@ -381,22 +372,21 @@ public final class HikarinagiSyncDialog {
     // ======================== 阶段 3：执行 ========================
 
     private static void runExecute(Activity activity, HikarinagiSyncService.Preview preview) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在同步…");
-        pd.setCancelable(false);
-        pd.show();
-
+        // 写入阶段也用同一个环形弹窗（原来这里是系统 ProgressDialog）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "Hikarinagi");
+        spd.stageWriting();
         AppExecutors.runOnIo(() -> {
             try {
                 HikarinagiSyncService.Result result = HikarinagiSyncService.execute(activity, preview);
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.finish();
                     if (!alive(activity)) return;
                     showResult(activity, result);
                 });
             } catch (Throwable t) {
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showError(activity, t);
                 });

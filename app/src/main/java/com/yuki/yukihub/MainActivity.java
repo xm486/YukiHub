@@ -2533,26 +2533,26 @@ private void showProfileDialog() {
     syncBody.setPadding(0, dp(6), 0, 0);
     syncBody.setVisibility(View.GONE);
 
-    addSyncSourceRow(syncBody, "H", 0xFF8AB4FF,
-            "Hikarinagi",
-            com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this),
-            hikarinagiSyncStatusText(),
-            v -> openHikarinagiSync());
-    addSyncSourceRow(syncBody, "B", 0xFFFF8AB3,
-            "Bangumi",
-            com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this),
-            bangumiSyncStatusText(),
-            v -> openBangumiSync());
-    addSyncSourceRow(syncBody, "V", 0xFF5BC8D6,
-            "VNDB",
-            com.yuki.yukihub.vndb.VndbSyncService.isConnected(this),
-            vndbSyncStatusText(),
-            v -> openVndbSync());
-    addSyncSourceRow(syncBody, "N", 0xFF34C759,
+    addSyncSourceRow(syncBody, "N", 0xFF34C759, R.drawable.ic_kungal_logo,
             "NextMoe",
             com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected(),
             nextMoeSyncStatusText(),
             v -> openNextMoeSync());
+    addSyncSourceRow(syncBody, "H", 0xFF8AB4FF, R.drawable.ic_hikarinagi_logo,
+            "Hikarinagi",
+            com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this),
+            hikarinagiSyncStatusText(),
+            v -> openHikarinagiSync());
+    addSyncSourceRow(syncBody, "V", 0xFF5BC8D6, R.drawable.ic_vndb_logo,
+            "VNDB",
+            com.yuki.yukihub.vndb.VndbSyncService.isConnected(this),
+            vndbSyncStatusText(),
+            v -> openVndbSync());
+    addSyncSourceRow(syncBody, "B", 0xFFFF8AB3, R.drawable.ic_bangumi_logo,
+            "Bangumi",
+            com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this),
+            bangumiSyncStatusText(),
+            v -> openBangumiSync());
 
     // 开关
     final boolean[] syncExpanded = {false};
@@ -11659,18 +11659,19 @@ return b;
     /**
      * 往折叠体里加一行「平台入口」。
      * <p>
-     * 每行：左侧色块字母图标 + 平台名 + 连接状态徽章 + 状态小字 + 右侧箭头。
+     * 每行：左侧平台图标（真实 logo）+ 平台名 + 连接状态徽章 + 状态小字 + 右侧箭头。
      * 点击整行即触发对应平台的同步弹窗（与原按钮行为一致）。
      *
      * @param parent    折叠体容器
-     * @param letter    图标上的字母（H/B/V/N）
-     * @param color     平台品牌色
+     * @param letter    字母（图标加载失败时的兜底显示，也是无障碍描述的一部分）
+     * @param color     平台品牌色（兜底色块用）
+     * @param iconRes   平台图标资源；传 0 则只显示字母色块
      * @param name      平台名
      * @param connected 是否已连接（决定徽章文案与颜色）
      * @param status    状态小字（沿用原来的 xxxSyncStatusText()）
      * @param onClick   点击动作（沿用原来的 openXxxSync()）
      */
-    private void addSyncSourceRow(LinearLayout parent, String letter, int color,
+    private void addSyncSourceRow(LinearLayout parent, String letter, int color, int iconRes,
                                   String name, boolean connected, String status,
                                   android.view.View.OnClickListener onClick) {
         LinearLayout row = new LinearLayout(this);
@@ -11682,15 +11683,24 @@ return b;
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         rowLp.setMargins(0, dp(5), 0, 0);
 
-        // 左侧字母色块
-        TextView icon = new TextView(this);
-        icon.setText(letter);
-        icon.setTextSize(11);
-        icon.setTextColor(0xFFFFFFFF);
-        icon.setTypeface(null, android.graphics.Typeface.BOLD);
-        icon.setGravity(android.view.Gravity.CENTER);
-        icon.setBackground(roundedBg(dp(8), color, 0));
-        row.addView(icon, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        // 左侧：有图标就用真图标，否则用品牌色字母块兜底
+        if (iconRes != 0) {
+            android.widget.ImageView icon = new android.widget.ImageView(this);
+            icon.setImageResource(iconRes);
+            icon.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+            icon.setAdjustViewBounds(true);
+            icon.setContentDescription(name);
+            row.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        } else {
+            TextView icon = new TextView(this);
+            icon.setText(letter);
+            icon.setTextSize(11);
+            icon.setTextColor(0xFFFFFFFF);
+            icon.setTypeface(null, android.graphics.Typeface.BOLD);
+            icon.setGravity(android.view.Gravity.CENTER);
+            icon.setBackground(roundedBg(dp(8), color, 0));
+            row.addView(icon, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        }
 
         // 中间：平台名 + 徽章 / 状态小字
         LinearLayout mid = new LinearLayout(this);

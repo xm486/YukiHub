@@ -2,7 +2,6 @@ package com.yuki.yukihub.nextmoe;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.ProgressDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.os.Handler;
@@ -55,12 +54,6 @@ public final class NextMoeSyncDialog {
         return true;
     }
 
-    private static void safeDismiss(android.app.ProgressDialog pd) {
-        try {
-            if (pd != null && pd.isShowing()) pd.dismiss();
-        } catch (Throwable ignored) { }
-    }
-
     // ======================== 入口 ========================
 
     /**
@@ -97,10 +90,10 @@ public final class NextMoeSyncDialog {
     }
 
     private static void authorize(Activity activity) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("请在浏览器中完成授权…");
-        pd.setCancelable(false);
-        pd.show();
+        // 换成自定义环形进度弹窗（原系统 ProgressDialog 与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "NextMoe");
+        spd.stageReading();
         new Thread(() -> {
             String err = null;
             try {
@@ -110,7 +103,7 @@ public final class NextMoeSyncDialog {
             }
             final String error = err;
             UI.post(() -> {
-                safeDismiss(pd);
+                spd.finish(); spd.close();
                 if (!alive(activity)) return;
                 boolean ok = error == null && NextMoeAuthStore.isConnected();
                 if (ok) {
@@ -135,10 +128,10 @@ public final class NextMoeSyncDialog {
      * @param forceResync true 表示忽略本地「已同步」记录，把所有能匹配上的条目重新推一遍
      */
     private static void startPrepare(Activity activity, boolean forceResync) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage(forceResync ? "正在准备重新同步…" : "正在匹配作品…");
-        pd.setCancelable(false);
-        pd.show();
+        // 换成自定义环形进度弹窗（原系统 ProgressDialog 与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "NextMoe");
+        spd.stageReading();
 
         AppExecutors.runOnIo(() -> {
             // 令牌过期时的刷新必须在这里做 —— 这是 IO 线程，可以发网络请求。
@@ -154,7 +147,7 @@ public final class NextMoeSyncDialog {
                 // 不能只报「同步失败」——要区分「需要重新授权」和「网络问题，凭据还在」。
                 final boolean stillConnected = NextMoeAuthStore.isConnected();
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.finish(); spd.close();
                     if (!alive(activity)) return;
                     if (stillConnected) {
                         new AlertDialog.Builder(activity)
@@ -175,17 +168,17 @@ public final class NextMoeSyncDialog {
                 NextMoeSyncService.Preview preview = NextMoeSyncService.prepare(activity, forceResync, (done, total) -> {
                     UI.post(() -> {
                         if (!alive(activity)) return;
-                        try { pd.setMessage("正在匹配作品… " + done + " / " + total); } catch (Throwable ignored) { }
+                        try { spd.stageMatching(done, total); } catch (Throwable ignored) { }
                     });
                 });
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showPreview(activity, preview);
                 });
             } catch (Throwable t) {
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showError(activity, t);
                 });
@@ -342,22 +335,22 @@ public final class NextMoeSyncDialog {
     // ======================== 阶段 3：执行 ========================
 
     private static void runExecute(Activity activity, NextMoeSyncService.Preview preview) {
-        ProgressDialog pd = new ProgressDialog(activity);
-        pd.setMessage("正在同步…");
-        pd.setCancelable(false);
-        pd.show();
+        // 换成自定义环形进度弹窗（原系统 ProgressDialog 与深色主题不搭）
+        final com.yuki.yukihub.ui.SyncProgressDialog spd =
+                com.yuki.yukihub.ui.SyncProgressDialog.show(activity, "NextMoe");
+        spd.stageWriting();
 
         AppExecutors.runOnIo(() -> {
             try {
                 NextMoeSyncService.Result result = NextMoeSyncService.execute(activity, preview);
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.finish();
                     if (!alive(activity)) return;
                     showResult(activity, result);
                 });
             } catch (Throwable t) {
                 UI.post(() -> {
-                    safeDismiss(pd);
+                    spd.close();
                     if (!alive(activity)) return;
                     showError(activity, t);
                 });
