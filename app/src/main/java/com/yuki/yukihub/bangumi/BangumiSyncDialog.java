@@ -19,6 +19,7 @@ import android.widget.Toast;
 import com.yuki.yukihub.model.Game;
 import com.yuki.yukihub.util.AppExecutors;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -220,6 +221,28 @@ public final class BangumiSyncDialog {
         TextView summary = bodyText(activity, buildSummary(preview));
         summary.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(summary);
+
+        // ---- 重新匹配：id 发生变化的条目（最需要用户确认的）----
+        // 强制重同步会绕开 id 缓存重新搜索，可能搜出与原来不同的条目。
+        // 必须显式列出来，不能让用户以为「只是重推一遍」。
+        List<BangumiSyncService.Matched> idChanged = new ArrayList<>();
+        for (BangumiSyncService.Matched m : preview.items) {
+            if (m.idChanged()) idChanged.add(m);
+        }
+        if (!idChanged.isEmpty()) {
+            root.addView(sectionHeader(activity, "重新匹配后条目变了（" + idChanged.size() + "）"));
+            for (BangumiSyncService.Matched m : idChanged) {
+                root.addView(row(activity, safeTitle(m.game),
+                        "原 " + m.previousId + " → 现 " + m.subjectId));
+            }
+            TextView warn = bodyText(activity,
+                    "这些游戏这次重新搜索后指向了不同的 Bangumi 条目。\n"
+                            + "如果某一项明显不对，请取消。\n"
+                            + "确认继续则会按「现」的条目写入。");
+            warn.setTextColor(0xFFFFB74D);
+            warn.setPadding(0, dp(activity, 8), 0, 0);
+            root.addView(warn);
+        }
 
         // ---- 本次有更新 ----
         List<BangumiSyncService.ChangeItem> changed = preview.changed;

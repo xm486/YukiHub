@@ -58,11 +58,32 @@ public final class NextMoeWorkResolver {
         public final String workId;
         /** nextmoe / vndb / bangumi / cache，仅用于日志与排错展示。 */
         public final String via;
+        /**
+         * 强制重同步时，重新匹配前用的 work_id。
+         * 与 {@link #workId} 不同时说明「换了条目」，UI 要如实展示。
+         * 非强制模式下恒为空串（无从比较，也不需要比较）。
+         */
+        public final String previousId;
 
         public Matched(Game game, String workId, String via) {
+            this(game, workId, via, "");
+        }
+
+        /**
+         * @param previousId 重新匹配前用的 work_id（强制重同步时用于展示变化）
+         */
+        public Matched(Game game, String workId, String via, String previousId) {
             this.game = game;
             this.workId = workId;
             this.via = via;
+            this.previousId = previousId == null ? "" : previousId;
+        }
+
+        /** 重新匹配后 id 是否发生了变化（仅强制重同步时可能为 true）。 */
+        public boolean idChanged() {
+            String cur = workId == null ? "" : workId.trim();
+            String prev = previousId.trim();
+            return !prev.isEmpty() && !prev.equals(cur);
         }
     }
 
@@ -74,6 +95,21 @@ public final class NextMoeWorkResolver {
     // ======================== 主流程 ========================
 
     public static ResolveResult resolve(Context context, List<Game> games, Progress progress)
+            throws Exception {
+        return resolve(context, games, false, progress);
+    }
+
+    /**
+     * @param forceResync 强制重同步：跳过第 1、2 级缓存（work_id 与 metadata 锚），
+     *                    让条目重新走一遍第 3 级外部锚反查与第 4 级标题搜索。
+     *                    <b>只影响「用不用缓存」，四级匹配的规则一条都不改。</b>
+     *                    <p>
+     *                    第 3 级（vndb/bangumi 外部锚）在强制模式下同样<b>照常执行</b>：
+     *                    它反查的是「另一个源的 id → NextMoe work_id」，
+     *                    这属于重新匹配的一部分，不是缓存的同步结果。
+     */
+    public static ResolveResult resolve(Context context, List<Game> games,
+                                        boolean forceResync, Progress progress)
             throws Exception {
         ResolveResult result = new ResolveResult();
         if (games == null || games.isEmpty()) return result;
@@ -89,7 +125,8 @@ public final class NextMoeWorkResolver {
         int lastReported = -1;
         for (Game g : games) {
             String cached = g.nextmoeWorkId == null ? "" : g.nextmoeWorkId.trim();
-            if (!cached.isEmpty()) {
+            // 强制重同步时忽略这份缓存，让所有条目重新走一遍匹配
+            if (!forceResync && !cached.isEmpty()) {
                 result.matched.add(new Matched(g, cached, "cache"));
             } else {
                 pending.add(g);
@@ -105,7 +142,11 @@ public final class NextMoeWorkResolver {
         if (pending.isEmpty()) return result;
 
         // ---- 第 2 级：metadata_cache 里 source='nextmoe' ----
-        Map<Long, String> nextMoeIds = readCachedSourceIds(context, idsOf(pending), "nextmoe");
+        // 强制重同步时同样跳过：这里的 id 是历次同步写入缓存的结果，
+        // 若沿用就失去了「重新匹配」的意义。
+        Map<Long, String> nextMoeIds = forceResync
+                ? new LinkedHashMap<>()
+                : readCachedSourceIds(context, idsOf(pending), "nextmoe");
         List<Game> stillPending = new ArrayList<>();
         for (Game g : pending) {
             String id = nextMoeIds.get(g.id);
@@ -167,7 +208,8 @@ public final class NextMoeWorkResolver {
                     resolvedGameIds.add(gameId);
                     Game g = findById(stillPending, gameId);
                     if (g == null) continue;
-                    result.matched.add(new Matched(g, e.getValue(), linkSourceOf(e.getKey())));
+                    String prev = g.nextmoeWorkId == null ? "" : g.nextmoeWorkId.trim();
+                    result.matched.add(new Matched(g, e.getValue(), linkSourceOf(e.getKey()), prev));
                     result.newlyResolved.put(gameId, e.getValue());
                 }
             }
@@ -207,7 +249,8 @@ public final class NextMoeWorkResolver {
                 for (String cand : candidates) {
                     String workId = NextMoeMeClient.searchWorkByExactTitle(cand);
                     if (workId != null && !workId.isEmpty()) {
-                        result.matched.add(new Matched(g, workId, "title"));
+                        String prev = g.nextmoeWorkId == null ? "" : g.nextmoeWorkId.trim();
+                        result.matched.add(new Matched(g, workId, "title", prev));
                         result.newlyResolved.put(g.id, workId);
                         hit = true;
                         break;

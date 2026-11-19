@@ -18,6 +18,7 @@ import android.widget.Toast;
 import com.yuki.yukihub.model.Game;
 import com.yuki.yukihub.util.AppExecutors;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -224,6 +225,28 @@ public final class HikarinagiSyncDialog {
         TextView summary = bodyText(activity, buildSummary(preview));
         summary.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(summary);
+
+        // ---- 重新匹配：id 发生变化的条目（最需要用户确认的）----
+        // 强制重同步会绕开 id 缓存重新搜索，可能搜出与原来不同的条目。
+        // 必须显式列出来，不能让用户以为「只是重推一遍」。
+        List<HikarinagiSyncService.Matched> idChanged = new ArrayList<>();
+        for (HikarinagiSyncService.Matched m : preview.items) {
+            if (m.idChanged()) idChanged.add(m);
+        }
+        if (!idChanged.isEmpty()) {
+            root.addView(sectionHeader(activity, "重新匹配后条目变了（" + idChanged.size() + "）"));
+            for (HikarinagiSyncService.Matched m : idChanged) {
+                root.addView(row(activity, safeTitle(m.game),
+                        "原 " + m.previousId + " → 现 " + m.galgameId));
+            }
+            TextView warn = bodyText(activity,
+                    "这些游戏这次重新搜索后指向了不同的 Hikarinagi 条目。\n"
+                            + "如果某一项明显不对，请取消，并先在产品主页反馈。\n"
+                            + "确认继续则会按「现」的条目写入。");
+            warn.setTextColor(0xFFFFB74D);
+            warn.setPadding(0, dp(activity, 8), 0, 0);
+            root.addView(warn);
+        }
 
         // ---- 本次有更新 ----
         List<HikarinagiSyncService.ChangeItem> changed = preview.changed;
@@ -462,6 +485,10 @@ public final class HikarinagiSyncDialog {
     private static String describeChange(HikarinagiSyncService.ChangeItem c) {
         String target = HikarinagiSyncService.statusText(c.status);
         if (c.minutes > 0) target = target + " · " + humanMinutes(c.minutes);
+        // 强制重同步导致条目变了：在右栏直接标出来，避免只看状态看不出风险。
+        if (c.matched.idChanged()) {
+            target = "原 " + c.matched.previousId + " → 现 " + c.matched.galgameId + " · " + target;
+        }
         if (c.firstTime) return "加入 · " + target;
         return target;
     }

@@ -134,11 +134,29 @@ public final class BangumiSyncService {
         public final String subjectId;
         /** 匹配来源：cache / metadata / title，仅用于日志与排错展示。 */
         public final String source;
+        /**
+         * 强制重同步时，重新匹配前用的是哪个 id。
+         * 与 {@link #subjectId} 不同时说明「换了条目」，UI 要如实展示。
+         * 非强制模式下恒等于 {@link #subjectId}。
+         */
+        public final String previousId;
 
         public Matched(Game game, String subjectId, String source) {
+            this(game, subjectId, source, subjectId);
+        }
+
+        public Matched(Game game, String subjectId, String source, String previousId) {
             this.game = game;
             this.subjectId = subjectId;
             this.source = source;
+            this.previousId = previousId == null ? "" : previousId;
+        }
+
+        /** 重新匹配后 id 是否发生了变化（仅强制重同步时可能为 true）。 */
+        public boolean idChanged() {
+            String cur = subjectId == null ? "" : subjectId.trim();
+            String prev = previousId.trim();
+            return !prev.isEmpty() && !prev.equals(cur);
         }
     }
 
@@ -236,6 +254,13 @@ public final class BangumiSyncService {
         // 第2级：metadata_cache 里 source='bangumi' 的 source_id
         Map<Long, String> metadataIds = repo.getBangumiSourceIds();
 
+        // 强制重同步：绕开第 1、2 级缓存，让每个条目重新走一遍标题搜索。
+        // 只是不用缓存，搜索规则（候选词顺序、精确/包含判定）一概不动。
+        if (forceResync) {
+            cachedIds.clear();
+            metadataIds.clear();
+        }
+
         List<Matched> matched = new ArrayList<>();
         List<Game> needTitleSearch = new ArrayList<>();
 
@@ -276,7 +301,9 @@ public final class BangumiSyncService {
                         if (sid == null || sid.isEmpty()) {
                             unmatched.add(g);
                         } else {
-                            matched.add(new Matched(g, sid, "title"));
+                            // 重新搜到的 sid；previousId 保留原来缓存里的值（若有），供 UI 展示变化
+                            String prev = g.bangumiSubjectId == null ? "" : g.bangumiSubjectId.trim();
+                            matched.add(new Matched(g, sid, "title", prev));
                             newlyResolved.put(g.id, sid);
                         }
                     } catch (BangumiSyncClient.NotAuthorizedException

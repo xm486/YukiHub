@@ -122,11 +122,29 @@ public final class HikarinagiSyncService {
         public final long galgameId;
         /** 匹配来源：cache / metadata / title，仅用于日志与排错展示。 */
         public final String source;
+        /**
+         * 强制重同步时，本次重新匹配得到的新 id。
+         * <p>
+         * 与 {@link #galgameId} 不同时说明「换了条目」，UI 要如实展示，
+         * 让用户能看出重新匹配导致了什么变化，而不是悄悄覆盖。
+         * 非强制模式下恒为 {@link #galgameId}。
+         */
+        public final long previousId;
 
         public Matched(Game game, long galgameId, String source) {
+            this(game, galgameId, source, galgameId);
+        }
+
+        public Matched(Game game, long galgameId, String source, long previousId) {
             this.game = game;
             this.galgameId = galgameId;
             this.source = source;
+            this.previousId = previousId;
+        }
+
+        /** 重新匹配后 id 是否发生了变化（仅强制重同步时可能为 true）。 */
+        public boolean idChanged() {
+            return previousId > 0L && previousId != galgameId;
         }
     }
 
@@ -306,6 +324,15 @@ public final class HikarinagiSyncService {
         // 第2级：metadata_cache 里 source='hikarinagi' 的 source_id
         Map<Long, Long> metadataIds = repo.getHikarinagiSourceIds();
 
+        // 强制重同步：绕开第 1、2 级缓存，让每个条目都重新走一遍标题搜索。
+        // 注意这里<b>只是不用缓存</b>，搜索规则本身（候选词顺序、两轮精确优先、
+        // 兜底、去重合并）一概不动 —— 复用原有规则，不另写一套。
+        // 旧 id 记在 previousId 里，供 UI 展示「原来 X → 现在 Y」。
+        if (forceResync) {
+            cachedIds.clear();
+            metadataIds.clear();
+        }
+
         List<Matched> matched = new ArrayList<>();
         List<Game> needTitleSearch = new ArrayList<>();
 
@@ -346,7 +373,10 @@ public final class HikarinagiSyncService {
                         if (id == null || id <= 0L) {
                             unmatched.add(g);
                         } else {
-                            matched.add(new Matched(g, id, "title"));
+                            // 重新搜到的新 id；previousId 保留原来缓存里的值（若有），
+                            // 供 UI 展示「原 2044 → 现 2046」这种变化。
+                            long prev = g.hikarinagiGalgameId;
+                            matched.add(new Matched(g, id, "title", prev));
                             newlyResolved.put(g.id, id);
                         }
                     } catch (HikarinagiSyncClient.RateLimitedException e) {

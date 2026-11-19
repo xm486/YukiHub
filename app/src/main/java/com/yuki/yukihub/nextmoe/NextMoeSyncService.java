@@ -211,7 +211,7 @@ public final class NextMoeSyncService {
         }
 
         NextMoeWorkResolver.ResolveResult resolved = NextMoeWorkResolver.resolve(
-                context, candidates, (done, total) -> {
+                context, candidates, forceResync, (done, total) -> {
                     if (progress != null) progress.onResolveProgress(done, total);
                 });
 
