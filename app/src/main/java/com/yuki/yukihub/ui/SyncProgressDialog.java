@@ -94,22 +94,10 @@ public class SyncProgressDialog {
         ring.setColors(0xFF8AB4FF, 0xFFFF8AB3, 0x269AA4BF);
         ringBox.addView(ring, new android.widget.FrameLayout.LayoutParams(ringSize, ringSize));
 
-        LinearLayout center = new LinearLayout(activity);
-        center.setOrientation(LinearLayout.VERTICAL);
-        center.setGravity(Gravity.CENTER);
-        countView = new TextView(activity);
-        countView.setTextSize(9.5f);
-        countView.setTextColor(0xFF9AA4BF);
-        countView.setGravity(Gravity.CENTER);
-        countView.setPadding(0, dp, 0, 0);
-        center.addView(countView);
-
-        ringBox.addView(center, new android.widget.FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        card.addView(ringBox, new LinearLayout.LayoutParams(ringSize, ringSize));
-
-        // 大号百分比（盖在环中间）。原先误加在 center 里导致与实际层级不符，
-        // 这里显式放到 ringBox 上层并居中。
+        // 百分比与大号数字都直接铺在 ringBox 上，靠 gravity + margin 错开，
+        // 不再套一层 LinearLayout（套了会导致「同一个 View 加两次」的错：
+        // 先 addView 到 LinearLayout，又 addView 到 FrameLayout，
+        // 第二次会抛 "The specified child already has a parent"）。
         pctView = new TextView(activity);
         pctView.setText("0%");
         pctView.setTextSize(21);
@@ -120,17 +108,21 @@ public class SyncProgressDialog {
                 new android.widget.FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pctLp.gravity = Gravity.CENTER;
-        // 稍微上移，给下面的 0 / 39 留位
-        pctLp.bottomMargin = dp * 10;
+        pctLp.bottomMargin = dp * 11;   // 往上挪，给下面的计数留位置
         ringBox.addView(pctView, pctLp);
 
+        countView = new TextView(activity);
+        countView.setTextSize(9.5f);
+        countView.setTextColor(0xFF9AA4BF);
+        countView.setGravity(Gravity.CENTER);
         android.widget.FrameLayout.LayoutParams cntLp =
                 new android.widget.FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         cntLp.gravity = Gravity.CENTER;
-        cntLp.topMargin = dp * 30;
-        ringBox.removeView(countView);
+        cntLp.topMargin = dp * 26;      // 往下挪
         ringBox.addView(countView, cntLp);
+
+        card.addView(ringBox, new LinearLayout.LayoutParams(ringSize, ringSize));
 
         // ---------- 右：标题 + 阶段 + 步骤 ----------
         LinearLayout right = new LinearLayout(activity);
@@ -216,6 +208,9 @@ public class SyncProgressDialog {
 
     /** 阶段 1：读取本地库（从 0% 起步，并启动保底爬升）。 */
     public void stageReading() {
+        // 允许同一实例被复用（例如「重试」时）。必须把所有状态归零，
+        // 否则上一次的 finished=true / lastPercent=100 会让这轮完全不动。
+        finished = false;
         stageView.setText("读取本地游戏库…");
         ring.setIndeterminate(false);
         lastPercent = 0;
@@ -223,6 +218,9 @@ public class SyncProgressDialog {
         pctView.setText("0%");
         countView.setText("");
         setStepState(0, STATE_ACTIVE);
+        setStepState(1, STATE_IDLE);
+        setStepState(2, STATE_IDLE);
+        setStepState(3, STATE_IDLE);
         startCreep();
     }
 
