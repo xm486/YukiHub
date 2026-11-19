@@ -217,11 +217,9 @@ public final class VndbSyncService {
         // 剩下 7 个里有 4 个能被标题搜索救回来 —— 所以第3级是必要的，不是锦上添花。
         Map<Long, String> metadataVnIds = repo.getVndbSourceIds();
 
-        // 强制重同步：绕开第 1、2 级缓存，让每个条目重新走一遍标题搜索。
-        // 只是不用缓存，搜索规则（候选词顺序用原名优先）一概不动。
-        if (forceResync) {
-            metadataVnIds.clear();
-        }
+        // 强制重同步的语义是「重新推送」而非「重新匹配」：
+        // 第 1、2 级锚点是已验证的正确映射，照常使用；区别只在后面绕过签名比对。
+        // （早期版本在这里清空了缓存，会导致本来匹配对的条目重新乱猜，已回退。）
 
         List<Game> all = repo.getAll();
         List<Matched> matched = new ArrayList<>();
@@ -235,7 +233,7 @@ public final class VndbSyncService {
 
             // 第1级：缓存的标题搜索成果
             String cached = g.vndbVnId == null ? "" : g.vndbVnId.trim();
-            if (!forceResync && !cached.isEmpty() && looksLikeVnId(cached)) {
+            if (!cached.isEmpty() && looksLikeVnId(cached)) {
                 matched.add(new Matched(g, cached, "cache"));
                 continue;
             }

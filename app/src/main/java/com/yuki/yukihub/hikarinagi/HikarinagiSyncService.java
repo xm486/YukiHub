@@ -324,14 +324,14 @@ public final class HikarinagiSyncService {
         // 第2级：metadata_cache 里 source='hikarinagi' 的 source_id
         Map<Long, Long> metadataIds = repo.getHikarinagiSourceIds();
 
-        // 强制重同步：绕开第 1、2 级缓存，让每个条目都重新走一遍标题搜索。
-        // 注意这里<b>只是不用缓存</b>，搜索规则本身（候选词顺序、两轮精确优先、
-        // 兜底、去重合并）一概不动 —— 复用原有规则，不另写一套。
-        // 旧 id 记在 previousId 里，供 UI 展示「原来 X → 现在 Y」。
-        if (forceResync) {
-            cachedIds.clear();
-            metadataIds.clear();
-        }
+        // 强制重同步的语义（重要，别理解错）：
+        //   它要解决的是「云端数据可能被改动/曾经写入失败，本地却以为已同步」，
+        //   属于<b>重新推送</b>，不是<b>重新匹配</b>。
+        //   所以第 1、2 级锚点<b>照常使用</b>——那些是已经验证过的正确映射，
+        //   丢掉它们只会让本来匹配对的条目重新乱猜（实测曾把
+        //   《星空的记忆 Eternal Heart》从正确的 68 认成 2202）。
+        //   唯一的区别在后面：签名比对被绕过，所有 matched 都算「有变化」。
+        // （早期版本在这里清空了缓存，是错的，已回退。）
 
         List<Matched> matched = new ArrayList<>();
         List<Game> needTitleSearch = new ArrayList<>();

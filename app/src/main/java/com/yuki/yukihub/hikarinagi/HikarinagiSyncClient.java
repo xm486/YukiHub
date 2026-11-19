@@ -149,6 +149,25 @@ public final class HikarinagiSyncClient {
     /** 时长上限（分钟）。本地实测最大约 1194 分钟，这里留足余量防脏数据。 */
     public static final int MAX_MINUTES = 60_000;
 
+    /**
+     * 「标题 ⊆ 查询词」方向的最小标题长度。
+     * <p>
+     * 短标题几乎必然出现在别的名字里，采纳它等于乱认：
+     * <ul>
+     *   <li>「原神牛比」→「原神」（2 字）</li>
+     *   <li>「星空のメモリア Eternal Heart」→「メモリア」（4 字，但覆盖率低）</li>
+     * </ul>
+     */
+    private static final int MIN_COVERED_TITLE_LEN = 5;
+
+    /**
+     * 「标题 ⊆ 查询词」方向的最低覆盖率。
+     * <p>
+     * 例：「原神牛比」里「原神」占 50%，明显串了别的名字，不采纳；
+     * 「星空的记忆(汉化版)」里「星空的记忆」占 83%，可以采纳。
+     */
+    private static final double MIN_TITLE_COVERAGE = 0.8d;
+
     private static final int CONNECT_TIMEOUT_MS = 15000;
     private static final int READ_TIMEOUT_MS = 25000;
     /**
@@ -632,6 +651,16 @@ public final class HikarinagiSyncClient {
         }
 
         // 2) 包含关系：查询词是返回标题的子串（或反之），且唯一
+        //
+        //    两个方向的安全性完全不同，必须分开判：
+        //    a) 查询词 ⊆ 标题（如「星空的记忆」→「星空的记忆 -Wish upon a star」）
+        //       安全：用户给的比完整标题短，正常。但要求标题别短得离谱，
+        //       防止「末」这种单字标题匹配上任何长查询词。
+        //    b) 标题 ⊆ 查询词（如「星空のメモリア Eternal Heart」→「メモリア」）
+        //       <b>危险方向</b>：实测这条把《星空的记忆 Eternal Heart》错认成
+        //       《メモリア》(id 2202)——目标 id 68 明明排在候选第 1，
+        //       却因为 2202 的字面包含关系被「唯一命中」捡走了。
+        //       这个方向必须要求标题<b>足够长</b>且覆盖查询词的大部分。
         Long one = null;
         int hits = 0;
         for (int i = 0; i < items.length(); i++) {
@@ -639,11 +668,25 @@ public final class HikarinagiSyncClient {
             if (it == null) continue;
             long id = it.optLong("id", 0L);
             if (id <= 0L) continue;
-            String t = normalizeTitle(it.optString("title", ""));
+            String rawTitle = it.optString("title", "");
+            String t = normalizeTitle(rawTitle);
             if (t.isEmpty()) continue;
-            if (nq.length() >= 4 && (t.contains(nq) || nq.contains(t))) {
+            if (nq.length() < 4) continue;
+
+            if (t.contains(nq)) {
+                // 查询词 ⊆ 标题
                 hits++;
                 if (one == null) one = id;
+            } else if (nq.contains(t)) {
+                // 标题 ⊆ 查询词：危险方向，需要覆盖率把关
+                if (acceptCoveredTitle(nq, t)) {
+                    hits++;
+                    if (one == null) one = id;
+                } else {
+                    double cov = (double) t.length() / (double) nq.length();
+                    Log.w(TAG, "候选「" + query + "」里「" + rawTitle + "」只覆盖 "
+                            + Math.round(cov * 100) + "%，疑似串了别的游戏名，不采纳");
+                }
             }
         }
         if (hits == 1) {
@@ -674,6 +717,29 @@ public final class HikarinagiSyncClient {
             Log.w(TAG, "候选「" + query + "」有 " + hits + " 条都包含，无法确定是哪一部，放弃");
         }
         return null;
+    }
+
+    /**
+     * 「返回标题 ⊆ 查询词」方向是否可采纳。
+     * <p>
+     * 这个方向天然危险：查询词里只要<b>碰巧包含</b>某个短标题，就会认错作品。
+     * <ul>
+     *   <li>实测反例 1：本地「原神牛比」→ 站上「原神」，覆盖率 50%，会把
+     *       用户真正的游戏覆盖成「原神」。</li>
+     *   <li>实测反例 2：「星空のメモリア Eternal Heart」→「メモリア」(id 2202)，
+     *       覆盖率很低，却因为「唯一包含」把本来正确的 id 68 挤掉了。</li>
+     * </ul>
+     * 因此要求两条同时满足：标题本身不算太短、且覆盖查询词的绝大部分。
+     *
+     * @param nq 归一化后的查询词
+     * @param t  归一化后的返回标题
+     */
+    static boolean acceptCoveredTitle(String nq, String t) {
+        if (nq == null || t == null) return false;
+        if (nq.isEmpty() || t.isEmpty()) return false;
+        if (t.length() < MIN_COVERED_TITLE_LEN) return false;
+        double cov = (double) t.length() / (double) nq.length();
+        return cov >= MIN_TITLE_COVERAGE;
     }
 
     /** 把各种横线换成空格，供搜索变体使用。 */
