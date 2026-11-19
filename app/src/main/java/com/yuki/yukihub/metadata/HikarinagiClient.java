@@ -31,7 +31,24 @@ public class HikarinagiClient {
     private static final String TOKEN_URL = "https://id.hikarinagi.org/oidc/token";
     private static final String CLIENT_ID = "hkn_4poXX7v37j_iM2-o";
     private static final String CLIENT_SECRET = "hks_Wv6tW5O6ev8Mbifvg1tPJ7UexehLATQcKpZJiFhV48Y";
-    private static final String SCOPE = "catalog:read";
+    /**
+     * 应用级令牌的 scope。
+     * <p>
+     * <b>必须是 {@code catalog:full}，不能用 {@code catalog:read}。</b>
+     * 文档 {@code guide/scopes} 原文：
+     * <ul>
+     *   <li>{@code catalog:read} ——「读取条目数据，<b>不含 NSFW 与乙女向条目</b>」</li>
+     *   <li>{@code catalog:full} ——「读取条目数据（全部），<b>含 NSFW 与乙女向条目</b>」，
+     *       且「{@code catalog:full} 包含 {@code catalog:read}，申请上位 scope 即可」</li>
+     * </ul>
+     * 用 {@code catalog:read} 时，NSFW 条目在 {@code /search} 结果里<b>根本不存在</b>
+     * （不是排在后面），导致这类作品既搜不到、也刮不到元数据。
+     * 控制可见性的是 scope，<b>不是</b>请求参数（{@code nsfw} 等一律 422 白名单拒绝）。
+     * <p>
+     * 同步侧 {@code hikarinagi.HikarinagiSyncClient#APP_SCOPE} 出于同一原因也用
+     * {@code catalog:full}，两处要一起改。
+     */
+    private static final String SCOPE = "catalog:full";
 
     private static final int MAX_RETRIES = 2;
     private static final long RETRY_DELAY_MS = 1200;
