@@ -393,10 +393,18 @@ public final class BangumiSyncClient {
 
             int code = c.getResponseCode();
             String text = readAll(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
-
             if (code == 401) throw new NotAuthorizedException("Bangumi token 无效或已过期，请重新生成");
-            if (code == 403) throw new NotAuthorizedException("Bangumi 拒绝访问，token 权限不足");
-            if (code == 404) throw new NotFoundException("Bangumi 找不到条目：" + preview(text));
+            if (code == 403) throw new NotAuthorizedException("Bangumi token 缺少 write:collection 权限，请重新生成 token");
+            // 400 = Validation Error：请求体/参数不合法（例如 subject_id 不是有效条目、type 越界）。
+            // 这条单独给文案，否则用户只会看到一坨 JSON。
+            if (code == 400) {
+                throw new Exception("Bangumi 认为这次请求不合法（HTTP 400）：" + preview(text));
+            }
+            // 注意：按官方 v0 规格，POST/PATCH /v0/users/-/collections/{subject_id} 的 404
+            // 含义是「用户不存在」，不是「条目不存在」——因为该端点语义是
+            // 「不存在则创建」，条目找不到不会报 404。
+            // 老代码把它当 NotFoundException（条目不存在）是误读，会误导用户以为作品没收录。
+            if (code == 404) throw new NotFoundException("Bangumi 返回 404（通常是 token 对应用户不存在或已失效）：" + preview(text));
             if (code == 429) throw new RateLimitedException("Bangumi 请求过于频繁，请稍后再试");
             if (code < 200 || code >= 300) {
                 throw new Exception("HTTP " + code + "：" + preview(text));
