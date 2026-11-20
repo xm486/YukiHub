@@ -52,6 +52,7 @@
 - 多种导入方式：支持手动添加、批量导入文件夹以及从第三方平台迁移（如 <a href="https://yukihub.kesug.com/guide/import-playnite.html">Playnite</a>、<a href="https://yukihub.kesug.com/guide/import-potatovn.html">PotatoVN</a>、<a href="https://yukihub.kesug.com/guide/import-vnite.html">Vnite</a>、<a href="https://yukihub.kesug.com/guide/import-lunabox.html">LunaBox</a>）。
 - 类steam的社交在线服务，在这里，你可以与好友尽情享受Gal的快乐，并且可以像steam一样记录时长，并且查看好友的游玩动态，以及正在游玩的游戏
 - 支持 NextMoe·未萌(原 鲲Galgame)、Hikarinagi 第三方账号快捷登录与绑定
+- 支持将游玩状态同步至鲲galgame(NextMoe)，vndb，bangumi，Hikarinagi
 - 支持好友聊天、游玩动态、在线状态（区分手机 / 电脑端）等社交功能
 - 支持 NextMoe 表情包，聊天时可以更愉快地带表情包发言
 - 集合了 NextMoe、VNDB、Bangumi、月幕 Gal、Hikarinagi 的游戏资料刮削源
@@ -231,7 +232,7 @@ YukiHub 更偏向于一个 **本地游戏管理中心**，而不是单纯的游�
 ### 使用内置 FVP 引擎的教程及游玩测试
 
 <p>
-  <a href="https://b23.tv/a0215xx">
+  <a href="https://b23.tv/6XBcHbA">
     <img src="https://img.shields.io/badge/Bilibili-观看教程-00A1D6?logo=bilibili&logoColor=white&labelColor=FF69B4" alt="FVP tutorial" />
   </a>
   
