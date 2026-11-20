@@ -11848,11 +11848,11 @@ return b;
                         // 同一个 Window 上连续 dismiss + show 容易撞上
                         // 「android.view.WindowLeaked」或新弹窗被立刻吞掉。
                         // 放到当前这轮消息循环之后重开，等确认框真正关干净。
-                        // 注意这里不能用主线程 Handler 以外的东西：
-                        // 用 dialog 自己的 decorView post，Activity 销毁时会随之丢弃。
-                        android.view.View anchor = dialog.getWindow() == null
-                                ? null : dialog.getWindow().getDecorView();
-                        Runnable reopen = () -> {
+                        // 用主线程 Handler 延后 120ms：此时确认框已 dismiss 完毕，
+                        // 再重建个人资料页就不会和它抢同一个 Window。
+                        // 延后回调内部已做 isFinishing / isDestroyed 检查，
+                        // Activity 若已销毁不会误操作。
+                        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                             if (isFinishing()
                                     || (android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed())) return;
                             try {
@@ -11862,13 +11862,7 @@ return b;
                             } catch (Throwable ignored) { }
                             pendingProfileDialog = null;
                             showProfileDialog();
-                        };
-                        if (anchor != null) {
-                            anchor.postDelayed(reopen, 120);
-                        } else {
-                            new android.os.Handler(android.os.Looper.getMainLooper())
-                                    .postDelayed(reopen, 120);
-                        }
+                        }, 120);
                     } catch (Throwable t) {
                         Toast.makeText(this, "解除失败："
                                 + (t.getMessage() == null ? "未知错误" : t.getMessage()),
