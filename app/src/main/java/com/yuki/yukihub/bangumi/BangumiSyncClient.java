@@ -427,8 +427,21 @@ public final class BangumiSyncClient {
 
     /** 共享的 OkHttpClient 与 JSON MediaType。 */
     private static final class Shared {
+        /**
+         * <b>必须精确为 {@code application/json}，不能带 {@code ; charset=utf-8} 后缀。</b>
+         * <p>
+         * Bangumi 服务端对 Content-Type 做精确匹配，带 charset 参数会直接返回
+         * <pre>
+         *   415 Unsupported Media Type
+         *   request with body must set "content-type" header to "application/json"
+         * </pre>
+         * 这个坑有旁证：同生态的 Tyranor-Next 在
+         * {@code core/net/HttpJson.kt} 里留了同一结论的注释
+         * （「带 charset 后缀返回 415，设备日志+curl 双重实证」）。
+         * JSON 按 RFC 8259 恒为 UTF-8，补 charset 本来就是冗余的。
+         */
         static final okhttp3.MediaType JSON_TYPE =
-                okhttp3.MediaType.parse("application/json; charset=utf-8");
+                okhttp3.MediaType.parse("application/json");
         static final okhttp3.OkHttpClient CLIENT = new okhttp3.OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .readTimeout(READ_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
