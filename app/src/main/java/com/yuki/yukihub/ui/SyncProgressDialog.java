@@ -175,6 +175,9 @@ public class SyncProgressDialog {
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         dialog.setContentView(card);
+        // 默认不可取消：同步中途误触返回键会中断写入。
+        // 但 finish() 后必须能退出，否则就是「卡死在 100%」——
+        // 见 finish() 里把 cancelable 打开，以及 close() 一定会 dismiss。
         dialog.setCancelable(false);
 
         Window w = dialog.getWindow();
@@ -294,6 +297,14 @@ public class SyncProgressDialog {
         stopCreep();
         ring.setIndeterminate(false);
         applyPercent(100);
+        // 完成之后允许用户点外部或按返回退出。
+        // 这是兜底：即使调用方忘了 close()，用户也不会被卡死在这个弹窗上
+        // （真实事故：4 个 SyncDialog 的 execute 成功分支只调了 finish() 没调 close()，
+        //  而 setCancelable(false) 让弹窗既不能点外部也不能按返回，界面彻底卡死）。
+        try {
+            dialog.setCancelable(true);
+            dialog.setCanceledOnTouchOutside(true);
+        } catch (Throwable ignored) { }
     }
 
     /**

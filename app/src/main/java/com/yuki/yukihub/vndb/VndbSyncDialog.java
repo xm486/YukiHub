@@ -352,7 +352,9 @@ public final class VndbSyncDialog {
             try {
                 VndbSyncService.Result result = VndbSyncService.execute(activity, token, preview);
                 UI.post(() -> {
+                    // 同 Bangumi：只调 finish() 不调 close() 会让弹窗停在 100% 且关不掉。
                     spd.finish();
+                    UI.postDelayed(spd::close, 420);
                     if (!alive(activity)) return;
                     showResult(activity, result);
                 });

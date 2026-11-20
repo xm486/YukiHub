@@ -2549,22 +2549,26 @@ private void showProfileDialog() {
             "NextMoe",
             com.yuki.yukihub.nextmoe.NextMoeAuthStore.isConnected(),
             nextMoeSyncStatusText(),
-            v -> openNextMoeSync());
+            v -> openNextMoeSync(),
+            this::detachNextMoeSync);
     addSyncSourceRow(syncBody, "H", 0xFF8AB4FF, R.drawable.ic_hikarinagi_logo,
             "Hikarinagi",
             com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.isConnected(this),
             hikarinagiSyncStatusText(),
-            v -> openHikarinagiSync());
+            v -> openHikarinagiSync(),
+            this::detachHikarinagiSync);
     addSyncSourceRow(syncBody, "V", 0xFF5BC8D6, R.drawable.ic_vndb_logo,
             "VNDB",
             com.yuki.yukihub.vndb.VndbSyncService.isConnected(this),
             vndbSyncStatusText(),
-            v -> openVndbSync());
+            v -> openVndbSync(),
+            this::detachVndbSync);
     addSyncSourceRow(syncBody, "B", 0xFFFF8AB3, R.drawable.ic_bangumi_logo,
             "Bangumi",
             com.yuki.yukihub.bangumi.BangumiSyncService.isConnected(this),
             bangumiSyncStatusText(),
-            v -> openBangumiSync());
+            v -> openBangumiSync(),
+            this::detachBangumiSync);
 
     // 开关
     final boolean[] syncExpanded = {false};
@@ -3350,6 +3354,31 @@ private void showAccountSettingsDialog() {
             Toast.makeText(this, "打开同步失败：" + (t.getMessage() == null ? "未知错误" : t.getMessage()),
                     Toast.LENGTH_LONG).show();
         }
+    }
+
+    // ==================== 解绑 / 更换账号 ====================
+    // 0.4.5 用户反馈：「绑定之后不能取消绑定或者修改绑定，token 失效或想换账号就很难」。
+    // 这里只清「本机的同步凭据」，不动任何已同步到平台的数据，也不动本地游戏库。
+    // 清除后卡片状态立刻回到「未连接」，用户可以重新走一遍绑定流程。
+
+    /** 解除 NextMoe 同步绑定。 */
+    private void detachNextMoeSync() {
+        com.yuki.yukihub.nextmoe.NextMoeAuthStore.clear();
+    }
+
+    /** 解除 Hikarinagi 同步绑定（只清同步用的令牌，不影响快捷登录状态）。 */
+    private void detachHikarinagiSync() {
+        com.yuki.yukihub.hikarinagi.HikarinagiAuthStore.clear(this);
+    }
+
+    /** 解除 VNDB 同步绑定（传空串即解绑，见 VndbSyncService.saveToken 注释）。 */
+    private void detachVndbSync() {
+        com.yuki.yukihub.vndb.VndbSyncService.saveToken(this, "");
+    }
+
+    /** 解除 Bangumi 同步绑定。 */
+    private void detachBangumiSync() {
+        com.yuki.yukihub.bangumi.BangumiSyncService.clearToken(this);
     }
 
     private void ensureNotificationPermission() {
@@ -11685,7 +11714,8 @@ return b;
      */
     private void addSyncSourceRow(LinearLayout parent, String letter, int color, int iconRes,
                                   String name, boolean connected, String status,
-                                  android.view.View.OnClickListener onClick) {
+                                  android.view.View.OnClickListener onClick,
+                                  Runnable onDetach) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -11764,7 +11794,54 @@ return b;
         row.setOnClickListener(v -> {
             if (onClick != null) onClick.onClick(v);
         });
+        // 长按 = 解绑/更换账号。
+        // 为什么需要：绑定后原来没有任何解绑入口，token 失效或想换账号时
+        // 用户只能清数据或卸载重装，这是 0.4.5 用户反馈的实际问题。
+        // 放在长按而不占用界面空间，同时在点击流程里也会提示（双入口，见 open*Sync）。
+        if (connected) {
+            row.setOnLongClickListener(v -> {
+                showSyncUnbindDialog(name, onDetach);
+                return true;
+            });
+        }
         parent.addView(row, rowLp);
+    }
+
+    /**
+     * 解绑确认框。四个平台共用。
+     *
+     * @param name 平台名，用于文案
+     * @param onDetach 确认解绑后的动作（清凭据 + 刷新卡片）
+     */
+    private void showSyncUnbindDialog(String name, Runnable onDetach) {
+        if (isFinishing() || isDestroyed()) return;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("解除 " + name + " 绑定")
+                .setMessage("解除后：\n"
+                        + "· 本机不再使用这个账号同步\n"
+                        + "· 已同步到 " + name + " 的数据不会被删除\n"
+                        + "· 之后可以重新绑定其它账号\n\n"
+                        + "随时可以再绑回来，本地游戏数据不受影响。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("解除绑定", (d, w) -> {
+                    try {
+                        onDetach.run();
+                        Toast.makeText(this, "已解除 " + name + " 绑定", Toast.LENGTH_SHORT).show();
+                        // 同步卡片是动态构建的，重新打开个人资料页即可刷新状态
+                        if (pendingProfileDialog != null) {
+                            pendingProfileDialog.dismiss();
+                            pendingProfileDialog = null;
+                        }
+                        showProfileDialog();
+                    } catch (Throwable t) {
+                        Toast.makeText(this, "解除失败："
+                                + (t.getMessage() == null ? "未知错误" : t.getMessage()),
+                                Toast.LENGTH_LONG).show();
+                    }
+                })
+                .create();
+        dialog.show();
+        styleAlertDialogDark(dialog);
     }
 
     /** Create an ArrayAdapter with dynamic theme text colors for Spinner. */

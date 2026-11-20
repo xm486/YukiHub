@@ -347,7 +347,12 @@ public final class BangumiSyncDialog {
             try {
                 BangumiSyncService.Result result = BangumiSyncService.execute(activity, token, preview);
                 UI.post(() -> {
+                    // 必须先 finish() 让环画到 100%（有个 ~400ms 的收尾动画），
+                    // 再延时 close()。这里原本只调了 finish() 没调 close()，
+                    // 导致进度弹窗停在 100% 且 setCancelable(false) 关不掉——
+                    // 用户反馈的「同步完成后卡死在这个界面」就是这个。
                     spd.finish();
+                    UI.postDelayed(spd::close, 420);
                     if (!alive(activity)) return;
                     showResult(activity, result);
                 });
