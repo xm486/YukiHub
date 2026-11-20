@@ -11810,6 +11810,11 @@ return b;
         // 放在长按而不占用界面空间，同时在点击流程里也会提示（双入口，见 open*Sync）。
         if (connected) {
             row.setOnLongClickListener(v -> {
+                if (onDetach == null) {
+                    // 防御：未来若有调用方不传解绑动作，长按不应该崩。
+                    Toast.makeText(this, "该平台暂不支持解绑", Toast.LENGTH_SHORT).show();
+                    return true;
+                }
                 showSyncUnbindDialog(name, onDetach);
                 return true;
             });
@@ -11837,12 +11842,33 @@ return b;
                     try {
                         onDetach.run();
                         Toast.makeText(this, "已解除 " + name + " 绑定", Toast.LENGTH_SHORT).show();
-                        // 同步卡片是动态构建的，重新打开个人资料页即可刷新状态
-                        if (pendingProfileDialog != null) {
-                            pendingProfileDialog.dismiss();
+                        // 同步卡片是动态构建的，需要重开个人资料页刷新状态。
+                        // 注意不能在这里「dismiss 后立刻 showProfileDialog()」：
+                        // 此时解除确认框自己还在走自己的 dismiss 流程，
+                        // 同一个 Window 上连续 dismiss + show 容易撞上
+                        // 「android.view.WindowLeaked」或新弹窗被立刻吞掉。
+                        // 放到当前这轮消息循环之后重开，等确认框真正关干净。
+                        // 注意这里不能用主线程 Handler 以外的东西：
+                        // 用 dialog 自己的 decorView post，Activity 销毁时会随之丢弃。
+                        android.view.View anchor = dialog.getWindow() == null
+                                ? null : dialog.getWindow().getDecorView();
+                        Runnable reopen = () -> {
+                            if (isFinishing()
+                                    || (android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed())) return;
+                            try {
+                                if (pendingProfileDialog != null && pendingProfileDialog.isShowing()) {
+                                    pendingProfileDialog.dismiss();
+                                }
+                            } catch (Throwable ignored) { }
                             pendingProfileDialog = null;
+                            showProfileDialog();
+                        };
+                        if (anchor != null) {
+                            anchor.postDelayed(reopen, 120);
+                        } else {
+                            new android.os.Handler(android.os.Looper.getMainLooper())
+                                    .postDelayed(reopen, 120);
                         }
-                        showProfileDialog();
                     } catch (Throwable t) {
                         Toast.makeText(this, "解除失败："
                                 + (t.getMessage() == null ? "未知错误" : t.getMessage()),
