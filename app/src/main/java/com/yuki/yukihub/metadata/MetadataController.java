@@ -934,14 +934,69 @@ public class MetadataController {
         input.setPadding(delegate.dp(12), 0, delegate.dp(12), 0);
         new AlertDialog.Builder(ctx)
                 .setTitle("自定义搜索 Bangumi")
+                .setMessage("可输入关键词搜索；若搜不到，请在 bgm.tv 找到该游戏，"
+                        + "把条目 ID（网址里 subject/ 后面那串数字）填进来直接匹配。")
                 .setView(input)
                 .setPositiveButton("搜索", (d, w) -> {
                     String keyword = input.getText() == null ? "" : input.getText().toString().trim();
-                    if (keyword.isEmpty()) { delegate.showToast("请输入搜索关键词", Toast.LENGTH_SHORT); return; }
-                    searchBangumiWithKeyword(game, keyword);
+                    if (keyword.isEmpty()) { delegate.showToast("请输入搜索关键词或条目 ID", Toast.LENGTH_SHORT); return; }
+                    if (isAllDigits(keyword)) matchBangumiById(game, keyword);
+                    else searchBangumiWithKeyword(game, keyword);
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    /** 纯数字则视为 Bangumi 条目 ID。 */
+    private static boolean isAllDigits(String s) {
+        if (s == null || s.isEmpty()) return false;
+        for (int i = 0; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 按 Bangumi 条目 ID 直接匹配。
+     * <p>
+     * 解决「搜索索引里没有这个条目」的问题：v0 搜索接口会漏条目
+     * （如 subject 207413 无论怎么搜都搜不到），但按 ID 取详情永远正常。
+     * 让用户自己在 bgm.tv 找到条目、把 ID 填进来，比在客户端里
+     * 反复猜关键词可靠得多。
+     */
+    public void matchBangumiById(Game game, String subjectId) {
+        if (game == null || subjectId == null || subjectId.trim().isEmpty()) return;
+        final String id = subjectId.trim();
+        delegate.setSideDescription("正在按 Bangumi ID 获取条目 " + id + "…");
+        AppExecutors.runOnIo(() -> {
+            VnMetadata one = BangumiClient.fetchById(id);
+            if (!this.isActivityAlive()) return;
+            if (one == null) {
+                String tip = "没有找到该 Bangumi 条目（ID " + id + "）。\n"
+                        + "请确认：① ID 是否抄错；② 该条目是否属于「游戏」类型"
+                        + "（动画/书籍/音乐不适用）。";
+                delegate.runOnUiThread(() -> {
+                    if (delegate.selectedGame() == null || delegate.selectedGame().id != game.id) return;
+                    delegate.showToast("未找到 Bangumi 条目 " + id, Toast.LENGTH_SHORT);
+                    delegate.setSideDescription(delegate.emptyText(game.description, "Bangumi 暂未匹配到资料。"));
+                    if (delegate.activity() != null) {
+                        new AlertDialog.Builder(delegate.activity())
+                                .setTitle("未找到该条目")
+                                .setMessage(tip)
+                                .setPositiveButton("知道了", null)
+                                .show();
+                    }
+                });
+                return;
+            }
+            List<VnMetadata> single = new java.util.ArrayList<>();
+            single.add(one);
+            // 复用既有的候选选择弹窗：让它显示一张卡，用户点确认即完成绑定
+            delegate.runOnUiThread(() -> {
+                if (delegate.selectedGame() == null || delegate.selectedGame().id != game.id) return;
+                showVndbCandidateDialog(game, single);
+            });
+        });
     }
 
     public void showCustomYmgalSearchDialog(Game game) {

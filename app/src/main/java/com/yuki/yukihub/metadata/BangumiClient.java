@@ -115,4 +115,78 @@ public class BangumiClient {
         if (s == null) return "";
         return s.replace("\\r", "").trim();
     }
+
+    /**
+     * 按 Bangumi 条目 ID 直接取详情。
+     * <p>
+     * <b>为什么需要这条通路</b>：v0 搜索接口（/v0/search/subjects）的索引
+     * 并不覆盖全部条目，实测「时钟机关的Ley-line-阳炎中彷徨的魔女-」
+     * （subject 207413）在任何关键词下都搜不出来（连搜「レイライン」返回 18 条、
+     * 同系列另外三部都在，也唯独缺它），但按 ID 取详情 100% 正常。
+     * <p>
+     * 所以遇到搜索搜不到的作品，让用户自己去 bgm.tv 找到条目、把 ID 填进来，
+     * 我们只按 ID 取数据，彻底绕开搜索索引的问题。
+     * <p>
+     * 端点：{@code GET /v0/subjects/{id}}
+     *
+     * @param subjectId 纯数字条目 ID（如 207413）
+     * @return 解析好的元数据；ID 非法或条目不存在时返回 null
+     */
+    public static VnMetadata fetchById(String subjectId) {
+        if (subjectId == null) return null;
+        String id = subjectId.trim();
+        if (id.isEmpty()) return null;
+        // 只接受纯数字，避免把普通关键词误当 ID（bv 之类的也没法当 ID）
+        for (int i = 0; i < id.length(); i++) {
+            if (!Character.isDigit(id.charAt(i))) return null;
+        }
+        try {
+            String url = "https://api.bgm.tv/v0/subjects/" + id;
+            okhttp3.Request req = new okhttp3.Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "yukihub/1.0 (https://github.com/yukihub)")
+                    .get()
+                    .build();
+            OkHttpClient client = HttpClient.defaultBuilder().build();
+            try (okhttp3.Response resp = client.newCall(req).execute()) {
+                if (!resp.isSuccessful() || resp.body() == null) return null;
+                String text = resp.body().string();
+                if (text == null || text.trim().isEmpty()) return null;
+                JSONObject o = new JSONObject(text);
+                // 只接受「游戏」类型：免得用户填了动画/书籍的 ID 被当游戏资料
+                int type = o.optInt("type", 0);
+                if (type != 0 && type != 4) return null;
+                return parseSubject(o);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 按 ID 取详情（异步，结果回主线程）。
+     * 与 {@link #searchCandidates} 的异步版保持同样的回调风格。
+     */
+    public static void fetchByIdAsync(String subjectId, final VndbClient.CandidatesCallback callback) {
+        new Thread(() -> {
+            VnMetadata one = null;
+            try {
+                one = fetchById(subjectId);
+            } catch (Throwable ignored) {
+                // 交给下面的空结果回调
+            }
+            final VnMetadata result = one;
+            if (callback == null) return;
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                if (result == null) {
+                    callback.onResult(new ArrayList<>());
+                } else {
+                    List<VnMetadata> single = new ArrayList<>();
+                    single.add(result);
+                    callback.onResult(single);
+                }
+            });
+        }, "bgm-fetch-by-id").start();
+    }
 }
