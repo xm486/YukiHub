@@ -368,42 +368,52 @@ public final class BangumiSyncClient {
                                                JSONObject body, String token) throws Exception {
         throttle();
         String url = API_BASE + path + (query == null ? "" : query);
-        HttpURLConnection c = null;
-        try {
-            c = (HttpURLConnection) new URL(url).openConnection();
-            c.setRequestMethod(method);
-            c.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            c.setReadTimeout(READ_TIMEOUT_MS);
-            // Bearer 方案（与 VNDB 的 Token 方案不同）
-            c.setRequestProperty("Authorization", "Bearer " + token);
-            c.setRequestProperty("Accept", "application/json");
-            // 官方硬性要求，缺了可能被直接拒
-            c.setRequestProperty("User-Agent", USER_AGENT);
 
-            if (body != null) {
-                byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
-                c.setDoOutput(true);
-                c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                c.setFixedLengthStreamingMode(data.length);
-                try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
-                    os.write(data);
-                    os.flush();
-                }
-            }
+        // ===== 用 OkHttp 而不是 HttpURLConnection =====
+        // 为什么换：真机（vivo / ColorOS 等）上 HttpURLConnection 在
+        // setDoOutput(true) 后会重建请求头，把 Content-Type 丢掉，
+        // 导致 Bangumi 收到无 Content-Type 的请求并返回
+        //   415 Unsupported Media Type
+        //   "request with body must set content-type header to application/json"
+        // 桌面 JDK 不复现（实现不同），所以只在部分机型暴露。
+        // OkHttp 的 RequestBody.create(bytes, MediaType) 会把 Content-Type
+        // 写进 RequestBody 自身，由 OkHttp 统一发头，不存在被丢弃的可能。
+        // 项目本来就依赖 OkHttp 4.12.0，metadata/BangumiClient 也是这么写的。
+        okhttp3.OkHttpClient client = Shared.CLIENT;
+        okhttp3.Request.Builder rb = new okhttp3.Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer " + token)
+                .header("Accept", "application/json")
+                // 官方硬性要求，缺了可能被直接拒
+                .header("User-Agent", USER_AGENT);
 
-            int code = c.getResponseCode();
-            String text = readAll(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
+        okhttp3.RequestBody reqBody = null;
+        if (body != null) {
+            reqBody = okhttp3.RequestBody.create(
+                    body.toString().getBytes(StandardCharsets.UTF_8), Shared.JSON_TYPE);
+        } else if ("POST".equals(method) || "PATCH".equals(method) || "PUT".equals(method)) {
+            // 有方法体但内容为空时也要给空 body，避免个别实现补头不一致
+            reqBody = okhttp3.RequestBody.create(new byte[0], Shared.JSON_TYPE);
+        }
+        rb.method(method, reqBody);
+
+        try (okhttp3.Response resp = client.newCall(rb.build()).execute()) {
+            int code = resp.code();
+            String text = resp.body() == null ? "" : resp.body().string();
+
             if (code == 401) throw new NotAuthorizedException("Bangumi token 无效或已过期，请重新生成");
             if (code == 403) throw new NotAuthorizedException("Bangumi token 缺少 write:collection 权限，请重新生成 token");
-            // 400 = Validation Error：请求体/参数不合法（例如 subject_id 不是有效条目、type 越界）。
-            // 这条单独给文案，否则用户只会看到一坨 JSON。
+            // 415 单独给文案：这正是本次事故的报错，说明 Content-Type 没送到。
+            if (code == 415) {
+                throw new Exception("Bangumi 拒收请求（HTTP 415，Content-Type 未被正确发送）：" + preview(text));
+            }
+            // 400 = Validation Error：请求体/参数不合法。
             if (code == 400) {
                 throw new Exception("Bangumi 认为这次请求不合法（HTTP 400）：" + preview(text));
             }
-            // 注意：按官方 v0 规格，POST/PATCH /v0/users/-/collections/{subject_id} 的 404
-            // 含义是「用户不存在」，不是「条目不存在」——因为该端点语义是
+            // 按官方 v0 规格，POST/PATCH /v0/users/-/collections/{subject_id} 的 404
+            // 含义是「用户不存在」，不是「条目不存在」——该端点语义是
             // 「不存在则创建」，条目找不到不会报 404。
-            // 老代码把它当 NotFoundException（条目不存在）是误读，会误导用户以为作品没收录。
             if (code == 404) throw new NotFoundException("Bangumi 返回 404（通常是 token 对应用户不存在或已失效）：" + preview(text));
             if (code == 429) throw new RateLimitedException("Bangumi 请求过于频繁，请稍后再试");
             if (code < 200 || code >= 300) {
@@ -412,11 +422,18 @@ public final class BangumiSyncClient {
             // 204 之类可能没有 body
             if (text == null || text.trim().isEmpty()) return new JSONObject();
             return new JSONObject(text);
-        } finally {
-            if (c != null) c.disconnect();
         }
     }
 
+    /** 共享的 OkHttpClient 与 JSON MediaType。 */
+    private static final class Shared {
+        static final okhttp3.MediaType JSON_TYPE =
+                okhttp3.MediaType.parse("application/json; charset=utf-8");
+        static final okhttp3.OkHttpClient CLIENT = new okhttp3.OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .readTimeout(READ_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build();
+    }
     /** 保守节流，避免触发 Bangumi 的频控。 */
     private static synchronized void throttle() throws InterruptedException {
         long now = System.currentTimeMillis();
@@ -426,19 +443,6 @@ public final class BangumiSyncClient {
         }
         lastRequestTime = System.currentTimeMillis();
     }
-
-    private static String readAll(InputStream is) throws Exception {
-        if (is == null) return "";
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[4096];
-        int n;
-        while ((n = is.read(buf)) != -1) {
-            bos.write(buf, 0, n);
-        }
-        is.close();
-        return new String(bos.toByteArray(), StandardCharsets.UTF_8);
-    }
-
     private static String preview(String s) {
         if (s == null) return "";
         String t = s.replace('\n', ' ').trim();

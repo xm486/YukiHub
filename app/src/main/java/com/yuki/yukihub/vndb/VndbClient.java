@@ -290,44 +290,52 @@ public final class VndbClient {
     private static JSONObject request(String method, String path, JSONObject body, String token)
             throws Exception {
         throttle();
-        String url = API_BASE + path;
-        HttpURLConnection c = null;
-        try {
-            c = (HttpURLConnection) new URL(url).openConnection();
-            c.setRequestMethod(method);
-            c.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            c.setReadTimeout(READ_TIMEOUT_MS);
-            // Token 方案，不是 Bearer
-            c.setRequestProperty("Authorization", "Token " + token);
-            c.setRequestProperty("Accept", "application/json");
-            c.setRequestProperty("User-Agent", "YukiHub/1.0 (Android)");
+String url = API_BASE + path;
 
-            if (body != null) {
-                byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
-                c.setDoOutput(true);
-                c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                // 固定长度，避免 chunked 被中转层误判
-                c.setFixedLengthStreamingMode(data.length);
-                try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
-                    os.write(data);
-                    os.flush();
-                }
-            }
+        // ===== 用 OkHttp（同 BangumiSyncClient 的原因）=====
+        // 真机上 HttpURLConnection 在 setDoOutput(true) 后会重建请求头，
+        // 部分 ROM 把 Content-Type 丢掉 → 服务端 415。
+        // OkHttp 的 RequestBody.create(bytes, MediaType) 会把 Content-Type
+        // 绑定在 body 上统一发送，不存在被丢弃的可能。
+        okhttp3.Request.Builder rb = new okhttp3.Request.Builder()
+                .url(url)
+                // Token 方案，不是 Bearer
+                .header("Authorization", "Token " + token)
+                .header("Accept", "application/json")
+                .header("User-Agent", "YukiHub/1.0 (Android)");
 
-            int code = c.getResponseCode();
-            String text = readAll(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
+        okhttp3.RequestBody reqBody = null;
+        if (body != null) {
+            reqBody = okhttp3.RequestBody.create(
+                    body.toString().getBytes(StandardCharsets.UTF_8), VndbHTTP.JSON_TYPE);
+        } else if ("POST".equals(method) || "PATCH".equals(method) || "PUT".equals(method)) {
+            reqBody = okhttp3.RequestBody.create(new byte[0], VndbHTTP.JSON_TYPE);
+        }
+        rb.method(method, reqBody);
 
+        try (okhttp3.Response resp = VndbHTTP.CLIENT.newCall(rb.build()).execute()) {
+            int code = resp.code();
+            String text = resp.body() == null ? "" : resp.body().string();
             if (code == 401) throw new NotAuthorizedException("VNDB token 无效或已撤销，请重新生成");
             if (code == 403) throw new NotAuthorizedException("VNDB token 权限不足：需要 listwrite 权限");
+            if (code == 415) throw new Exception("VNDB 拒收请求（HTTP 415，Content-Type 未被正确发送）：" + preview(text));
             if (code == 429) throw new RateLimitedException("VNDB 请求过于频繁，请稍后再试");
             if (code < 200 || code >= 300) {
                 throw new Exception("HTTP " + code + "：" + preview(text));
             }
             if (text == null || text.trim().isEmpty()) return new JSONObject();
             return new JSONObject(text);
-        } finally {
-            if (c != null) c.disconnect();
         }
+    }
+
+    /** 共享 OkHttp 客户端与 JSON MediaType。 */
+    private static final class VndbHTTP {
+        static final okhttp3.MediaType JSON_TYPE =
+                okhttp3.MediaType.parse("application/json; charset=utf-8");
+        static final okhttp3.OkHttpClient CLIENT = new okhttp3.OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .readTimeout(READ_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build();
     }
 
     private static void throttle() {
@@ -337,19 +345,6 @@ public final class VndbClient {
             try { Thread.sleep(wait); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
         lastRequestTime = System.currentTimeMillis();
-    }
-
-    private static String readAll(InputStream is) throws Exception {
-        if (is == null) return "";
-        try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
-            return bos.toString("UTF-8");
-        } finally {
-            try { is.close(); } catch (Throwable ignored) { }
-        }
     }
 
     /** 错误正文截断，避免整页 HTML 塞进日志/Toast。 */

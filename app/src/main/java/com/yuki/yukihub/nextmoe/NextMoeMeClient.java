@@ -311,9 +311,11 @@ public final class NextMoeMeClient {
             conn.setRequestMethod("POST");
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setDoOutput(true);
+            // 请求头必须在 setDoOutput(true) 之前设好（同 BangumiSyncClient / VndbClient）。
+            // 否则部分 Android ROM 会丢掉 Content-Type，服务端回 415。
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setDoOutput(true);
             byte[] data = jsonBody.getBytes(StandardCharsets.UTF_8);
             // 固定长度：既避免 chunked 引发的中转层误判，也让服务端能立刻拿到长度。
             conn.setFixedLengthStreamingMode(data.length);

@@ -278,10 +278,14 @@ public final class HikarinagiSyncClient {
         c.setRequestMethod("POST");
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
         c.setReadTimeout(READ_TIMEOUT_MS);
-        c.setDoOutput(true);
+        // 请求头必须在 setDoOutput(true) 之前设好。
+        // setDoOutput 之后 HttpURLConnection 会重建请求头，部分 Android ROM
+        // 会把后设的 Content-Type 丢掉，OAuth token 端点会因缺它而失败。
+        // 同型问题已修：BangumiSyncClient / VndbClient / NextMoeMeClient。
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
         c.setRequestProperty("User-Agent", USER_AGENT);
+        c.setDoOutput(true);
         byte[] data = form.getBytes(StandardCharsets.UTF_8);
         c.setFixedLengthStreamingMode(data.length);
         try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
@@ -796,10 +800,11 @@ public final class HikarinagiSyncClient {
         c.setRequestMethod("POST");
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
         c.setReadTimeout(READ_TIMEOUT_MS);
-        c.setDoOutput(true);
+        // 同 tokenPost：请求头必须在 setDoOutput 之前设定。
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
         c.setRequestProperty("User-Agent", USER_AGENT);
+        c.setDoOutput(true);
         byte[] data = form.getBytes(StandardCharsets.UTF_8);
         c.setFixedLengthStreamingMode(data.length);
         try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
@@ -1002,9 +1007,10 @@ public final class HikarinagiSyncClient {
             c.setRequestProperty("User-Agent", USER_AGENT);
 
             if (body != null) {
-                byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
-                c.setDoOutput(true);
+                // Content-Type 必须在 setDoOutput 之前设定（同型问题已修）。
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                c.setDoOutput(true);
+                byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
                 c.setFixedLengthStreamingMode(data.length);
                 try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
                     os.write(data);
