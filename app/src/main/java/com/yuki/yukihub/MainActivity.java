@@ -2570,6 +2570,16 @@ private void showProfileDialog() {
             v -> openBangumiSync(),
             this::detachBangumiSync);
 
+    // 底部提示：长按平台行可解绑 / 换账号。
+    // 0.4.5 用户反馈绑定后没有解绑入口，长按是隐藏操作，
+    // 必须在界面上写出来，否则用户根本不知道有这功能。
+    TextView syncHint = new TextView(this);
+    syncHint.setText("提示：长按任一平台可解除绑定或更换账号");
+    syncHint.setTextSize(9.5f);
+    syncHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+    syncHint.setPadding(dp(2), dp(8), dp(2), 0);
+    syncBody.addView(syncHint);
+
     // 开关
     final boolean[] syncExpanded = {false};
     syncHead.setOnClickListener(v -> {
