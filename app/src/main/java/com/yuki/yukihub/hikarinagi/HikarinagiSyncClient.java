@@ -279,16 +279,10 @@ public final class HikarinagiSyncClient {
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
         c.setReadTimeout(READ_TIMEOUT_MS);
         c.setDoOutput(true);
-        // 顺序很关键：Content-Type 必须在 getOutputStream() 之前设好。
-        // setDoOutput(true) 之后部分 Android 版本的 HttpURLConnection 适配层
-        // 会在写出时重建请求头，导致 Content-Type 丢失，
-        // 服务端会报 content-type 相关的 4xx。
-        // 同型问题已修：BangumiSyncClient / VndbClient / NextMoeMeClient。
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
         c.setRequestProperty("User-Agent", USER_AGENT);
         byte[] data = form.getBytes(StandardCharsets.UTF_8);
-        c.setRequestProperty("Content-Length", String.valueOf(data.length));
         c.setFixedLengthStreamingMode(data.length);
         try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
             os.write(data);
@@ -803,12 +797,10 @@ public final class HikarinagiSyncClient {
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
         c.setReadTimeout(READ_TIMEOUT_MS);
         c.setDoOutput(true);
-        // 同 tokenPost：Content-Type 必须在写出前设定，否则可能被适配层丢掉。
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
         c.setRequestProperty("User-Agent", USER_AGENT);
         byte[] data = form.getBytes(StandardCharsets.UTF_8);
-        c.setRequestProperty("Content-Length", String.valueOf(data.length));
         c.setFixedLengthStreamingMode(data.length);
         try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
             os.write(data);
@@ -1012,10 +1004,7 @@ public final class HikarinagiSyncClient {
             if (body != null) {
                 byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
                 c.setDoOutput(true);
-                // Content-Type 必须在 getOutputStream() 之前设好（同型问题已修：
-                // BangumiSyncClient / VndbClient / NextMoeMeClient / 本类 tokenPost）。
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                c.setRequestProperty("Content-Length", String.valueOf(data.length));
                 c.setFixedLengthStreamingMode(data.length);
                 try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
                     os.write(data);

@@ -312,16 +312,10 @@ public final class NextMoeMeClient {
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setDoOutput(true);
-            // 顺序很关键：Content-Type 必须在 getOutputStream() 之前设好。
-            // setDoOutput(true) 之后部分 Android 版本的 HttpURLConnection 适配层
-            // 会在写出时重建请求头，导致 Content-Type 丢失，
-            // NextMoe 服务端会报 "content-type header must be application/json"。
-            // 同型问题已修：BangumiSyncClient / VndbClient。
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             conn.setRequestProperty("Authorization", "Bearer " + token);
             byte[] data = jsonBody.getBytes(StandardCharsets.UTF_8);
             // 固定长度：既避免 chunked 引发的中转层误判，也让服务端能立刻拿到长度。
-            conn.setRequestProperty("Content-Length", String.valueOf(data.length));
             conn.setFixedLengthStreamingMode(data.length);
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(data);

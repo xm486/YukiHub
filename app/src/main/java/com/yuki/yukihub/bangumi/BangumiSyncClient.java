@@ -383,15 +383,7 @@ public final class BangumiSyncClient {
             if (body != null) {
                 byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
                 c.setDoOutput(true);
-                // 注意顺序：Content-Type 必须在 getOutputStream() 之前设置。
-                // 部分 Android 版本的 HttpURLConnection 实现（尤其流式模式下走
-                // OkHttp/HttpsURLConnection 适配层时）会在写出时重建请求头，
-                // 之后再 setRequestProperty("Content-Type") 会被忽略/覆盖成空，
-                // 服务端就会报 "request with body must set content-type header
-                // to application/json"。VNDB 那边写法相同但未触发，是因为其服务端
-                // 对缺失 Content-Type 更宽容；Bangumi 会直接 4xx。
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                c.setRequestProperty("Content-Length", String.valueOf(data.length));
                 c.setFixedLengthStreamingMode(data.length);
                 try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
                     os.write(data);

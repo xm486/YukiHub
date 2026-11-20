@@ -305,11 +305,7 @@ public final class VndbClient {
             if (body != null) {
                 byte[] data = body.toString().getBytes(StandardCharsets.UTF_8);
                 c.setDoOutput(true);
-                // Content-Type 必须在 getOutputStream() 之前设好（与 BangumiSyncClient 同一处坑）。
-                // 显式补 Content-Length：setFixedLengthStreamingMode 在部分实现下不会
-                // 反映到请求头，缺了会被某些中转层当成 chunked 处理。
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                c.setRequestProperty("Content-Length", String.valueOf(data.length));
                 // 固定长度，避免 chunked 被中转层误判
                 c.setFixedLengthStreamingMode(data.length);
                 try (OutputStream os = new BufferedOutputStream(c.getOutputStream())) {
