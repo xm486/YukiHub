@@ -163,30 +163,4 @@ public class BangumiClient {
             return null;
         }
     }
-
-    /**
-     * 按 ID 取详情（异步，结果回主线程）。
-     * 与 {@link #searchCandidates} 的异步版保持同样的回调风格。
-     */
-    public static void fetchByIdAsync(String subjectId, final VndbClient.CandidatesCallback callback) {
-        new Thread(() -> {
-            VnMetadata one = null;
-            try {
-                one = fetchById(subjectId);
-            } catch (Throwable ignored) {
-                // 交给下面的空结果回调
-            }
-            final VnMetadata result = one;
-            if (callback == null) return;
-            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-                if (result == null) {
-                    callback.onResult(new ArrayList<>());
-                } else {
-                    List<VnMetadata> single = new ArrayList<>();
-                    single.add(result);
-                    callback.onResult(single);
-                }
-            });
-        }, "bgm-fetch-by-id").start();
-    }
 }
